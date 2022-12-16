@@ -109,10 +109,6 @@
   tags:
     - comp
 
-#- name: add auto completion kubectl for all
-#  template: src=templates/autocomp.j2 dest=/etc/bash_completion.d/kubectl owner=root group=root
-#  ignore_errors: true
-
 - name: Generate completion command
   command: kubectl completion bash
   register: completion_command

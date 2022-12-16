@@ -1,14 +1,14 @@
-- name: Mise a jour du fichier config.toml
+- name: Update config.toml
   template: src=templates/config.toml.j2 dest=/etc/containerd/config.toml owner=root group=root
   tags:
     - worker
 
-- name: Redémarrage de du service containerd
+- name: Restart containerd service
   shell: systemctl restart containerd
   tags:
     - worker  
 
-- name: Suppression dans anciens fichier du cluster
+- name: Remove old file of cluster if exist
   command: "{{ item }}"
   with_items:
     - rm -rf /etc/kubernetes/kubelet.conf
@@ -16,7 +16,7 @@
   tags:
     - worker   
 
-- name: Supprimer un ancien eventuel cluster du worker (un reset)
+- name: Remove an old cluster if exist (reset)
   command: kubeadm reset -f
   ignore_errors: true
   tags:
@@ -31,7 +31,7 @@
   tags:
     - flannel
     
-- name: Ajout des paramètres subenv pour flannel
+- name: Add subenv for flannel
   template: src=templates/flannel.j2 dest=/run/flannel/subnet.env owner=root group=root
   ignore_errors: true
   tags:
