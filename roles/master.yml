@@ -1,0 +1,10 @@
+- hosts: masters
+  become: yes
+  roles:
+    - { role: master}   
+  tags: master
+- hosts: workers
+  become: yes
+  roles:
+    - { role: worker} 
+  tags: worker

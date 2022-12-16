@@ -1,0 +1,97 @@
+- name: Change Docker cgroup driver - Create daemon.json file
+  file:
+    path: "/etc/docker/daemon.json"
+    state: touch
+  tags:
+    - master    
+
+- name: Change Docker cgroup driver - Edit daemon.json file
+  blockinfile:
+    path: "/etc/docker/daemon.json"
+    block: |
+            {
+               "exec-opts": ["native.cgroupdriver=systemd"]
+             }
+    marker: ""
+  tags:
+    - master   
+
+- name: Restart service docker
+  systemd:
+    state: restarted
+    daemon_reload: yes
+    name: docker
+  tags:
+    - master   
+
+- name: Mise a jour du fichier config.toml
+  template: src=templates/config.toml.j2 dest=/etc/containerd/config.toml owner=root group=root
+  tags:
+    - master   
+
+- name: Redémarrage de du service containerd
+  shell: systemctl restart containerd
+  tags:
+    - master   
+
+- name: Supprimer un ancien eventuel cluster (un reset)
+  command: kubeadm reset -f
+  ignore_errors: true
+  tags:
+    - master   
+
+- name: Initialize the Kubernetes cluster using kubeadm
+  command: kubeadm init --apiserver-advertise-address="{{ node_ip }}" --apiserver-cert-extra-sans="{{ node_ip }}"  --node-name="{{ node_name }}" --pod-network-cidr={{ pod_network }}
+  ignore_errors: true
+  tags:
+    - master
+
+- name: Setup kubeconfig for vagrant user
+  command: "{{ item }}"
+  with_items:
+    - rm -rf /home/vagrant/.kube
+    - mkdir -p /home/vagrant/.kube
+    - cp -f /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+    - chown vagrant:vagrant /home/vagrant/.kube/config
+  tags:
+    - master   
+
+#- name: Install calico pod network
+#  become: false
+#  command: kubectl create -f https://docs.projectcalico.org/v3.4/getting-started/kubernetes/installation/hosted/calico.yaml
+
+- name: Install flannel pod network
+  become: false
+  command: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+  tags:
+    - master     
+
+- name: Create subnet.env for flannel network
+  command: "{{ item }}"
+  with_items: 
+    - mkdir -p /run/flannel/
+    - touch /run/flannel/subnet.env
+  ignore_errors: true
+  tags:
+    - flannel
+    
+- name: Ajout des paramètres subenv pour flannel
+  template: src=templates/flannel.j2 dest=/run/flannel/subnet.env owner=root group=root
+  ignore_errors: true
+  tags:
+    - flannel
+
+- name: Generate join command
+  command: kubeadm token create --print-join-command
+  register: join_command
+  tags:
+    - master
+
+- name: Copy join command to local file
+  delegate_to: localhost
+  copy:
+    content: "{{ join_command.stdout_lines[0] }}"
+    dest: ./join-command  
+  tags: master  
+
+  

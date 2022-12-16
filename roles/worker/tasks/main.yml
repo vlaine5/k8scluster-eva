@@ -1,0 +1,48 @@
+- name: Mise a jour du fichier config.toml
+  template: src=templates/config.toml.j2 dest=/etc/containerd/config.toml owner=root group=root
+  tags:
+    - worker
+
+- name: Redémarrage de du service containerd
+  shell: systemctl restart containerd
+  tags:
+    - worker  
+
+- name: Suppression dans anciens fichier du cluster
+  command: "{{ item }}"
+  with_items:
+    - rm -rf /etc/kubernetes/kubelet.conf
+    - rm  -rf /etc/kubernetes/pki/ca.crt
+  tags:
+    - worker   
+
+- name: Supprimer un ancien eventuel cluster du worker (un reset)
+  command: kubeadm reset -f
+  ignore_errors: true
+  tags:
+    - worker  
+    
+- name: Create subnet.env for flannel network
+  command: "{{ item }}"
+  with_items: 
+    - mkdir -p /run/flannel/
+    - touch /run/flannel/subnet.env
+  ignore_errors: true
+  tags:
+    - flannel
+    
+- name: Ajout des paramètres subenv pour flannel
+  template: src=templates/flannel.j2 dest=/run/flannel/subnet.env owner=root group=root
+  ignore_errors: true
+  tags:
+    - flannel 
+
+- name: Copy the join command to server location
+  copy: src=join-command dest=/tmp/join-command.sh mode=0777
+  tags:
+    - worker  
+
+- name: Join the node to cluster
+  command: sh /tmp/join-command.sh
+  tags:
+    - worker
