@@ -1,0 +1,71 @@
+---
+- name: Install packages that allow apt to be used over HTTPS
+  apt: 
+    name='{{ item.name }}'
+    state=present
+    update_cache=yes
+  with_items: "{{ https_packages | default([]) }}"
+
+- name: Add new repositories keys
+  apt_key:
+    url='{{item.key}}'
+    state=present
+  with_items: "{{ gpg_keys | default([]) }}"
+
+- name: Add new apt repositories
+  apt_repository:
+    repo='{{item.repo}}'
+    state=present
+  with_items: "{{ repositories | default([]) }}"
+
+- name: Install docker
+  apt: 
+    name="{{ item.name }}"
+    state=present
+    update_cache=yes
+  with_items: "{{ docker_packages | default([]) }}"
+  notify:
+    - docker status
+
+- name: Configure Docker daemon options (json)
+  template:
+    src: "daemon.json.j2"
+    dest: "/etc/docker/daemon.json"
+  when: docker_daemon_json | d()
+  notify: restart docker
+
+- name: Restart service docker
+  systemd:
+    state: restarted
+    daemon_reload: yes
+    name: docker
+
+- name: Restart et enable docker by command
+  command: "{{ item }}"
+  with_items:
+    - systemctl enable docker
+    - systemctl daemon-reload
+    - systemctl restart docker
+
+- name: Ensure docker users are added to the docker group.
+  user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  with_items: "{{ docker_users }}"
+
+- name: Remove swapfile from /etc/fstab
+  mount:
+    name: "{{ item }}"
+    fstype: swap
+    state: absent
+  with_items:
+    - swap
+    - none
+
+- name: Disable swap
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: iptable see bridge traffic
+  command: sysctl net.bridge.bridge-nf-call-iptables=1

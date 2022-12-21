@@ -1,0 +1,7 @@
+k8s_packages:
+- name: kubeadm 
+- name: kubelet 
+- name: kubectl
+- name: kubernetes-cni
+- name: bash-completion
+- name: net-tools

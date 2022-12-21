@@ -1,0 +1,26 @@
+https_packages:
+  - name: apt-transport-https
+  - name: curl
+  
+gpg_keys:
+  - key: https://download.docker.com/linux/ubuntu/gpg
+  - key: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+
+repositories:
+#- repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ansible_distribution_release}} stable" 
+  - repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu focal stable" # Change this if you change the bento/ubuntu box
+  - repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main" #k8s not available yet for Bionic (Ubuntu 18.04)
+
+docker_packages:
+  - name: docker-ce
+  - name: docker-ce-cli 
+  - name: containerd.io
+
+docker_daemon_json: |
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "100m" },
+  "storage-driver": "overlay2"
+
+docker_users: 
+  - vagrant

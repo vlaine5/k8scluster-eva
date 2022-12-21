@@ -1,0 +1,11 @@
+--- 
+- name: install base
+  include_tasks: setup-base.yml
+
+- name: install masters
+  include_tasks: setup-master.yml
+  when: role == 'master'
+
+- name: install workers
+  include_tasks: setup-workers.yml
+  when: role == 'workers'

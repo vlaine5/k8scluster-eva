@@ -32,13 +32,20 @@
     - flannel
     
 - name: Add subenv for flannel
-  template: src=templates/flannel.j2 dest=/run/flannel/subnet.env owner=root group=root
+  template: 
+    src: flannel.j2 
+    dest: /run/flannel/subnet.env 
+    owner: root 
+    group: root
   ignore_errors: true
   tags:
     - flannel 
 
 - name: Copy the join command to server location
-  copy: src=join-command dest=/tmp/join-command.sh mode=0777
+  copy: 
+    src: join-command 
+    dest: /tmp/join-command.sh 
+    mode: 0777
   tags:
     - worker  
 
