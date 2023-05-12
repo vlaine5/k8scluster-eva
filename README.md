@@ -2,7 +2,6 @@
 K8S Cluster with 3 workers - ESXi deployment with Vagrant and Ansible
 Full automated deploy, let's begin to create pod or wathever.
 
-
 Tested in a debian11 VM (hosted esxi).
 ```bash
 ansible [core 2.14.0]
@@ -16,6 +15,21 @@ Vagrant plugins :
     - Version Constraint: 0.1.0
 ```
 https://github.com/josenk/vagrant-vmware-esxi
+
+##### OVF Tools install
+Here : https://docs.vmware.com/en/VMware-Telco-Cloud-Operations/1.4.0/deployment-guide-140/GUID-95301A42-F6F6-4BA9-B3A0-A86A268754B6.html
+
+You need to have X11 enable cause of the window to validate install : so if the commande **./VMware[...].bundle** don't work, check it. https://www.cyberciti.biz/faq/x11-connection-rejected-because-of-wrong-authentication/
+```shell
+apt install xauth
+sudo mkdir /root/.Xauthority
+mkdir /home/vagrant/.Xauthority
+
+export DISPLAY=localhost:0.0
+
+sudo ./VMware-ovftool-4.3.0-7948156-lin.x86_64.bundle
+Extracting VMware Installer...done.
+```
 
 
 Execute :
