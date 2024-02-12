@@ -3,58 +3,58 @@
     path: "/etc/docker/daemon.json"
     state: touch
   tags:
-    - master    
+  - master
 
-- name: Change Docker cgroup driver - Edit daemon.json file
-  blockinfile:
-    path: "/etc/docker/daemon.json"
-    block: |
-            {
-               "exec-opts": ["native.cgroupdriver=systemd"]
-             }
-    marker: ""
-  tags:
-    - master   
-
-- name: Restart docker service 
+#- name: Change Docker cgroup driver - Edit daemon.json file
+#  blockinfile:
+#    path: "/etc/docker/daemon.json"
+#    block: |
+#            {
+#               "exec-opts": ["native.cgroupdriver=systemd"]
+#             }
+#    marker: ""
+#  tags:
+#    - master   
+#
+- name: Restart docker service
   systemd:
     state: restarted
     daemon_reload: yes
     name: docker
   tags:
-    - master   
+  - master
 
 - name: Update config.toml
   template: src=templates/config.toml.j2 dest=/etc/containerd/config.toml owner=root group=root
   tags:
-    - master   
+  - master
 
 - name: Restart containerd service
   shell: systemctl restart containerd
   tags:
-    - master   
+  - master
 
 - name: Remove and old cluster if exist (reset)
   command: kubeadm reset -f
   ignore_errors: true
   tags:
-    - master   
+  - master
 
 - name: Initialize the Kubernetes cluster using kubeadm
   command: kubeadm init --apiserver-advertise-address="{{ node_ip }}" --apiserver-cert-extra-sans="{{ node_ip }}"  --node-name="{{ node_name }}" --pod-network-cidr={{ pod_network }}
   ignore_errors: true
   tags:
-    - master
+  - master
 
 - name: Setup kubeconfig for vagrant user
   command: "{{ item }}"
   with_items:
-    - rm -rf /home/vagrant/.kube
-    - mkdir -p /home/vagrant/.kube
-    - cp -f /etc/kubernetes/admin.conf /home/vagrant/.kube/config
-    - chown vagrant:vagrant /home/vagrant/.kube/config
+  - rm -rf /home/vagrant/.kube
+  - mkdir -p /home/vagrant/.kube
+  - cp -f /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+  - chown vagrant:vagrant /home/vagrant/.kube/config
   tags:
-    - master   
+  - master
 
 #- name: Install calico pod network
 #  become: false
@@ -64,34 +64,34 @@
   become: false
   command: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
   tags:
-    - master     
+  - master
 
 - name: Create subnet.env for flannel network
   command: "{{ item }}"
-  with_items: 
-    - mkdir -p /run/flannel/
-    - touch /run/flannel/subnet.env
+  with_items:
+  - mkdir -p /run/flannel/
+  - touch /run/flannel/subnet.env
   ignore_errors: true
   tags:
-    - flannel
-    
+  - flannel
+
 - name: Add subenv parameters flannel
   template: src=templates/flannel.j2 dest=/run/flannel/subnet.env owner=root group=root
   ignore_errors: true
   tags:
-    - flannel
+  - flannel
 
 - name: Generate join command
   command: kubeadm token create --print-join-command
   register: join_command
   tags:
-    - master
+  - master
 
 - name: Copy join command to local file
   delegate_to: localhost
   copy:
     content: "{{ join_command.stdout_lines[0] }}"
-    dest: ./join-command  
-  tags: master  
+    dest: ./join-command
+  tags: master
 
-  
+

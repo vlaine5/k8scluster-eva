@@ -1,18 +1,18 @@
 # k8scluster - Kube + ESXI + Vagrant + Ansible
-K8S Cluster with 3 workers - ESXi deployment with Vagrant and Ansible
+K8S Cluster with 3 workers - ESXi 6.5 deployment with Vagrant and Ansible
 Full automated deploy, let's begin to create pod or wathever.
 
 Tested in a debian11 VM (hosted esxi).
 ```bash
-ansible [core 2.14.0]
-Vagrant 2.2.14
-VMware ovftool 4.3.0 (build-7948156)
-Vagrant plugins :
-  vagrant-libvirt (0.3.0, system)
-  vagrant-reload (0.0.1, global)
-  vagrant-vmware-esxi (2.5.5, global)
-  vagrant-winrm-syncedfolders (0.1.0, global)
-    - Version Constraint: 0.1.0
+ansible [core 2.15.9]
+  config file = None
+  configured module search path = ['/home/vagrant/.ansible/plugins/modules', '/usr/share/ansible/plugins/modules']
+  ansible python module location = /home/vagrant/.local/lib/python3.9/site-packages/ansible
+  ansible collection location = /home/vagrant/.ansible/collections:/usr/share/ansible/collections
+  executable location = /home/vagrant/.local/bin/ansible
+  python version = 3.9.2 (default, Feb 28 2021, 17:03:44) [GCC 10.2.1 20210110] (/usr/bin/python3)
+  jinja version = 3.1.3
+  libyaml = True
 ```
 https://github.com/josenk/vagrant-vmware-esxi
 
@@ -30,7 +30,11 @@ export DISPLAY=localhost:0.0
 sudo ./VMware-ovftool-4.3.0-7948156-lin.x86_64.bundle
 Extracting VMware Installer...done.
 ```
+Or install with :
 
+```shell
+sudo ./VMware-ovftool-4.3.0-7948156-lin.x86_64.bundle --console
+```
 
 Execute :
 Execute run.sh after modify the Vagrantfile and/or other to match with your organization.
