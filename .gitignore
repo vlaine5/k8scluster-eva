@@ -1,4 +1,4 @@
 # General
 .vagrant/
-./roles/join-command
-./roles/completion-command
+/roles/join-command
+/roles/completion-command
