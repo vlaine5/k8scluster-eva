@@ -17,7 +17,7 @@ nodes = [
   { hostname: MASTER_NAME, box:IMAGE_NAME, mac:'00:70:56:19:01:95', numvcpus:'2', ip:"#{NODE_NETWORK_BASE}.26" },
   { hostname: 'worker-1', box:IMAGE_NAME, mac:'00:70:56:06:11:98', numvcpus:'2', ip:"#{NODE_NETWORK_BASE}.27"  },
   { hostname: 'worker-2', box:IMAGE_NAME, mac:'00:70:56:06:11:99', numvcpus:'2', ip:"#{NODE_NETWORK_BASE}.28"  },
-  { hostname: 'worker-3', box:IMAGE_NAME, mac:'00:70:56:06:11:800', numvcpus:'2', ip:"#{NODE_NETWORK_BASE}.29"  }
+  { hostname: 'worker-3', box:IMAGE_NAME, mac:'00:70:56:06:11:80', numvcpus:'2', ip:"#{NODE_NETWORK_BASE}.29"  }
   
 ]
 Vagrant.configure("2") do |config|
