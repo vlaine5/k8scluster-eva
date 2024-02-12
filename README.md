@@ -50,6 +50,8 @@ You need ovftools installed.
 
 You need to do a DHCP reservation before deployment. MAC address are specified in Vagrantfile. Workaround can be setup with ansible. It's due to the fact that the Vagrant esxi plugin can not specify an ip address on the main interface, but only to assign a static IP to an additionnal interface.
 
+See vlaine5/bind9-dhcp repository for simple pre configured server with mac reservation
+
 # Troubleshooting
 
 With the bento image on Vagrant, there is bug you can avoid, here is the error you get :
