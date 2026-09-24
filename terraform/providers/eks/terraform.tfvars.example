@@ -1,0 +1,15 @@
+# =============================================================================
+#  Réglages AWS EKS. Fichier OPTIONNEL : les valeurs par défaut conviennent.
+#
+#    cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars est ignoré par Git)
+#
+#  Aucun identifiant ici : utilisez aws configure ou AWS_PROFILE.
+#  Nom du cluster et nombre de workers : CLUSTER_NAME et WORKER_COUNT dans
+#  .env (./k8s-lab les transmet). Guide : docs/deploy-eks.md
+# =============================================================================
+
+# Région AWS (Paris).
+aws_region = "eu-west-3"
+
+# Type d'instance EC2 des workers.
+node_instance_types = ["t3.medium"]
