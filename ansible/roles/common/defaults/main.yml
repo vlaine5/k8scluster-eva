@@ -22,6 +22,11 @@ common_sysctl_settings:
   net.bridge.bridge-nf-call-iptables: "1"
   net.bridge.bridge-nf-call-ip6tables: "1"
 
+# Désactive le swap (le kubelet refuse de démarrer si le swap est actif,
+# sauf failSwapOn: false). À ne passer à false que si le swap est hors de
+# portée du nœud (conteneur de test partageant le swap de l'hôte).
+common_disable_swap: true
+
 # Ajoute tous les nœuds du cluster dans /etc/hosts (utile sans DNS local).
 common_manage_etc_hosts: true
 

@@ -36,7 +36,7 @@ k8s_cluster_name: "{{ cluster_name | default('k8s-lab') }}"
 kubernetes_minor_version: "{{ kubernetes_version.split('.')[0:2] | join('.') }}"
 # IP utilisée par Kubernetes sur chaque nœud. Indispensable quand une VM a
 # plusieurs cartes réseau (cas de Vagrant : NAT + réseau privé).
-k8s_node_ip: "{{ node_ip | default(ansible_default_ipv4.address) }}"
+k8s_node_ip: "{{ node_ip | default(ansible_facts['default_ipv4'].address) }}"
 # Le control-plane (unique) du cluster.
 k8s_control_plane_host: "{{ groups['control_plane'] | first }}"
 k8s_control_plane_ip: "{{ hostvars[k8s_control_plane_host]['k8s_node_ip'] }}"
