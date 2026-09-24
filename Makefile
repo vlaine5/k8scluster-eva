@@ -2,7 +2,7 @@
 #  k8s-lab — raccourcis "make" (ils appellent tous ./k8s-lab).
 #
 #    make help
-#    make doctor [MODE=kind]
+#    make doctor MODE=kind
 #    make deploy MODE=kind
 #    make deploy MODE=terraform PROVIDER=proxmox
 #    make destroy MODE=kind
@@ -30,16 +30,35 @@ TF_DIRS  := terraform/providers/proxmox terraform/providers/vsphere terraform/pr
 TF_MODS  := terraform/modules/k8s-nodes terraform/modules/ansible-inventory
 SHELL_SCRIPTS := k8s-lab $(wildcard scripts/*.sh scripts/lib/*.sh tests/*/*.sh)
 
-.PHONY: help menu doctor deploy destroy status kubeconfig test config \
-        lint shellcheck yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate \
-        terraform-test tflint markdownlint check-config ruby-check test-kubeadm
+.PHONY: help help-dev menu doctor deploy destroy status kubeconfig test config \
+        lint shellcheck ruby-check vagrant-validate yamllint ansible-lint ansible-syntax \
+        terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs \
+        check-config test-kubeadm
 
 ## --- Utilisation -------------------------------------------------------------
 
-help: ## Affiche cette aide
-	@printf '\nk8s-lab — raccourcis make (détails : ./k8s-lab help)\n\n'
-	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36mmake %-20s\033[0m %s\n", $$1, $$2}'
-	@printf '\nExemples :\n  make doctor\n  make deploy MODE=kind\n  make deploy MODE=vagrant WORKERS=3\n  make deploy MODE=terraform PROVIDER=proxmox\n  make destroy MODE=kind\n\n'
+help: ## Aide : les commandes principales
+	@printf '%s\n' \
+	  '' \
+	  'Kubernetes Lab - commandes principales' \
+	  '' \
+	  '  make doctor MODE=kind      vérifier votre machine (sans MODE : tous les modes)' \
+	  '  make deploy MODE=kind      créer le cluster (ne détruit jamais un cluster existant)' \
+	  '  make status                voir les clusters du lab' \
+	  '  make test                  tester le cluster actif (nginx + Service + DNS)' \
+	  '  make kubeconfig            utiliser kubectl avec le lab' \
+	  '  make destroy MODE=kind     supprimer le cluster (confirmation demandée)' \
+	  '' \
+	  'Modes     MODE=kind   MODE=minikube   MODE=vagrant' \
+	  '          MODE=terraform PROVIDER=proxmox   (ou PROVIDER=vsphere, PROVIDER=libvirt)' \
+	  'Options   WORKERS=3 (nombre de workers)   RECREATE=1 (recréer)   YES=1 (sans question)' \
+	  '' \
+	  'Puis : export KUBECONFIG="$$PWD/.kube/config" && kubectl get nodes' \
+	  'Guides : docs/deployment.md   Menu interactif : ./k8s-lab   Toutes les cibles : make help-dev' \
+	  ''
+
+help-dev: ## Toutes les cibles, y compris la qualité (CI)
+	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-20s %s\n", $$1, $$2}'
 
 menu: ## Menu interactif
 	@$(LAB)
@@ -67,13 +86,16 @@ config: ## Affiche la configuration effective
 
 ## --- Qualité (utilisé par la CI) ------------------------------------------------
 
-lint: shellcheck ruby-check yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate terraform-test tflint markdownlint check-config ## Lance tous les contrôles
+lint: shellcheck ruby-check yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs check-config ## Tous les contrôles statiques (+ vagrant-validate en CI)
 
 shellcheck: ## ShellCheck sur les scripts
 	shellcheck --external-sources --source-path=SCRIPTDIR $(SHELL_SCRIPTS)
 
 ruby-check: ## Syntaxe du Vagrantfile
 	ruby -c vagrant/Vagrantfile
+
+vagrant-validate: ## vagrant validate, sans hyperviseur (VirtualBox, 2 puis 4 workers ; Vagrant requis)
+	cd vagrant && for n in 2 4; do VAGRANT_CHECKPOINT_DISABLE=1 VAGRANT_PROVIDER=virtualbox WORKER_COUNT=$$n vagrant validate --ignore-provider || exit 1; done
 
 yamllint: ## yamllint sur tout le dépôt
 	yamllint --strict .
@@ -99,6 +121,9 @@ tflint: ## TFLint sur tout le code Terraform
 
 markdownlint: ## markdownlint sur la documentation
 	markdownlint-cli2 "**/*.md"
+
+check-docs: ## Liens, pages docs/*.md et commandes make cités dans la documentation
+	scripts/check-docs.sh
 
 test-kubeadm: ## Test d'intégration : site.yml sur des nœuds conteneurs systemd (Docker requis)
 	tests/kubeadm-in-docker/run.sh

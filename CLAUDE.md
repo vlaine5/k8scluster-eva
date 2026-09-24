@@ -46,17 +46,24 @@ config/lab.env (+ .env) ──> ./k8s-lab (Bash) ──> kind | minikube | vagra
 7. **Honnêteté sur la validation** : ne jamais présenter comme testé ce qui ne l'a été que
    statiquement (Proxmox, vSphere, libvirt, Vagrant nécessitent une infrastructure réelle).
 8. Bash compatible 3.2 (macOS) : pas de tableaux associatifs, `mapfile`, `${var,,}`.
+9. **Documentation à deux niveaux.** Guides étudiants courts (`README.md`,
+   `docs/deployment.md`, `docs/deploy-<mode>.md`) : commandes `make` uniquement et structure
+   fixe (Ce que vous allez obtenir, Prérequis, 1. Vérifier votre machine, 2. Configurer,
+   3. Déployer, 4. Vérifier, 5. Tester, 6. Supprimer, En cas de problème, Pour aller plus
+   loin). Le détail technique va dans `docs/architecture.md`, `ansible-kubeadm.md`,
+   `configuration.md`, `security.md`, `troubleshooting.md`, sans duplication.
 
 ## Commandes de test
 
 ```bash
-make lint                 # tout ce que fait la CI (hors e2e)
+make lint                 # contrôles statiques de la CI (make help-dev : liste des cibles)
+make vagrant-validate     # vagrant validate sans hyperviseur (lancé aussi en CI ; Vagrant requis)
 make shellcheck           # scripts Bash
 make yamllint ansible-lint ansible-syntax
 make terraform-fmt terraform-validate terraform-test tflint
-make markdownlint
+make markdownlint check-docs   # style + liens, pages et commandes make cités
 make check-config         # cohérence config/lab.env <-> Terraform / Ansible / kind
-./k8s-lab deploy kind --yes && ./k8s-lab test && ./k8s-lab destroy kind --yes   # e2e (Docker, cgroup v2)
+make deploy MODE=kind && make test && make destroy MODE=kind YES=1   # e2e (Docker, cgroup v2)
 make test-kubeadm         # site.yml réel sur des nœuds conteneurs systemd + idempotence + nginx
 ```
 
@@ -66,7 +73,8 @@ yamllint) puis `ansible-galaxy collection install -r ansible/requirements.yml`.
 ## Ajouter…
 
 - **un provider Terraform** : `terraform/providers/<nom>/` appelant les deux modules communs,
-  puis `scripts/lib/mode_terraform.sh`, `scripts/lib/doctor.sh`, CI (`matrix`), docs.
+  puis `scripts/lib/mode_terraform.sh`, `scripts/lib/doctor.sh`, `TF_DIRS` du Makefile, un
+  guide `docs/deploy-<nom>.md`, `docs/deployment.md` et le tableau du README.
 - **un CNI** : `ansible/roles/cni/tasks/<nom>.yml` + liste dans `roles/cni/tasks/main.yml`.
 - **un réglage** : `config/lab.env` (commenté) → transmis par le CLI (`TF_VAR_*` ou
   `ansible_write_vars`) → copie de la valeur par défaut → `scripts/check-config-sync.sh` →
