@@ -1,0 +1,69 @@
+---
+# =============================================================================
+#  DESTRUCTIF : remet les nœuds à zéro avec "kubeadm reset".
+#
+#  Les VMs sont conservées, mais le cluster Kubernetes est supprimé (etcd,
+#  certificats, Pods...). Utile après un "kubeadm init" raté, ou pour
+#  s'entraîner à recréer un cluster sans recréer les VMs.
+#
+#    cd ansible
+#    ansible-playbook -i inventories/<inventaire>.ini reset.yml -e reset_confirm=true
+#
+#  Relancez ensuite site.yml pour recréer le cluster.
+# =============================================================================
+
+- name: Reset Kubernetes on every node
+  hosts: k8s_cluster
+  become: true
+  gather_facts: false
+  vars:
+    reset_confirm: false
+  tasks:
+    - name: Refuse to run without an explicit confirmation
+      ansible.builtin.assert:
+        that: reset_confirm | bool
+        fail_msg: >-
+          This playbook DESTROYS the Kubernetes cluster on every host of the inventory.
+          Re-run it with -e reset_confirm=true if this is really what you want.
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+      become: false
+
+    - name: Check whether kubeadm is installed
+      ansible.builtin.stat:
+        path: /usr/bin/kubeadm
+      register: reset_kubeadm
+
+    - name: Run kubeadm reset
+      ansible.builtin.command:
+        argv: [kubeadm, reset, --force]
+      when: reset_kubeadm.stat.exists
+      changed_when: true
+
+    # kubeadm reset ne nettoie pas le réseau des Pods : sans cela, un nouveau
+    # cluster obtiendrait d'autres sous-réseaux Flannel que ceux de cni0.
+    - name: Delete the network interfaces left by the CNI
+      ansible.builtin.command:
+        argv: [ip, link, delete, "{{ item }}"]
+        removes: /sys/class/net/{{ item }}
+      loop:
+        - cni0
+        - flannel.1
+
+    - name: Remove the files that kubeadm reset keeps
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/cni/net.d
+        - /var/lib/cni
+        - /run/flannel
+        - /etc/kubernetes/addons
+        - /etc/kubernetes/kubeadm-config.yaml
+        - /root/.kube
+
+    - name: Remove the kubeconfig of the SSH user
+      ansible.builtin.file:
+        path: "~{{ ansible_user | default('root') }}/.kube/config"
+        state: absent

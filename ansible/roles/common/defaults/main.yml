@@ -1,0 +1,36 @@
+---
+# Paquets de base installés sur chaque nœud.
+common_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - bash-completion
+  - conntrack
+  # requis par le module Ansible deb822_repository
+  - python3-debian
+
+# Modules noyau requis par containerd (overlay) et par le réseau des Pods
+# (br_netfilter : le trafic des bridges Linux passe par iptables).
+common_kernel_modules:
+  - overlay
+  - br_netfilter
+
+# Paramètres réseau exigés par Kubernetes :
+# https://kubernetes.io/docs/setup/production-environment/container-runtimes/#prerequisite-ipv4-forwarding-optional
+common_sysctl_settings:
+  net.ipv4.ip_forward: "1"
+  net.bridge.bridge-nf-call-iptables: "1"
+  net.bridge.bridge-nf-call-ip6tables: "1"
+
+# Désactive le swap (le kubelet refuse de démarrer si le swap est actif,
+# sauf failSwapOn: false). À ne passer à false que si le swap est hors de
+# portée du nœud (conteneur de test partageant le swap de l'hôte).
+common_disable_swap: true
+
+# Ajoute tous les nœuds du cluster dans /etc/hosts (utile sans DNS local).
+common_manage_etc_hosts: true
+
+# Kubernetes >= 1.35 exige cgroup v2. Ne passez à false que si vous savez
+# pourquoi (hôte ancien) ET que vous ajoutez failCgroupV1: false dans
+# control_plane_kubelet_config.
+common_require_cgroup_v2: true

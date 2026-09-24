@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: worker
+  author: k8s-lab
+  description: Join a Kubernetes worker node with kubeadm using a short-lived token
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+dependencies: []

@@ -1,0 +1,204 @@
+# -*- mode: ruby; coding: utf-8 -*-
+# vi: set ft=ruby :
+#
+# =============================================================================
+#  k8s-lab — VMs d'un cluster Kubernetes (kubeadm), créées par Vagrant.
+#
+#  Vagrant crée uniquement les VMs et écrit l'inventaire Ansible
+#  (ansible/inventories/vagrant.ini). Kubernetes est ensuite installé par
+#  Ansible : ./k8s-lab deploy vagrant enchaîne les deux étapes.
+#
+#  Aucun réglage n'est écrit en dur ici : tout vient de config/lab.env,
+#  surchargé par .env puis par les variables d'environnement.
+#
+#  Providers supportés (VAGRANT_PROVIDER) :
+#    virtualbox      défaut, Linux / Windows / macOS Intel
+#    libvirt         Linux + KVM (plugin vagrant-libvirt)
+#    vmware_desktop  VMware Workstation / Fusion (plugin vagrant-vmware-desktop)
+#    vmware_esxi     ESXi autonome, mode historique du projet (plugin
+#                    vagrant-vmware-esxi, non maintenu depuis 2022)
+# =============================================================================
+
+require "fileutils"
+
+LAB_ROOT = File.expand_path("..", __dir__)
+
+# --- Lecture de la configuration ---------------------------------------------
+# Fichiers KEY=VALUE : .env surcharge config/lab.env ; l'environnement surcharge tout.
+def lab_config_files(root)
+  values = {}
+  [File.join(root, "config", "lab.env"), File.join(root, ".env")].each do |file|
+    next unless File.file?(file)
+
+    File.foreach(file, encoding: "UTF-8") do |raw|
+      line = raw.strip
+      next if line.empty? || line.start_with?("#")
+
+      key, value = line.split("=", 2)
+      next if value.nil? || key !~ /\A[A-Z][A-Z0-9_]*\z/
+
+      values[key] = value.strip.sub(/\A(["'])(.*)\1\z/, '\2')
+    end
+  end
+  values
+end
+
+LAB_FILES = lab_config_files(LAB_ROOT)
+
+# Valeur d'un réglage ; une chaîne vide est considérée comme "non définie".
+def setting(key, default = nil)
+  value = ENV.fetch(key) { LAB_FILES[key] }
+  value.nil? || value.empty? ? default : value
+end
+
+def integer_setting(key, default)
+  Integer(setting(key, default.to_s), 10)
+rescue ArgumentError
+  abort "k8s-lab: #{key} must be an integer (got '#{setting(key)}'). Check config/lab.env and .env."
+end
+
+CLUSTER_NAME  = setting("CLUSTER_NAME", "k8s-lab")
+CONTEXT_NAME  = "#{CLUSTER_NAME}-vagrant"
+PROVIDER      = setting("VAGRANT_PROVIDER", "virtualbox")
+BOX           = setting("VAGRANT_BOX", "bento/ubuntu-24.04")
+BOX_VERSION   = setting("VAGRANT_BOX_VERSION")
+PREFIX        = setting("NODE_HOSTNAME_PREFIX", "k8s")
+WORKER_COUNT  = integer_setting("WORKER_COUNT", 2)
+CPUS          = integer_setting("NODE_CPUS", 2)
+MEMORY_MB     = integer_setting("NODE_MEMORY_MB", 2048)
+NET_PREFIX    = setting("VAGRANT_NETWORK_PREFIX", "192.168.56")
+IP_START      = integer_setting("VAGRANT_IP_START", 10)
+INVENTORY     = File.join(LAB_ROOT, "ansible", "inventories", "vagrant.ini")
+
+SUPPORTED_PROVIDERS = %w[virtualbox libvirt vmware_desktop vmware_esxi].freeze
+
+unless SUPPORTED_PROVIDERS.include?(PROVIDER)
+  abort "k8s-lab: VAGRANT_PROVIDER=#{PROVIDER} is not supported (use one of: #{SUPPORTED_PROVIDERS.join(', ')})."
+end
+abort "k8s-lab: WORKER_COUNT must be between 0 and 20." unless (0..20).cover?(WORKER_COUNT)
+abort "k8s-lab: NODE_CPUS must be >= 2 (kubeadm requirement)." if CPUS < 2
+abort "k8s-lab: NODE_MEMORY_MB must be >= 2048." if MEMORY_MB < 2048
+abort "k8s-lab: VAGRANT_IP_START + WORKER_COUNT must stay below 255." if IP_START < 2 || IP_START + WORKER_COUNT > 254
+
+if PROVIDER == "vmware_esxi"
+  abort "k8s-lab: ESXI_HOSTNAME is required for the vmware_esxi provider (see .env.example)." unless setting("ESXI_HOSTNAME")
+  if setting("ESXI_NETWORKS", "").split(",").size < 2
+    abort "k8s-lab: ESXI_NETWORKS needs two port groups: 'network with DHCP,network for the cluster IPs'."
+  end
+end
+
+# "vagrant up" sans --provider utilise le provider configuré.
+ENV["VAGRANT_DEFAULT_PROVIDER"] ||= PROVIDER
+
+# --- Description des nœuds ----------------------------------------------------
+NODES = [{ name: "#{PREFIX}-cp-1", role: "control_plane", ip: "#{NET_PREFIX}.#{IP_START}" }] +
+        (1..WORKER_COUNT).map do |i|
+          { name: "#{PREFIX}-worker-#{i}", role: "worker", ip: "#{NET_PREFIX}.#{IP_START + i}" }
+        end
+
+# --- Inventaire Ansible --------------------------------------------------------
+# Écrit à partir des informations SSH réelles de chaque VM démarrée
+# (NAT + redirection de port pour VirtualBox, IP directe pour libvirt/ESXi...).
+def write_ansible_inventory(env, provider)
+  lines = lambda do |role|
+    NODES.select { |n| n[:role] == role }.filter_map do |node|
+      ssh = begin
+        env.machine(node[:name].to_sym, provider).ssh_info
+      rescue StandardError
+        nil
+      end
+      next if ssh.nil?
+
+      key = Array(ssh[:private_key_path]).first
+      "#{node[:name]} ansible_host=#{ssh[:host]} ansible_port=#{ssh[:port]} " \
+        "ansible_ssh_private_key_file=#{key} node_ip=#{node[:ip]}"
+    end
+  end
+
+  content = <<~INI
+    # =============================================================================
+    #  Inventaire Ansible GÉNÉRÉ par Vagrant (vagrant/Vagrantfile).
+    #  Ne pas modifier à la main : il est réécrit à chaque "vagrant up".
+    # =============================================================================
+
+    [control_plane]
+    #{lines.call('control_plane').join("\n")}
+
+    [workers]
+    #{lines.call('worker').join("\n")}
+
+    [k8s_cluster:children]
+    control_plane
+    workers
+
+    [k8s_cluster:vars]
+    ansible_user=vagrant
+    cluster_name=#{CONTEXT_NAME}
+  INI
+
+  FileUtils.mkdir_p(File.dirname(INVENTORY))
+  tmp = "#{INVENTORY}.tmp"
+  File.write(tmp, content)
+  File.rename(tmp, INVENTORY)
+end
+
+# --- VMs -------------------------------------------------------------------------
+Vagrant.configure("2") do |config|
+  config.vm.box = BOX
+  config.vm.box_version = BOX_VERSION if BOX_VERSION
+  config.vm.boot_timeout = 600
+  # Pas de dossier partagé : Ansible fait tout le travail depuis votre poste.
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  NODES.each do |node|
+    config.vm.define node[:name] do |machine|
+      machine.vm.hostname = node[:name]
+      # Réseau privé : IP fixe utilisée par Kubernetes (node-ip) entre les nœuds.
+      machine.vm.network "private_network", ip: node[:ip]
+
+      machine.vm.provider "virtualbox" do |vb|
+        vb.name = "#{CLUSTER_NAME}-#{node[:name]}"
+        vb.cpus = CPUS
+        vb.memory = MEMORY_MB
+        vb.linked_clone = true
+      end
+
+      machine.vm.provider "libvirt" do |lv|
+        lv.cpus = CPUS
+        lv.memory = MEMORY_MB
+        lv.default_prefix = "#{CLUSTER_NAME}-"
+      end
+
+      machine.vm.provider "vmware_desktop" do |vmw|
+        vmw.vmx["displayName"] = "#{CLUSTER_NAME}-#{node[:name]}"
+        vmw.vmx["numvcpus"] = CPUS.to_s
+        vmw.vmx["memsize"] = MEMORY_MB.to_s
+        vmw.linked_clone = true
+      end
+
+      # Mode historique : ESXi autonome via le plugin vagrant-vmware-esxi.
+      # Le mot de passe n'est JAMAIS écrit ici : "env:" le lit dans ESXI_PASSWORD (.env).
+      machine.vm.provider "vmware_esxi" do |esxi|
+        esxi.esxi_hostname = setting("ESXI_HOSTNAME")
+        esxi.esxi_username = setting("ESXI_USERNAME", "root")
+        esxi.esxi_password = "env:ESXI_PASSWORD"
+        esxi.esxi_disk_store = setting("ESXI_DATASTORE") if setting("ESXI_DATASTORE")
+        # 1er réseau : accès SSH/Internet (DHCP) ; 2e réseau : IP privée du cluster.
+        esxi.esxi_virtual_network = setting("ESXI_NETWORKS", "").split(",").map(&:strip)
+        esxi.guest_name = "#{CLUSTER_NAME}-#{node[:name]}"
+        esxi.guest_numvcpus = CPUS
+        esxi.guest_memsize = MEMORY_MB
+        esxi.guest_disk_type = "thin"
+        esxi.guest_nic_type = "vmxnet3"
+      end
+    end
+  end
+
+  # Après chaque démarrage : (ré)écriture de l'inventaire Ansible.
+  config.trigger.after [:up, :reload, :resume] do |trigger|
+    trigger.info = "Writing the Ansible inventory: ansible/inventories/vagrant.ini"
+    trigger.ruby do |env, machine|
+      write_ansible_inventory(env, machine.provider_name)
+    end
+  end
+end

@@ -1,0 +1,22 @@
+# Propositions automatiques de mises à jour (une PR par mise à jour, à tester avant fusion).
+# Les versions de config/lab.env (Kubernetes, kind, Flannel...) se mettent à jour à la main :
+# voir docs/maintenance.md.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: terraform
+    directories:
+      - /terraform/providers/proxmox
+      - /terraform/providers/vsphere
+      - /terraform/providers/libvirt
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly

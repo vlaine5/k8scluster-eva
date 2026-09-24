@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: kubernetes
+  author: k8s-lab
+  description: Install kubeadm, kubelet and kubectl from pkgs.k8s.io at a pinned version
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+dependencies: []

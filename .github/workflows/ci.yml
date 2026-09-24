@@ -1,0 +1,256 @@
+# =============================================================================
+#  CI du lab : validation statique de tout le code, puis tests de bout en
+#  bout réels : Kind, Minikube (avec les commandes make des guides
+#  étudiants), et le playbook Ansible + kubeadm exécuté sur des nœuds
+#  conteneurs systemd (aucune infrastructure externe requise).
+#  Vagrant (vagrant validate), Proxmox, vSphere et libvirt (fmt, validate,
+#  TFLint, terraform test des modules communs) sont validés statiquement.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell:
+    name: Shell, Vagrantfile, cohérence de la config
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: ShellCheck
+        run: |
+          shellcheck --version
+          make shellcheck
+
+      - name: Syntaxe du Vagrantfile
+        run: make ruby-check
+
+      - name: Installer Vagrant (version de config/lab.env, SHA-256 vérifié)
+        run: |
+          version="$(sed -n 's/^VAGRANT_VERSION=//p' config/lab.env)"
+          base="https://releases.hashicorp.com/vagrant/${version}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO --retry 3 "${base}/vagrant_${version}-1_amd64.deb"
+          curl -fsSLO --retry 3 "${base}/vagrant_${version}_SHA256SUMS"
+          sha256sum --check --ignore-missing "vagrant_${version}_SHA256SUMS"
+          sudo dpkg -i "vagrant_${version}-1_amd64.deb"
+          vagrant --version
+
+      - name: vagrant validate (VirtualBox, 2 puis 4 workers, sans hyperviseur)
+        run: make vagrant-validate
+
+      - name: Cohérence config/lab.env <-> Terraform / Ansible / kind
+        run: make check-config
+
+  ansible:
+    name: Ansible (yamllint, ansible-lint, syntax-check)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Installer les outils
+        run: |
+          pip install -r requirements-dev.txt
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: yamllint
+        run: make yamllint
+
+      - name: ansible-lint (profil production)
+        run: make ansible-lint
+
+      - name: ansible-playbook --syntax-check
+        run: make ansible-syntax
+
+  terraform:
+    name: Terraform (fmt, validate, test, TFLint)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Lire les versions depuis config/lab.env
+        id: versions
+        run: |
+          echo "terraform=$(sed -n 's/^TERRAFORM_VERSION=//p' config/lab.env)" >> "$GITHUB_OUTPUT"
+          echo "tflint=$(sed -n 's/^TFLINT_VERSION=//p' config/lab.env)" >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ steps.versions.outputs.terraform }}
+          terraform_wrapper: false
+
+      - uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef # v6.3.1
+        with:
+          tflint_version: ${{ steps.versions.outputs.tflint }}
+
+      - name: terraform fmt -check
+        run: make terraform-fmt
+
+      - name: terraform validate (proxmox, vsphere, libvirt)
+        run: make terraform-validate
+
+      - name: terraform test (modules communs, génération d'inventaire)
+        run: make terraform-test
+
+      - name: TFLint
+        run: make tflint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  docs:
+    name: Documentation (markdownlint, liens, commandes citées)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: "**/*.md"
+
+      - name: Liens, pages docs/*.md et commandes make cités
+        run: make check-docs
+
+  e2e-kind:
+    name: E2E Kind (déploiement réel + test nginx)
+    needs: [shell]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Installer kind et kubectl (versions de config/lab.env, SHA-256 vérifiés)
+        run: |
+          scripts/install-tools.sh kind kubectl
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Les étapes suivantes sont exactement les commandes du guide docs/deploy-kind.md.
+      - name: make help / make doctor
+        run: |
+          make help
+          make doctor
+          make doctor MODE=kind
+
+      - name: make deploy MODE=kind (1 control-plane + 2 workers)
+        run: make deploy MODE=kind
+
+      - name: deploy une seconde fois avec ./k8s-lab (idempotence, rien ne doit être recréé)
+        run: |
+          ./k8s-lab deploy kind | tee second-deploy.log
+          grep -q "existe déjà" second-deploy.log
+
+      - name: kubectl (export KUBECONFIG, get nodes, get pods -A)
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          kubectl get nodes
+          kubectl get pods -A
+          test "$(kubectl get nodes --no-headers | grep -c ' Ready ')" -eq 3
+
+      - name: make status / make kubeconfig
+        run: |
+          make status
+          make kubeconfig
+
+      - name: make test (nginx + Service + DNS)
+        run: make test
+
+      - name: Diagnostic en cas d'échec
+        if: failure()
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          kubectl get nodes -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -50 || true
+          kind export logs ./kind-logs --name k8s-lab || true
+
+      - name: Conserver les logs kind
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kind-logs
+          path: kind-logs
+          retention-days: 7
+
+      - name: make destroy MODE=kind YES=1
+        if: always()
+        run: make destroy MODE=kind YES=1
+
+  e2e-minikube:
+    name: E2E Minikube (driver docker)
+    needs: [shell]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Installer minikube et kubectl (versions de config/lab.env, SHA-256 vérifiés)
+        run: |
+          scripts/install-tools.sh minikube kubectl
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Les étapes suivantes sont exactement les commandes du guide docs/deploy-minikube.md.
+      - name: make doctor MODE=minikube
+        run: make doctor MODE=minikube
+
+      - name: make deploy MODE=minikube
+        run: make deploy MODE=minikube
+        env:
+          MINIKUBE_DRIVER: docker
+
+      - name: kubectl (export KUBECONFIG, get nodes, get pods -A)
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          kubectl get nodes
+          kubectl get pods -A
+
+      - name: make test (nginx + Service + DNS)
+        run: make test
+
+      - name: Diagnostic en cas d'échec
+        if: failure()
+        run: |
+          minikube logs --profile k8s-lab --length 200 || true
+
+      - name: make destroy MODE=minikube YES=1
+        if: always()
+        run: make destroy MODE=minikube YES=1
+
+  e2e-kubeadm:
+    name: E2E Ansible + kubeadm (nœuds conteneurs systemd)
+    needs: [ansible]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Installer Ansible, les collections et kubectl
+        run: |
+          pip install -r requirements-dev.txt
+          ansible-galaxy collection install -r ansible/requirements.yml
+          scripts/install-tools.sh kubectl
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: site.yml sur 1 control-plane + 2 workers, idempotence, test nginx
+        run: tests/kubeadm-in-docker/run.sh

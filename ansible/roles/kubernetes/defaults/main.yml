@@ -1,0 +1,22 @@
+---
+# Dépôt communautaire officiel des paquets Kubernetes (un dépôt par version
+# mineure). Les anciens apt.kubernetes.io / packages.cloud.google.com sont
+# fermés depuis 2024.
+# Doc : https://kubernetes.io/blog/2023/08/15/pkgs-k8s-io-introduction/
+kubernetes_repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor_version }}/deb/"
+kubernetes_repo_key_url: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor_version }}/deb/Release.key"
+
+# Paquets installés à la version exacte kubernetes_version puis "gelés"
+# (apt-mark hold) : une mise à jour de Kubernetes doit être un geste volontaire
+# (kubeadm upgrade), jamais un effet de bord d'un apt upgrade.
+kubernetes_packages:
+  - kubelet
+  - kubeadm
+  - kubectl
+
+# Outils complémentaires (non gelés) : crictl pour le diagnostic.
+kubernetes_extra_packages:
+  - cri-tools
+
+# Active l'auto-complétion kubectl pour tous les utilisateurs.
+kubernetes_kubectl_completion: true

@@ -1,0 +1,78 @@
+---
+# =============================================================================
+#  Initialisation du control-plane avec "kubeadm init".
+#  https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/
+# =============================================================================
+
+- name: Write the kubeadm configuration
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: "{{ control_plane_kubeadm_config }}"
+    owner: root
+    group: root
+    mode: "0600"
+  register: control_plane_config_file
+
+- name: Check whether the control-plane is already initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: control_plane_admin_conf
+
+- name: Warn that a new kubeadm configuration is not applied to an existing cluster
+  ansible.builtin.debug:
+    msg: >-
+      The kubeadm configuration changed but the cluster already exists: the changes are NOT
+      applied. Destroy and recreate the lab (or use kubeadm upgrade) to apply them.
+  when:
+    - control_plane_admin_conf.stat.exists
+    - control_plane_config_file.changed
+
+- name: Initialize the cluster
+  when: not control_plane_admin_conf.stat.exists
+  block:
+    - name: Run kubeadm init (pulls images and starts the control-plane, may take a few minutes)
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - init
+          - --config={{ control_plane_kubeadm_config }}
+        creates: /etc/kubernetes/admin.conf
+      register: control_plane_kubeadm_init
+
+  rescue:
+    - name: Explain how to investigate a failed kubeadm init
+      ansible.builtin.fail:
+        msg: |
+          "kubeadm init" failed on {{ inventory_hostname }}.
+          Error: {{ control_plane_kubeadm_init.stderr | default('') | trim | truncate(1500) }}
+
+          To investigate (ssh into the node first):
+            sudo journalctl -u kubelet --no-pager | tail -50
+            sudo crictl ps -a
+          To retry from scratch:
+            ansible-playbook -i <inventory> reset.yml -e reset_confirm=true
+          See docs/troubleshooting.md.
+
+- name: Create the .kube directory of the SSH user
+  ansible.builtin.file:
+    path: "{{ ansible_facts['user_dir'] }}/.kube"
+    state: directory
+    owner: "{{ ansible_facts['user_id'] }}"
+    mode: "0700"
+
+- name: Give kubectl access to the SSH user on the control-plane
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_facts['user_dir'] }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_facts['user_id'] }}"
+    mode: "0600"
+
+- name: Wait for the API server to answer
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, --raw=/readyz]
+  register: control_plane_readyz
+  until: control_plane_readyz.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false

@@ -1,72 +1,109 @@
-# k8scluster - Kube + ESXI + Vagrant + Ansible
-K8S Cluster with 3 workers - ESXi 6.5 deployment with Vagrant and Ansible
-Full automated deploy, let's begin to create pod or wathever.
+# Kubernetes Lab
 
-Tested in a debian11 VM (hosted esxi).
+Déployez facilement un cluster Kubernetes pour apprendre Kubernetes : en local en une
+commande (Kind, Minikube), puis sur de vraies VMs installées avec Ansible et kubeadm
+(Vagrant, Proxmox, vSphere, libvirt).
+
+## Démarrage rapide
+
+### Le plus simple : Kind
+
+Il vous faut Docker, `kind` et `kubectl` : `make doctor` vérifie tout et explique comment
+installer ce qui manque.
+
 ```bash
-ansible [core 2.15.9]
-  config file = None
-  configured module search path = ['/home/vagrant/.ansible/plugins/modules', '/usr/share/ansible/plugins/modules']
-  ansible python module location = /home/vagrant/.local/lib/python3.9/site-packages/ansible
-  ansible collection location = /home/vagrant/.ansible/collections:/usr/share/ansible/collections
-  executable location = /home/vagrant/.local/bin/ansible
-  python version = 3.9.2 (default, Feb 28 2021, 17:03:44) [GCC 10.2.1 20210110] (/usr/bin/python3)
-  jinja version = 3.1.3
-  libyaml = True
-```
-https://github.com/josenk/vagrant-vmware-esxi
-
-##### OVF Tools install
-Here : https://docs.vmware.com/en/VMware-Telco-Cloud-Operations/1.4.0/deployment-guide-140/GUID-95301A42-F6F6-4BA9-B3A0-A86A268754B6.html
-
-You need to have X11 enable cause of the window to validate install : so if the commande **./VMware[...].bundle** don't work, check it. https://www.cyberciti.biz/faq/x11-connection-rejected-because-of-wrong-authentication/
-```shell
-apt install xauth
-sudo mkdir /root/.Xauthority
-mkdir /home/vagrant/.Xauthority
-
-export DISPLAY=localhost:0.0
-
-sudo ./VMware-ovftool-4.3.0-7948156-lin.x86_64.bundle
-Extracting VMware Installer...done.
-```
-Or install with :
-
-```shell
-sudo ./VMware-ovftool-4.3.0-7948156-lin.x86_64.bundle --console
-```
-
-Execute :
-Execute run.sh after modify the Vagrantfile and/or other to match with your organization.
-snap.sh can be executed after deployment, simple snapshot with vagrant.
-```bash
+git clone https://github.com/vlaine5/k8scluster-eva.git
 cd k8scluster-eva
-./run.sh
+
+make doctor MODE=kind
+make deploy MODE=kind
+
+export KUBECONFIG="$PWD/.kube/config"
+
+kubectl get nodes
 ```
 
-# Prerequisite
+Pour supprimer le cluster :
 
-You need ovftools installed.
-
-You need to do a DHCP reservation before deployment. MAC address are specified in Vagrantfile. Workaround can be setup with ansible. It's due to the fact that the Vagrant esxi plugin can not specify an ip address on the main interface, but only to assign a static IP to an additionnal interface.
-
-See vlaine5/bind9-dhcp repository for simple pre configured server with mac reservation
-
-# Troubleshooting
-
-With the bento image on Vagrant, there is bug you can avoid, here is the error you get :
 ```bash
-==> master: An error occurred. The error will be shown after all tasks complete.
-Opening VMX source: /root/.vagrant.d/boxes/bento-VAGRANTSLASH-ubuntu-20.04/202112.19.0/vmware_desktop/ZZZZ_worker-1.vmx
-Error: File (/Users/tsmith/.cache/packer/62850188884fff34d447798ebc9d9b22bf1f3f1f.iso) could not be found.
-Completed with errors
+make destroy MODE=kind
 ```
 
-The Vagrant box search for a DVD, it's not that serious, juste fake it or use an other image.
-In your host :
-```bash
-mkdir -p /Users/tsmith/.cache/packer/
-touch /Users/tsmith/.cache/packer/62850188884fff34d447798ebc9d9b22bf1f3f1f.iso
-```
+Guide pas à pas : [docs/deploy-kind.md](docs/deploy-kind.md).
 
-Addionnaly, i run it with a DNS configured, maybe you'll need to add resolution of master, worker-1, worker-2 etc...
+## Quel mode choisir ?
+
+| Je veux… | Utiliser |
+| --- | --- |
+| Découvrir Kubernetes rapidement | [Kind](docs/deploy-kind.md) |
+| Tester Minikube | [Minikube](docs/deploy-minikube.md) |
+| Comprendre kubeadm sur des VMs | [Vagrant](docs/deploy-vagrant.md) |
+| Déployer sur mon Proxmox | [Terraform + Proxmox](docs/deploy-proxmox.md) |
+| Déployer sur VMware vCenter | [Terraform + vSphere](docs/deploy-vsphere.md) |
+| Utiliser des VMs KVM locales | [Terraform + libvirt](docs/deploy-libvirt.md) |
+
+Parcours conseillé : Kind → Minikube → Vagrant → Terraform. Pourquoi ? [docs/modes.md](docs/modes.md).
+
+## Les commandes
+
+| Commande | Effet |
+| --- | --- |
+| `make doctor MODE=…` | vérifie votre machine et explique quoi installer |
+| `make deploy MODE=…` | crée le cluster (ne détruit jamais un cluster existant) |
+| `make status` | montre les clusters du lab |
+| `make test` | teste le cluster actif (nginx + Service + DNS) |
+| `make kubeconfig` | explique comment utiliser `kubectl` avec le lab |
+| `make destroy MODE=…` | supprime le cluster (confirmation demandée) |
+
+Modes : `MODE=kind`, `MODE=minikube`, `MODE=vagrant`,
+`MODE=terraform PROVIDER=proxmox` (ou `vsphere`, `libvirt`).
+Options : `WORKERS=3` (nombre de workers), `RECREATE=1` (recréer le cluster), `YES=1` (sans
+question, pour les scripts).
+
+Sans `make`, le même outil s'utilise directement : `./k8s-lab help`. Lancé seul, `./k8s-lab`
+ouvre un menu.
+
+Tous les clusters du lab sont rangés dans `.kube/config` (un contexte par cluster) : votre
+`~/.kube/config` n'est jamais modifié. Vos réglages et identifiants vont dans un fichier
+`.env` (copie de `.env.example`, ignoré par Git).
+
+## État de validation
+
+| Mode | Statut |
+| --- | --- |
+| Kind | **TESTÉ EN CI** |
+| Minikube | **TESTÉ EN CI** |
+| Ansible + kubeadm | **TESTÉ EN CI** (sur des nœuds conteneurs) |
+| Vagrant | VALIDÉ STATIQUEMENT — TEST D'INTÉGRATION VM À FAIRE |
+| Terraform Proxmox | VALIDÉ STATIQUEMENT — TEST SUR PROXMOX RÉEL À FAIRE |
+| Terraform vSphere | VALIDÉ STATIQUEMENT — TEST SUR VCENTER RÉEL À FAIRE |
+| Terraform libvirt | VALIDÉ STATIQUEMENT — TEST SUR KVM RÉEL À FAIRE |
+
+**TESTÉ EN CI** : à chaque push, GitHub Actions crée réellement le cluster, le teste (nginx,
+Service, DNS) puis le supprime. L'installation Ansible + kubeadm est testée avec 1
+control-plane + 2 workers simulés par des conteneurs systemd.
+**VALIDÉ STATIQUEMENT** : le code est vérifié (`vagrant validate`, `terraform validate`,
+TFLint, `terraform test`), mais le déploiement demande une infrastructure réelle que la CI
+n'a pas.
+
+## Documentation
+
+Guides étudiants (courts, pas à pas) : [choisir un déploiement](docs/deployment.md), puis
+[Kind](docs/deploy-kind.md) · [Minikube](docs/deploy-minikube.md) ·
+[Vagrant](docs/deploy-vagrant.md) · [Proxmox](docs/deploy-proxmox.md) ·
+[vSphere](docs/deploy-vsphere.md) · [libvirt](docs/deploy-libvirt.md).
+
+Documentation technique :
+
+- [Architecture](docs/architecture.md) — organisation du dépôt et principes
+- [Ansible + kubeadm](docs/ansible-kubeadm.md) — ce que fait chaque étape de l'installation
+- [Configuration](docs/configuration.md) — toutes les variables
+- [Terraform](docs/terraform.md) — utilisation directe, outputs, state, ajout d'un provider
+- [Sécurité et secrets](docs/security.md)
+- [Dépannage](docs/troubleshooting.md)
+- [Maintenance des versions](docs/maintenance.md)
+- [Migration depuis la version historique](docs/migration.md)
+
+## Licence
+
+[MIT](LICENSE).

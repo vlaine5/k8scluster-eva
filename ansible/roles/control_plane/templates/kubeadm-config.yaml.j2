@@ -1,0 +1,53 @@
+# {{ ansible_managed }}
+#
+# Configuration de "kubeadm init".
+# Référence : https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/
+#
+# Attention : modifier ce fichier APRÈS l'initialisation n'a aucun effet sur
+# le cluster existant (il faut recréer le cluster ou utiliser kubeadm upgrade).
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: "{{ k8s_node_ip }}"
+  bindPort: 6443
+bootstrapTokens:
+  # Pas de jeton fixe : kubeadm en génère un aléatoire, qui expire vite.
+  - ttl: "{{ control_plane_bootstrap_token_ttl }}"
+nodeRegistration:
+  name: "{{ inventory_hostname }}"
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    # IP annoncée par le nœud (indispensable si la VM a plusieurs cartes réseau).
+    - name: node-ip
+      value: "{{ k8s_node_ip }}"
+{% if control_plane_ignore_preflight_errors | length > 0 %}
+  ignorePreflightErrors: {{ control_plane_ignore_preflight_errors | to_json }}
+{% endif %}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: "{{ k8s_cluster_name }}"
+kubernetesVersion: "v{{ kubernetes_version }}"
+# Adresse stable de l'API server (permettrait d'ajouter d'autres control-planes).
+controlPlaneEndpoint: "{{ k8s_api_endpoint }}"
+networking:
+  podSubnet: "{{ pod_cidr }}"
+  serviceSubnet: "{{ service_cidr }}"
+  dnsDomain: cluster.local
+apiServer:
+  certSANs:
+    - "{{ k8s_node_ip }}"
+    - "{{ inventory_hostname }}"
+{% for san in control_plane_extra_cert_sans %}
+    - "{{ san }}"
+{% endfor %}
+---
+# KubeletConfiguration : cgroupDriver systemd (comme containerd, SystemdCgroup = true).
+# control_plane_kubelet_config permet d'ajouter ou de remplacer des clés.
+{{ {'apiVersion': 'kubelet.config.k8s.io/v1beta1', 'kind': 'KubeletConfiguration', 'cgroupDriver': 'systemd'}
+   | combine(control_plane_kubelet_config) | to_nice_yaml(indent=2) }}
+{% if control_plane_kube_proxy_config | length > 0 %}
+---
+{{ {'apiVersion': 'kubeproxy.config.k8s.io/v1alpha1', 'kind': 'KubeProxyConfiguration'}
+   | combine(control_plane_kube_proxy_config) | to_nice_yaml(indent=2) }}
+{% endif %}

@@ -1,0 +1,20 @@
+---
+# =============================================================================
+#  Installation du plugin réseau des Pods (CNI).
+#
+#  Sans CNI, les nœuds restent "NotReady" et les Pods ne reçoivent pas d'IP.
+#  Pour ajouter un autre CNI (Calico, Cilium...) : créez tasks/<nom>.yml et
+#  ajoutez <nom> à la liste de la tâche "Check that the requested CNI is supported".
+# =============================================================================
+
+- name: Check that the requested CNI is supported
+  ansible.builtin.assert:
+    that: cni in ["flannel", "none"]
+    fail_msg: >-
+      cni={{ cni }} is not supported. Use "flannel", or "none" to install your own CNI
+      after the deployment.
+    quiet: true
+
+- name: Install the CNI plugin
+  ansible.builtin.include_tasks: "{{ cni }}.yml"
+  when: cni != "none"

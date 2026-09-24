@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+#
+# Configuration MINIMALE de containerd : containerd la fusionne avec ses
+# valeurs par défaut. Pour voir la configuration effective :
+#   sudo containerd config dump
+version = 3
+
+[plugins.'io.containerd.cri.v1.images'.pinned_images]
+  # Image "pause" utilisée comme sandbox de chaque Pod.
+  sandbox = '{{ container_runtime_sandbox_image }}'
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
+  # Même driver cgroup que le kubelet (systemd).
+  SystemdCgroup = {{ container_runtime_systemd_cgroup | bool | lower }}
+{% if container_runtime_extra_config | length > 0 %}
+
+# --- container_runtime_extra_config ---
+{{ container_runtime_extra_config }}
+{% endif %}

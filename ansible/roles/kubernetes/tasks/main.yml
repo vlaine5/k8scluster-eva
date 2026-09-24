@@ -1,0 +1,111 @@
+---
+# =============================================================================
+#  Installation de kubeadm, kubelet et kubectl.
+#  https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
+# =============================================================================
+
+- name: Check the requested Kubernetes version format
+  ansible.builtin.assert:
+    that: kubernetes_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+    fail_msg: >-
+      kubernetes_version must be a full version like 1.37.1 (got "{{ kubernetes_version }}").
+    quiet: true
+
+- name: Gather the list of installed packages
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Check whether this node already belongs to a cluster
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubernetes_kubelet_conf
+
+# Changer la version des paquets d'un cluster existant sans "kubeadm upgrade"
+# casserait le cluster : on refuse et on explique la bonne procédure.
+- name: Refuse to silently change the Kubernetes version of an existing cluster
+  ansible.builtin.assert:
+    that: >-
+      not kubernetes_kubelet_conf.stat.exists
+      or 'kubelet' not in ansible_facts.packages
+      or ansible_facts.packages['kubelet'][0].version is match(kubernetes_version | regex_escape ~ '-')
+    fail_msg: >-
+      {{ inventory_hostname }} already runs kubelet
+      {{ ansible_facts.packages['kubelet'][0].version | default('?') }} but kubernetes_version is
+      {{ kubernetes_version }}. Upgrading a running cluster must be done with "kubeadm upgrade"
+      (see docs/troubleshooting.md), or destroy and recreate the lab.
+    quiet: true
+
+# Méthode moderne : fichier .sources (deb822) + clé de signature dédiée
+# (/etc/apt/keyrings) au lieu de l'obsolète apt-key.
+- name: Add the Kubernetes APT repository (pkgs.k8s.io)
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: [deb]
+    uris: ["{{ kubernetes_repo_url }}"]
+    suites: ["/"]
+    signed_by: "{{ kubernetes_repo_key_url }}"
+    state: present
+  register: kubernetes_repo
+
+- name: Install kubelet, kubeadm and kubectl at the requested version
+  ansible.builtin.apt:
+    name: "{{ kubernetes_packages | map('regex_replace', '$', '=' ~ kubernetes_version ~ '-*') | list }}"
+    state: present
+    update_cache: "{{ kubernetes_repo.changed }}"
+    allow_change_held_packages: true
+
+- name: Install the complementary tools
+  ansible.builtin.apt:
+    name: "{{ kubernetes_extra_packages }}"
+    state: present
+
+- name: Hold the Kubernetes packages at their current version
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ kubernetes_packages }}"
+
+- name: Enable the kubelet service (it restarts in a loop until kubeadm configures it)
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true
+
+- name: Generate the kubectl bash completion script
+  ansible.builtin.command:
+    argv: [kubectl, completion, bash]
+  register: kubernetes_completion
+  changed_when: false
+  when: kubernetes_kubectl_completion | bool
+
+- name: Create the bash completion directory (absent by default on Ubuntu 24.04)
+  ansible.builtin.file:
+    path: /etc/bash_completion.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: kubernetes_kubectl_completion | bool
+
+- name: Install the kubectl bash completion for every user
+  ansible.builtin.copy:
+    dest: /etc/bash_completion.d/kubectl
+    content: "{{ kubernetes_completion.stdout }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  when: kubernetes_kubectl_completion | bool
+
+- name: Add a short "k" alias for kubectl (with completion)
+  ansible.builtin.copy:
+    dest: /etc/profile.d/kubectl-alias.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (k8s-lab)
+      alias k=kubectl
+      if [ -n "$BASH_VERSION" ] && [ -r /etc/bash_completion.d/kubectl ]; then
+        . /etc/bash_completion.d/kubectl
+        complete -o default -F __start_kubectl k
+      fi
+  when: kubernetes_kubectl_completion | bool

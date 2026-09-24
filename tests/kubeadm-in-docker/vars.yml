@@ -1,0 +1,28 @@
+---
+# Adaptations nécessaires parce que les "nœuds" sont des conteneurs et non des
+# VMs (noyau et disque partagés avec l'hôte). Aucune n'est utile sur de vraies VMs.
+
+# /etc/hosts est un point de montage géré par Docker.
+common_manage_etc_hosts: false
+
+# Le swap éventuel est celui de l'HÔTE : impossible de le désactiver depuis un
+# conteneur. Le kubelet est donc autorisé à démarrer avec (comme dans kind).
+common_disable_swap: false
+
+# Certains contrôles système de kubeadm échouent sur un noyau partagé.
+control_plane_ignore_preflight_errors: [SystemVerification, Swap]
+worker_ignore_preflight_errors: [SystemVerification, Swap]
+
+# kube-proxy ne peut pas modifier nf_conntrack_max depuis un conteneur (comme kind).
+control_plane_kube_proxy_config:
+  conntrack:
+    maxPerCore: 0
+
+control_plane_kubelet_config:
+  failSwapOn: false
+  # Le DNS embarqué de Docker (127.0.0.11) créerait une boucle dans CoreDNS.
+  resolvConf: /etc/resolv-kubelet.conf
+  # Disque partagé avec l'hôte : pas d'éviction liée au disque (comme kind).
+  evictionHard:
+    nodefs.available: "0%"
+    imagefs.available: "0%"

@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: cni
+  author: k8s-lab
+  description: Install the Pod network (CNI) of a kubeadm cluster (Flannel by default)
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+dependencies: []

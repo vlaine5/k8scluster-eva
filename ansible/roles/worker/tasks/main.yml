@@ -1,0 +1,84 @@
+---
+# =============================================================================
+#  Ajout d'un worker au cluster avec "kubeadm join".
+#
+#  Sécurité : aucun "join-command" n'est écrit sur votre poste ni laissé sur
+#  les VMs. Un jeton valable 15 minutes est créé sur le control-plane au
+#  moment du join, transmis en mémoire par Ansible, puis le fichier de
+#  configuration qui le contient est supprimé.
+# =============================================================================
+
+- name: Check whether the worker already joined the cluster
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: worker_kubelet_conf
+
+- name: Join the cluster
+  when: not worker_kubelet_conf.stat.exists
+  block:
+    - name: Create a short-lived join token on the control-plane
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - token
+          - create
+          - --ttl={{ worker_join_token_ttl }}
+          - --description=k8s-lab join of {{ inventory_hostname }}
+          - --print-join-command
+      delegate_to: "{{ k8s_control_plane_host }}"
+      register: worker_join_command
+      changed_when: true
+      no_log: true
+
+    - name: Extract the token and the CA certificate hash
+      ansible.builtin.set_fact:
+        worker_join_token: "{{ worker_join_command.stdout | regex_search('--token\\s+(\\S+)', '\\1') | first }}"
+        worker_join_ca_hash: "{{ worker_join_command.stdout | regex_search('--discovery-token-ca-cert-hash\\s+(\\S+)', '\\1') | first }}"
+      no_log: true
+
+    - name: Write the kubeadm join configuration
+      ansible.builtin.template:
+        src: kubeadm-join.yaml.j2
+        dest: /etc/kubernetes/kubeadm-join.yaml
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Run kubeadm join
+      ansible.builtin.command:
+        argv: [kubeadm, join, --config=/etc/kubernetes/kubeadm-join.yaml]
+        creates: /etc/kubernetes/kubelet.conf
+      register: worker_kubeadm_join
+
+  rescue:
+    - name: Explain how to investigate a failed kubeadm join
+      ansible.builtin.fail:
+        msg: |
+          "kubeadm join" failed on {{ inventory_hostname }}.
+          Error: {{ worker_kubeadm_join.stderr | default(ansible_failed_result.msg | default('')) | trim | truncate(1500) }}
+
+          Check that {{ inventory_hostname }} can reach {{ k8s_api_endpoint }} (firewall, routes),
+          then look at: sudo journalctl -u kubelet --no-pager | tail -50
+          See docs/troubleshooting.md.
+
+  always:
+    - name: Remove the join configuration (it contains a token)
+      ansible.builtin.file:
+        path: /etc/kubernetes/kubeadm-join.yaml
+        state: absent
+
+- name: Label the node as a worker
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - label
+      - node
+      - "{{ inventory_hostname }}"
+      - node-role.kubernetes.io/worker=
+      - --overwrite
+  delegate_to: "{{ k8s_control_plane_host }}"
+  register: worker_label
+  changed_when: "'not labeled' not in worker_label.stdout"
+  when: worker_add_role_label | bool

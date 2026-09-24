@@ -1,0 +1,9 @@
+# Un namespace isole les ressources d'un projet / d'une équipe.
+#   kubectl apply -f examples/namespace.yaml
+#   kubectl get namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+  labels:
+    app.kubernetes.io/part-of: k8s-lab

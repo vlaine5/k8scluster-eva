@@ -1,0 +1,19 @@
+# markdownlint-cli2 : règles par défaut, avec quelques ajustements pédagogiques.
+config:
+  default: true
+  # Lignes longues autorisées (tableaux, commandes, liens).
+  MD013: false
+  # Titres répétés autorisés entre sections différentes.
+  MD024:
+    siblings_only: true
+  # HTML simple autorisé (<details>, <br>).
+  MD033:
+    allowed_elements: [details, summary, br]
+  # Le premier titre n'est pas forcément un H1 (fichiers inclus).
+  MD041: false
+globs:
+  - "**/*.md"
+ignores:
+  - "**/.terraform/**"
+  - ".lab/**"
+  - "node_modules/**"

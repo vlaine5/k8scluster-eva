@@ -1,0 +1,108 @@
+---
+# =============================================================================
+#  Préparation du système d'exploitation de chaque nœud.
+# =============================================================================
+
+- name: Check that the operating system is supported
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == "Debian"
+      - ansible_facts['service_mgr'] == "systemd"
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+      with {{ ansible_facts['service_mgr'] }}. This lab supports Debian-based systems with systemd
+      (tested target: Ubuntu 24.04 LTS).
+    quiet: true
+
+# Kubernetes >= 1.35 refuse par défaut de démarrer sur un hôte en cgroup v1.
+- name: Check that the node uses cgroup v2
+  ansible.builtin.stat:
+    path: /sys/fs/cgroup/cgroup.controllers
+  register: common_cgroup_v2
+
+- name: Fail with an explanation when cgroup v2 is not available
+  ansible.builtin.assert:
+    that: common_cgroup_v2.stat.exists or not (common_require_cgroup_v2 | bool)
+    fail_msg: >-
+      {{ inventory_hostname }} does not use cgroup v2. Recent Kubernetes versions require it.
+      Use a recent distribution (Ubuntu 22.04+ / Debian 12+) or enable the unified cgroup
+      hierarchy (kernel parameter systemd.unified_cgroup_hierarchy=1).
+    quiet: true
+
+- name: Set the hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Declare every cluster node in /etc/hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} k8s-lab nodes (managed by Ansible)"
+    mode: "0644"
+    block: |
+      {% for host in groups['k8s_cluster'] %}
+      {{ hostvars[host]['k8s_node_ip'] }} {{ host }}
+      {% endfor %}
+  when: common_manage_etc_hosts | bool
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# --- Swap --------------------------------------------------------------------
+# Par défaut, le kubelet refuse de démarrer si le swap est actif.
+- name: Disable swap for the current boot
+  ansible.builtin.command:
+    argv: [swapoff, --all]
+  when:
+    - common_disable_swap | bool
+    - ansible_facts['swaptotal_mb'] | int > 0
+  changed_when: true
+
+- name: Disable swap permanently (comment swap entries in /etc/fstab)
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\s*[^#\s]+\s+\S+\s+swap\s+.*)$'
+    replace: '# \1  # disabled for Kubernetes'
+  when: common_disable_swap | bool
+
+# --- Modules noyau et sysctl -------------------------------------------------
+# Certains noyaux minimalistes (microVM, noyaux cloud) n'ont pas de modules
+# chargeables : overlay et br_netfilter y sont alors intégrés au noyau.
+- name: Check whether the kernel supports loadable modules
+  ansible.builtin.stat:
+    path: /proc/modules
+  register: common_proc_modules
+
+- name: Load the kernel modules now and at every boot
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop: "{{ common_kernel_modules }}"
+  when: common_proc_modules.stat.exists
+
+- name: Check that the bridge netfilter support is available
+  ansible.builtin.stat:
+    path: /proc/sys/net/bridge/bridge-nf-call-iptables
+  register: common_br_netfilter
+
+- name: Fail with an explanation when br_netfilter is missing
+  ansible.builtin.assert:
+    that: common_br_netfilter.stat.exists
+    fail_msg: >-
+      br_netfilter is not available on {{ inventory_hostname }}: the Pod network cannot work.
+      Load the module (modprobe br_netfilter) or use a kernel that includes it.
+    quiet: true
+
+- name: Configure the kernel network parameters required by Kubernetes
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+    sysctl_set: true
+    reload: true
+    state: present
+  loop: "{{ common_sysctl_settings | dict2items }}"

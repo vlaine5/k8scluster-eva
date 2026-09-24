@@ -1,0 +1,9 @@
+---
+# Durée de vie du jeton créé pour chaque "kubeadm join" (usage immédiat).
+worker_join_token_ttl: 15m
+
+# Ajoute le label node-role.kubernetes.io/worker (colonne ROLES de kubectl).
+worker_add_role_label: true
+
+# Contrôles préalables de kubeadm à ne pas bloquer (usage avancé), ex : ["SystemVerification"].
+worker_ignore_preflight_errors: []

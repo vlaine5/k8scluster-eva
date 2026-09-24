@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: container_runtime
+  author: k8s-lab
+  description: Install and configure containerd 2.x for Kubernetes (systemd cgroup driver)
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+dependencies: []

@@ -1,0 +1,93 @@
+---
+# =============================================================================
+#  Installation du runtime de conteneurs (containerd).
+#  https://kubernetes.io/docs/setup/production-environment/container-runtimes/
+# =============================================================================
+
+- name: Check that the requested container runtime is supported
+  ansible.builtin.assert:
+    that: container_runtime == "containerd"
+    fail_msg: >-
+      container_runtime={{ container_runtime }} is not supported. Only "containerd" is
+      implemented (to add CRI-O, create roles/container_runtime/tasks/crio.yml).
+    quiet: true
+
+- name: Check that the CPU architecture is supported
+  ansible.builtin.assert:
+    that: ansible_facts['architecture'] in container_runtime_arch_map
+    fail_msg: "Unsupported architecture: {{ ansible_facts['architecture'] }}"
+    quiet: true
+
+# Méthode moderne : fichier .sources (format deb822) + clé dans /etc/apt/keyrings,
+# limitée à CE dépôt (Signed-By). L'ancien "apt-key" est obsolète.
+- name: Add the Docker APT repository (provides containerd.io)
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: ["{{ container_runtime_repo_url }}"]
+    suites: ["{{ ansible_facts['distribution_release'] }}"]
+    components: [stable]
+    architectures: ["{{ container_runtime_arch_map[ansible_facts['architecture']] }}"]
+    signed_by: "{{ container_runtime_repo_key_url }}"
+    state: present
+  register: container_runtime_repo
+
+- name: Install containerd
+  ansible.builtin.apt:
+    name: "containerd.io={{ containerd_version }}"
+    state: present
+    update_cache: "{{ container_runtime_repo.changed }}"
+  notify: Restart containerd
+
+- name: Create the containerd configuration directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure containerd (systemd cgroup driver, sandbox image)
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart containerd
+
+- name: Configure crictl
+  ansible.builtin.template:
+    src: crictl.yaml.j2
+    dest: /etc/crictl.yaml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable and start containerd
+  ansible.builtin.systemd_service:
+    name: containerd
+    enabled: true
+    state: started
+
+# Applique tout de suite une éventuelle nouvelle configuration : kubeadm
+# doit trouver un containerd correctement configuré.
+- name: Apply pending containerd restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Read the effective containerd configuration
+  ansible.builtin.command:
+    argv: [containerd, config, dump]
+  register: container_runtime_config_dump
+  changed_when: false
+
+- name: Check the effective containerd configuration
+  ansible.builtin.assert:
+    that:
+      - "'SystemdCgroup = ' ~ (container_runtime_systemd_cgroup | bool | lower) in container_runtime_config_dump.stdout"
+      - "container_runtime_sandbox_image in container_runtime_config_dump.stdout"
+      - "'disabled_plugins = []' in container_runtime_config_dump.stdout"
+    fail_msg: >-
+      containerd does not use the expected configuration. Run
+      'sudo containerd config dump' on {{ inventory_hostname }} to investigate.
+    quiet: true

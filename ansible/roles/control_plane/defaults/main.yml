@@ -1,0 +1,27 @@
+---
+# Fichier de configuration kubeadm généré sur le control-plane.
+control_plane_kubeadm_config: /etc/kubernetes/kubeadm-config.yaml
+
+# Noms/IP supplémentaires acceptés par le certificat de l'API server
+# (ex : une IP publique ou un nom DNS pour kubectl depuis l'extérieur).
+control_plane_extra_cert_sans: []
+
+# Réglages supplémentaires du kubelet (KubeletConfiguration), appliqués à
+# TOUS les nœuds du cluster. Usage avancé, vide par défaut.
+# Doc : https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/
+control_plane_kubelet_config: {}
+
+# Durée de vie du jeton d'amorçage créé par "kubeadm init". Les workers
+# utilisent des jetons à usage immédiat (15 min), créés au moment du join.
+control_plane_bootstrap_token_ttl: 15m0s
+
+# Réglages de kube-proxy (KubeProxyConfiguration), vide = valeurs par défaut.
+# Exercice possible : {mode: nftables} ou {mode: ipvs}.
+# Doc : https://kubernetes.io/docs/reference/config-api/kube-proxy-config.v1alpha1/
+control_plane_kube_proxy_config: {}
+
+# Contrôles préalables de kubeadm à ne pas bloquer (usage avancé), ex : ["SystemVerification"].
+control_plane_ignore_preflight_errors: []
+
+# Délai maximal d'attente de l'état "Ready" (nœuds et Pods système).
+control_plane_wait_timeout: 300s
