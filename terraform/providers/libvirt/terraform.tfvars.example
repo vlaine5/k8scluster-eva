@@ -1,0 +1,19 @@
+# =============================================================================
+#  Réglages libvirt/KVM : les valeurs par défaut conviennent à la plupart des
+#  postes Linux, ce fichier est donc OPTIONNEL.
+#
+#    cp terraform.tfvars.example terraform.tfvars   (ignoré par Git)
+#
+#  La taille du cluster (WORKER_COUNT, NODE_CPUS...) se règle dans .env /
+#  config/lab.env : ./k8s-lab la transmet à Terraform.
+# =============================================================================
+
+# Hyperviseur local (défaut) ou distant :
+# libvirt_uri = "qemu+ssh://student@kvm-host.example.lan/system"
+
+# Réseau NAT créé pour le lab (ne doit pas chevaucher un réseau existant).
+# network_cidr = "192.168.123.0/24"
+# ip_start     = 10
+
+# Dossier du pool de stockage créé pour le lab.
+# storage_pool_path = "/var/lib/libvirt/images/k8s-lab"
