@@ -1,0 +1,38 @@
+# =============================================================================
+#  Réglages de VOTRE infrastructure Proxmox VE.
+#
+#    cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars est ignoré par Git)
+#
+#  Aucun secret ici : le token API se met dans le fichier .env à la racine
+#  (PROXMOX_VE_ENDPOINT, PROXMOX_VE_API_TOKEN). Voir docs/terraform-proxmox.md
+#
+#  La taille du cluster (WORKER_COUNT, NODE_CPUS...) se règle dans .env /
+#  config/lab.env : ./k8s-lab la transmet à Terraform.
+# =============================================================================
+
+# Nom du nœud Proxmox qui héberge les VMs (en haut à gauche de l'interface web).
+proxmox_node = "pve"
+
+# Stockage des disques des VMs.
+vm_datastore = "local-lvm"
+
+# Stockage où l'image cloud Ubuntu est téléchargée : le type de contenu
+# "Import" doit y être activé (Datacenter > Storage > local > Edit > Content).
+image_datastore = "local"
+
+# Bridge réseau et VLAN éventuel.
+network_bridge = "vmbr0"
+# vlan_id      = 20
+
+# Réseau des VMs : IP statiques à partir de .100 (control-plane), .101...
+# Choisissez une plage libre (hors de la plage DHCP de votre routeur).
+network_cidr = "192.168.1.0/24"
+ip_start     = 100
+# gateway    = "192.168.1.1"
+# dns_servers = ["192.168.1.1"]
+
+# Optionnel : cloner un template cloud-init existant au lieu d'importer l'image.
+# template_vm_id = 9000
+
+# Optionnel : IDs fixes des VMs (sinon Proxmox choisit).
+# vm_id_start = 700
