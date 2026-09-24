@@ -135,6 +135,14 @@ validate_config() {
     die "KUBERNETES_VERSION=${KUBERNETES_VERSION:-} est invalide." \
       "Indiquez une version complète, par exemple 1.37.1."
   fi
+  if [[ ! "${EKS_KUBERNETES_VERSION:-}" =~ ^1\.[0-9]+$ ]]; then
+    die "EKS_KUBERNETES_VERSION=${EKS_KUBERNETES_VERSION:-} est invalide." \
+      "Indiquez une version mineure proposée par EKS, par exemple 1.36."
+  fi
+  case "${AWS_TARGET:-}" in
+    aws | localstack) ;;
+    *) die "AWS_TARGET=${AWS_TARGET:-} est invalide." "Valeurs possibles : aws (défaut) ou localstack." ;;
+  esac
 }
 
 ensure_state_dirs() {

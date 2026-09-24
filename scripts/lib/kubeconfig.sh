@@ -9,12 +9,12 @@
 #    kubectl config get-contexts
 # =============================================================================
 
-# Fusionne le kubeconfig d'un cluster kubeadm dans .kube/config et l'active.
+# Fusionne le kubeconfig d'un cluster dans .kube/config et l'active.
 #   kubeconfig_merge <fichier> <contexte>
 kubeconfig_merge() {
   local file="$1" context="$2" tmp
   [[ -f "${file}" ]] || die "kubeconfig introuvable : ${file}" \
-    "Il est normalement écrit par Ansible à la fin du déploiement." \
+    "Il est normalement écrit à la fin du déploiement (par Ansible, ou par aws eks update-kubeconfig)." \
     "Relancez : $(hint_cmd kubeconfig "${LAB_MODE:-<mode>}" "${LAB_PROVIDER:-}")"
   ensure_state_dirs
   kubeconfig_remove "${context}" "${context}" "${context}-admin"
@@ -32,15 +32,25 @@ kubeconfig_merge() {
 }
 
 # Supprime un contexte (et son cluster / utilisateur) de .kube/config.
+# Le cluster et l'utilisateur référencés par le contexte sont aussi supprimés
+# (EKS nomme son cluster par son ARN).
 #   kubeconfig_remove <contexte> <cluster> <utilisateur>
 kubeconfig_remove() {
-  local context="$1" cluster="$2" user="$3" current
+  local context="$1" cluster="$2" user="$3" current ref_cluster ref_user
   [[ -f "${LAB_KUBECONFIG}" ]] || return 0
   local kc=(kubectl --kubeconfig "${LAB_KUBECONFIG}" config)
   current="$("${kc[@]}" current-context 2>/dev/null || true)"
+  ref_cluster="$("${kc[@]}" view -o jsonpath="{.contexts[?(@.name==\"${context}\")].context.cluster}" 2>/dev/null || true)"
+  ref_user="$("${kc[@]}" view -o jsonpath="{.contexts[?(@.name==\"${context}\")].context.user}" 2>/dev/null || true)"
   "${kc[@]}" delete-context "${context}" >/dev/null 2>&1 || true
   "${kc[@]}" delete-cluster "${cluster}" >/dev/null 2>&1 || true
   "${kc[@]}" delete-user "${user}" >/dev/null 2>&1 || true
+  if [[ -n "${ref_cluster}" && "${ref_cluster}" != "${cluster}" ]]; then
+    "${kc[@]}" delete-cluster "${ref_cluster}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${ref_user}" && "${ref_user}" != "${user}" ]]; then
+    "${kc[@]}" delete-user "${ref_user}" >/dev/null 2>&1 || true
+  fi
   if [[ "${current}" == "${context}" ]]; then
     "${kc[@]}" unset current-context >/dev/null 2>&1 || true
   fi

@@ -26,12 +26,12 @@ truthy   = $(filter 1 true yes oui,$(1))
 OPTIONS  := $(if $(call truthy,$(YES)),--yes) $(if $(call truthy,$(RECREATE)),--recreate)
 LAB_ENV  := $(if $(WORKERS),WORKER_COUNT=$(WORKERS))
 
-TF_DIRS  := terraform/providers/proxmox terraform/providers/vsphere terraform/providers/libvirt
-TF_MODS  := terraform/modules/k8s-nodes terraform/modules/ansible-inventory
+TF_DIRS  := terraform/providers/proxmox terraform/providers/vsphere terraform/providers/libvirt terraform/providers/eks
+TF_TESTS := terraform/modules/k8s-nodes terraform/modules/ansible-inventory terraform/providers/eks
 SHELL_SCRIPTS := k8s-lab $(wildcard scripts/*.sh scripts/lib/*.sh tests/*/*.sh)
 
 .PHONY: help help-dev menu doctor deploy destroy status kubeconfig test config \
-        lint shellcheck ruby-check vagrant-validate yamllint ansible-lint ansible-syntax \
+        lint shellcheck ruby-check vagrant-validate actionlint yamllint ansible-lint ansible-syntax \
         terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs \
         check-config test-kubeadm
 
@@ -51,6 +51,7 @@ help: ## Aide : les commandes principales
 	  '' \
 	  'Modes     MODE=kind   MODE=minikube   MODE=vagrant' \
 	  '          MODE=terraform PROVIDER=proxmox   (ou PROVIDER=vsphere, PROVIDER=libvirt)' \
+	  '          MODE=terraform PROVIDER=eks       (AWS EKS, Kubernetes managé, payant)' \
 	  'Options   WORKERS=3 (nombre de workers)   RECREATE=1 (recréer)   YES=1 (sans question)' \
 	  '' \
 	  'Puis : export KUBECONFIG="$$PWD/.kube/config" && kubectl get nodes' \
@@ -86,13 +87,16 @@ config: ## Affiche la configuration effective
 
 ## --- Qualité (utilisé par la CI) ------------------------------------------------
 
-lint: shellcheck ruby-check yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs check-config ## Tous les contrôles statiques (+ vagrant-validate en CI)
+lint: shellcheck ruby-check yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs check-config ## Tous les contrôles statiques (+ vagrant-validate et actionlint en CI)
 
 shellcheck: ## ShellCheck sur les scripts
 	shellcheck --external-sources --source-path=SCRIPTDIR $(SHELL_SCRIPTS)
 
 ruby-check: ## Syntaxe du Vagrantfile
 	ruby -c vagrant/Vagrantfile
+
+actionlint: ## actionlint sur les workflows GitHub Actions (actionlint requis)
+	actionlint
 
 vagrant-validate: ## vagrant validate, sans hyperviseur (VirtualBox, 2 puis 4 workers ; Vagrant requis)
 	cd vagrant && for n in 2 4; do VAGRANT_CHECKPOINT_DISABLE=1 VAGRANT_PROVIDER=virtualbox WORKER_COUNT=$$n vagrant validate --ignore-provider || exit 1; done
@@ -112,8 +116,8 @@ terraform-fmt: ## terraform fmt -check
 terraform-validate: ## terraform init (sans backend) + validate pour chaque provider
 	for d in $(TF_DIRS); do (cd "$$d" && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; done
 
-terraform-test: ## terraform test sur les modules communs
-	for d in $(TF_MODS); do (cd "$$d" && terraform init -backend=false -input=false >/dev/null && terraform test) || exit 1; done
+terraform-test: ## terraform test (modules communs, provider eks avec AWS simulé)
+	for d in $(TF_TESTS); do (cd "$$d" && terraform init -backend=false -input=false >/dev/null && terraform test) || exit 1; done
 
 tflint: ## TFLint sur tout le code Terraform
 	tflint --init --config "$(CURDIR)/.tflint.hcl" >/dev/null

@@ -1,7 +1,8 @@
 # Ansible + kubeadm : comment le cluster est construit
 
 Quel que soit l'outil qui a créé les VMs (Vagrant ou Terraform), c'est le même playbook,
-`ansible/site.yml`, qui installe Kubernetes. Il suit la documentation officielle
+`ansible/site.yml`, qui installe Kubernetes. (Le mode AWS EKS n'utilise pas ce playbook : AWS
+fournit le control-plane, voir [deploy-eks.md](deploy-eks.md).) Il suit la documentation officielle
 [*Creating a cluster with kubeadm*](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/).
 
 ## L'inventaire
@@ -107,9 +108,9 @@ checksum, `kubectl apply`, attente), et ajoutez `<nom>` à la liste vérifiée d
   playbook complet sur 1 control-plane + 2 workers (conteneurs systemd Ubuntu 24.04, cgroup v2,
   driver cgroup `systemd` par défaut), **2ᵉ exécution avec `changed=0`**, nœuds `Ready`, Pods
   système prêts, test nginx inter-nœuds (Service + DNS).
-- **Pendant la refonte** (en plus) : ajout d'un 4ᵉ nœud sur un cluster existant sans toucher
-  aux autres, refus d'un changement de version, `reset.yml` puis redéploiement, inventaire
-  généré par les modules Terraform du dépôt.
+- **Tests manuels complémentaires** (hors CI) : ajout d'un 4ᵉ nœud sur un cluster existant
+  sans toucher aux autres, refus d'un changement de version, `reset.yml` puis redéploiement,
+  inventaire généré par les modules Terraform du dépôt.
 - **Reste à valider sur de vraies VMs** (Vagrant, Proxmox, vSphere, libvirt) : cloud-init sur
   les images réelles, le réseau propre à chaque plateforme et le cas multi-cartes de Vagrant
   (`node-ip`, `FLANNELD_IFACE`).

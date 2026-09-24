@@ -1,19 +1,29 @@
-# Choisir un mode : Kind, Minikube ou kubeadm sur VMs ?
+# Choisir un mode : local, kubeadm sur VMs, ou cloud managé ?
 
-Les trois familles produisent un « vrai » Kubernetes (mêmes API, même `kubectl`), mais elles
-ne montrent pas la même chose.
+Tous les modes produisent un « vrai » Kubernetes (mêmes API, même `kubectl`), mais ils ne
+montrent pas la même chose.
+
+## Quatre niveaux
+
+```text
+Niveau 1   Kind / Minikube                        → utiliser Kubernetes
+Niveau 2   Vagrant + Ansible + kubeadm            → comprendre comment Kubernetes est installé
+Niveau 3   Terraform (Proxmox, vSphere, libvirt)  → Infrastructure as Code
+             + Ansible + kubeadm                     + installation de Kubernetes
+Niveau 4   Terraform + AWS EKS                    → Kubernetes managé dans le cloud
+```
 
 ## En résumé
 
-| | Kind | Minikube | kubeadm sur VMs (Vagrant / Terraform) |
-| --- | --- | --- | --- |
-| Un nœud = | un conteneur Docker | un conteneur ou une VM | une vraie VM Linux |
-| Création | ~1 min | 2-5 min | 10-20 min |
-| Ressources | faibles (≈ 3 Go RAM pour 3 nœuds) | faibles à moyennes | ≈ 2 Go RAM par nœud |
-| Multi-nœuds | oui (défaut du lab : 1 + 2) | possible (défaut du lab : 1) | oui (défaut du lab : 1 + 2) |
-| Installation de Kubernetes | cachée (image toute prête) | cachée | **visible** : containerd, kubeadm init/join, CNI |
-| Réseau des Pods | kindnet (fourni) | fourni par minikube | **Flannel, installé par vous** |
-| Idéal pour | apprendre `kubectl`, tester des manifestes, la CI | découvrir les addons (dashboard, ingress…) | comprendre l'architecture d'un cluster |
+| | Kind | Minikube | kubeadm sur VMs (Vagrant / Terraform) | AWS EKS (Terraform) |
+| --- | --- | --- | --- | --- |
+| Un nœud = | un conteneur Docker | un conteneur ou une VM | une vraie VM Linux | une instance EC2 |
+| Création | ~1 min | 2-5 min | 10-20 min | 15-20 min |
+| Coût | gratuit (votre poste) | gratuit (votre poste) | vos VMs | **facturé par AWS** |
+| Multi-nœuds | oui (défaut du lab : 1 + 2) | possible (défaut du lab : 1) | oui (défaut du lab : 1 + 2) | oui (défaut du lab : 2 workers) |
+| Control-plane | caché (image toute prête) | caché | **installé par vous** : kubeadm init | **fourni par AWS** |
+| Réseau des Pods | kindnet (fourni) | fourni par minikube | **Flannel, installé par vous** | addon `vpc-cni` d'AWS |
+| Idéal pour | apprendre `kubectl`, tester des manifestes, la CI | découvrir les addons (dashboard, ingress…) | comprendre l'architecture d'un cluster | découvrir Kubernetes dans le cloud |
 
 ## Kind et Minikube : l'environnement local rapide
 
@@ -27,7 +37,7 @@ ConfigMaps… Ce qui se passe dans les nœuds est volontairement masqué.
   (`minikube addons enable ingress`), tableau de bord (`minikube dashboard`), choix du driver
   (Docker, KVM, VirtualBox…).
 
-## kubeadm sur des VMs : un cluster « comme en vrai »
+## kubeadm sur des VMs : « je construis mon cluster »
 
 Il répond à la question **« comment fonctionne un cluster ? »**. Vous voyez chaque brique :
 
@@ -47,10 +57,28 @@ Ensuite, deux façons de créer les VMs :
 - **Terraform** (niveau 3) : l'Infrastructure as Code, sur Proxmox, vSphere ou KVM. Le même
   code Ansible installe Kubernetes, quel que soit le provider.
 
+## AWS EKS : « le cloud me fournit le control-plane »
+
+Il répond à la question **« comment utilise-t-on Kubernetes dans le cloud ? »**. Terraform
+décrit l'infrastructure AWS (réseau, droits IAM, cluster, workers) ; AWS installe et opère le
+control-plane. Il n'y a ni Ansible ni kubeadm : c'est justement ce qu'il faut observer.
+
+## kubeadm ou EKS ?
+
+Deux objectifs différents, pas un meilleur que l'autre :
+
+| | kubeadm (Vagrant, Proxmox, vSphere, libvirt) | EKS |
+| --- | --- | --- |
+| Control-plane | installé par vous (Ansible + kubeadm) | géré par AWS |
+| Workers | VMs configurées par Ansible | Managed Node Group |
+| Infrastructure | au choix : vos VMs, votre hyperviseur | AWS |
+| Niveau d'abstraction | plus bas niveau | plus managé |
+| On apprend | l'installation de Kubernetes | Kubernetes dans le cloud |
+
 ## Parcours conseillé
 
 ```text
-Kind ──> Minikube ──> Vagrant ──> Ansible + kubeadm ──> Terraform ──> Proxmox / vSphere / KVM
+Kind ──> Minikube ──> Vagrant + kubeadm ──> Terraform + kubeadm ──> Terraform + EKS
 ```
 
 1. Kind : `kubectl`, manifestes, `examples/`.
@@ -59,6 +87,8 @@ Kind ──> Minikube ──> Vagrant ──> Ansible + kubeadm ──> Terrafor
    (`vagrant ssh k8s-cp-1`), observer `sudo crictl ps`, `/etc/kubernetes/manifests/`.
 4. Terraform : lire `terraform/modules/k8s-nodes`, faire un `terraform plan`, changer
    `WORKER_COUNT` et observer le plan.
+5. EKS : lire `terraform/providers/eks/main.tf`, comparer `kubectl get pods -n kube-system`
+   avec un cluster kubeadm (où sont etcd et l'API server ?), puis **détruire le cluster**.
 
 ## Exercices pour aller plus loin
 
@@ -67,3 +97,5 @@ Kind ──> Minikube ──> Vagrant ──> Ansible + kubeadm ──> Terrafor
   ajouté, le cluster existant est conservé.
 - Mettez à jour un cluster kubeadm d'une version mineure avec `kubeadm upgrade`
   (<https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/>).
+- Sur EKS, passez de 2 à 3 workers (`make deploy MODE=terraform PROVIDER=eks WORKERS=3`) et
+  observez le plan : seul le Managed Node Group change.

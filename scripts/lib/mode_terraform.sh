@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # =============================================================================
-#  Mode terraform : VMs créées par Terraform (Proxmox, vSphere, libvirt),
-#  Kubernetes installé par Ansible + kubeadm (niveau 3, Infrastructure as Code).
+#  Mode terraform : l'infrastructure est décrite en code (Terraform).
 #
+#  proxmox, vsphere, libvirt (niveau 3) : Terraform crée des VMs, Ansible y
+#  installe Kubernetes avec kubeadm.
 #    terraform plan/apply  -> VMs + ansible/inventories/terraform-<provider>.ini
 #    ansible-playbook      -> kubeadm init / join, CNI, vérifications
+#
+#  eks (niveau 4) : Terraform crée un cluster AWS EKS, Kubernetes managé.
+#  Ni Ansible ni kubeadm : voir scripts/lib/eks.sh.
 # =============================================================================
 
-TERRAFORM_PROVIDERS="proxmox, vsphere, libvirt"
+TERRAFORM_PROVIDERS="proxmox, vsphere, libvirt, eks"
 
 # terraform, ou OpenTofu (tofu) s'il est seul installé. Forçable : TERRAFORM_BIN=tofu
 terraform_bin() {
@@ -23,7 +27,7 @@ terraform_bin() {
 
 tf_check_provider() {
   case "$1" in
-    proxmox | vsphere | libvirt) ;;
+    proxmox | vsphere | libvirt | eks) ;;
     "") die "Précisez le provider Terraform." "Exemple : $(hint_cmd deploy terraform proxmox)" "Providers : ${TERRAFORM_PROVIDERS}" ;;
     *) die "Provider Terraform inconnu : \"$1\"." "Providers disponibles : ${TERRAFORM_PROVIDERS}" ;;
   esac
@@ -39,10 +43,19 @@ tf() {
   run "$(terraform_bin)" -chdir="terraform/providers/${provider}" "$@"
 }
 
+# Valeur d'un output Terraform (sans affichage de la commande).
+tf_output() {
+  "$(terraform_bin)" -chdir="$(tf_dir "$1")" output -raw "$2" 2>/dev/null
+}
+
 # Réglages de config/lab.env transmis à Terraform (variables TF_VAR_*).
 # Les réglages propres à l'infrastructure restent dans terraform.tfvars.
 tf_export_vars() {
   local provider="$1"
+  if [[ "${provider}" == "eks" ]]; then
+    eks_export_vars "${2:-}"
+    return 0
+  fi
   ensure_ssh_key
   export TF_VAR_cluster_name="${CLUSTER_NAME}"
   export TF_VAR_worker_count="${WORKER_COUNT}"
@@ -111,6 +124,10 @@ terraform_deploy() {
   tf_export_vars "${provider}"
   mkdir -p "${LAB_STATE_DIR}/terraform"
   plan="${LAB_STATE_DIR}/terraform/${provider}.tfplan"
+  if [[ "${provider}" == "eks" && "${AWS_TARGET}" == "aws" ]]; then
+    warn "AWS EKS utilise de vraies ressources payantes (cluster, instances EC2)."
+    warn "Quand le TP est terminé : $(hint_cmd destroy terraform eks)"
+  fi
 
   step "Terraform : initialisation (téléchargement des providers)"
   (cd "${LAB_ROOT}" && tf "${provider}" init -input=false) ||
@@ -120,7 +137,7 @@ terraform_deploy() {
   # Un plan peut contenir des valeurs sensibles : fichier privé, supprimé après usage.
   (umask 077 && cd "${LAB_ROOT}" && tf "${provider}" plan -input=false -out="${plan}") ||
     die "terraform plan a échoué (voir l'erreur ci-dessus)." \
-      "Vérifiez terraform/providers/${provider}/terraform.tfvars et vos identifiants dans .env."
+      "Vérifiez terraform/providers/${provider}/terraform.tfvars et vos identifiants (.env, ou aws configure pour EKS)."
 
   summary="$("$(terraform_bin)" -chdir="$(tf_dir "${provider}")" show -no-color "${plan}" |
     grep -E '^(Plan:|No changes)')" || summary=""
@@ -143,11 +160,21 @@ terraform_deploy() {
   fi
   rm -f "${plan}"
 
-  ansible_install_kubernetes "$(tf_inventory "${provider}")"
-  kubeconfig_merge "${LAB_KUBE_DIR}/clusters/${context}.yaml" "${context}"
+  if [[ "${provider}" == "eks" ]]; then
+    # Kubernetes managé : AWS a déjà installé le control-plane, pas d'Ansible.
+    eks_write_kubeconfig
+  else
+    ansible_install_kubernetes "$(tf_inventory "${provider}")"
+    kubeconfig_merge "${LAB_KUBE_DIR}/clusters/${context}.yaml" "${context}"
+  fi
   smoke_basic "${context}"
   kubeconfig_hint "${context}"
-  printf '\nAdresses et commandes SSH : %s -chdir=terraform/providers/%s output\n' "$(terraform_bin)" "${provider}"
+  if [[ "${provider}" == "eks" ]]; then
+    printf '\nInformations du cluster : %s -chdir=terraform/providers/eks output\n' "$(terraform_bin)"
+    [[ "${AWS_TARGET}" == "aws" ]] && warn "Le cluster EKS est facturé tant qu'il existe. Fin du TP : $(hint_cmd destroy terraform eks)"
+  else
+    printf '\nAdresses et commandes SSH : %s -chdir=terraform/providers/%s output\n' "$(terraform_bin)" "${provider}"
+  fi
 }
 
 terraform_destroy() {
@@ -158,9 +185,16 @@ terraform_destroy() {
     info "Aucune ressource Terraform ${provider} dans le state : rien à détruire."
   else
     [[ -n "$(terraform_bin)" ]] || die "Terraform (ou OpenTofu) est introuvable." "Diagnostic : $(hint_cmd doctor terraform "${provider}")"
-    confirm "Détruire TOUTES les VMs Terraform ${provider} du lab (terraform destroy) ?" || die "Destruction annulée."
-    known_hosts_forget "$(tf_inventory "${provider}")"
-    tf_export_vars "${provider}"
+    if [[ "${provider}" == "eks" ]]; then
+      eks_prepare_env
+      eks_check_no_load_balancer
+      confirm "Détruire le cluster EKS du lab et toutes ses ressources AWS (terraform destroy) ?" || die "Destruction annulée."
+      tf_export_vars "${provider}" --destroy
+    else
+      confirm "Détruire TOUTES les VMs Terraform ${provider} du lab (terraform destroy) ?" || die "Destruction annulée."
+      known_hosts_forget "$(tf_inventory "${provider}")"
+      tf_export_vars "${provider}"
+    fi
     (cd "${LAB_ROOT}" && tf "${provider}" init -input=false >/dev/null &&
       tf "${provider}" destroy -input=false -auto-approve) ||
       die "terraform destroy a échoué." "Relancez la commande : elle reprend là où elle s'est arrêtée."
@@ -179,12 +213,23 @@ terraform_status() {
       status_line none "tf ${provider}" "aucune VM"
     fi
   done
+  # Lecture du state local uniquement : rapide, sans appel à AWS.
+  if tf_has_resources eks; then
+    status_line up "tf eks" "cluster EKS déployé (contexte $(tf_context eks)), facturé tant qu'il existe"
+  else
+    status_line none "tf eks" "aucun cluster"
+  fi
 }
 
 terraform_kubeconfig() {
   local provider="$1" context
   tf_check_provider "${provider}"
   context="$(tf_context "${provider}")"
+  if [[ "${provider}" == "eks" ]]; then
+    eks_write_kubeconfig
+    kubeconfig_hint "${context}"
+    return 0
+  fi
   ansible_fetch_kubeconfig "$(tf_inventory "${provider}")"
   kubeconfig_merge "${LAB_KUBE_DIR}/clusters/${context}.yaml" "${context}"
   kubeconfig_hint "${context}"
