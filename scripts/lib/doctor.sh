@@ -350,6 +350,8 @@ check_tfvars() {
     d_ok "terraform/providers/${provider}/terraform.tfvars présent"
   elif [[ "${provider}" == "libvirt" ]]; then
     d_info "Pas de terraform.tfvars : valeurs par défaut utilisées (réseau 192.168.123.0/24)."
+  elif [[ "${provider}" == "eks" ]]; then
+    d_info "Pas de terraform.tfvars : valeurs par défaut utilisées (instances $(eks_tf_default node_instance_types | tr -d '[] '))."
   else
     d_fail "terraform/providers/${provider}/terraform.tfvars est absent." \
       "Ce fichier décrit VOTRE infrastructure (nœud, stockage, réseau...)." \
@@ -383,6 +385,78 @@ check_proxmox_access() {
       "Vérifiez l'URL, le réseau, et le certificat (PROXMOX_VE_INSECURE=true si auto-signé)." ;;
     *) d_warn "API Proxmox : réponse HTTP ${code} inattendue." ;;
   esac
+}
+
+check_aws_cli() {
+  if ! have aws; then
+    d_fail "AWS CLI (commande aws) est introuvable." \
+      "kubectl l'utilise pour s'authentifier auprès d'EKS (aws eks get-token)." \
+      "Installation (version 2) : https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+    return
+  fi
+  local version
+  version="$(aws --version 2>&1 | sed -n -E 's#^aws-cli/([0-9.]+).*#\1#p')"
+  if [[ "${version}" == 2.* ]]; then
+    d_ok "AWS CLI ${version}"
+  else
+    d_warn "AWS CLI ${version:-de version inconnue} : la version 2 est recommandée." \
+      "Installation : https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+  fi
+}
+
+# Cible LocalStack : l'émulateur doit tourner et proposer EKS (licence requise).
+check_localstack() {
+  local health
+  d_info "AWS_TARGET=localstack : les appels AWS vont vers ${LOCALSTACK_ENDPOINT} (identifiants factices)."
+  if ! health="$(curl -fsS --max-time 5 "${LOCALSTACK_ENDPOINT%/}/_localstack/health" 2>/dev/null)"; then
+    d_fail "LocalStack est injoignable (${LOCALSTACK_ENDPOINT})." \
+      "Démarrez-le avec votre LOCALSTACK_AUTH_TOKEN : voir docs/deploy-eks.md (LocalStack)."
+    return
+  fi
+  d_ok "LocalStack joignable (${LOCALSTACK_ENDPOINT})"
+  if grep -Eq '"eks": *"(available|running)"' <<<"${health}"; then
+    d_ok "Service EKS disponible dans LocalStack"
+  else
+    d_fail "Le service EKS n'est pas disponible dans ce LocalStack." \
+      "EKS exige une licence LocalStack Ultimate, Student (GitHub Education) ou open source." \
+      "Voir docs/deploy-eks.md (LocalStack)."
+  fi
+}
+
+check_aws_account() {
+  local region identity status
+  region="$(eks_region)"
+  d_info "Région AWS : ${region}"
+  have aws || return 0
+  if identity="$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)"; then
+    d_ok "Identifiants AWS valides : ${identity}${AWS_PROFILE:+ (profil ${AWS_PROFILE})}"
+  else
+    d_fail "Aucun identifiant AWS valide." \
+      "Terraform crée le cluster avec vos identifiants, et kubectl les réutilise." \
+      "Configurez-les : aws configure (ou aws configure sso), ou choisissez un profil : AWS_PROFILE=<profil>" \
+      "Vérification : aws sts get-caller-identity"
+    return
+  fi
+  # La version de Kubernetes doit être proposée par EKS (calendrier propre à AWS).
+  if status="$(aws eks describe-cluster-versions --region "${region}" --cluster-versions "${EKS_KUBERNETES_VERSION}" \
+    --query 'clusterVersions[0].status' --output text 2>/dev/null)"; then
+    case "${status}" in
+      STANDARD_SUPPORT) d_ok "Kubernetes ${EKS_KUBERNETES_VERSION} proposé par EKS (support standard)" ;;
+      EXTENDED_SUPPORT)
+        d_warn "Kubernetes ${EKS_KUBERNETES_VERSION} est en support étendu sur EKS (facturé en supplément)." \
+          "Choisissez une version plus récente : EKS_KUBERNETES_VERSION dans .env."
+        ;;
+      *)
+        d_fail "Kubernetes ${EKS_KUBERNETES_VERSION} n'est pas proposé par EKS dans ${region}." \
+          "Versions disponibles : aws eks describe-cluster-versions --region ${region}" \
+          "Changez EKS_KUBERNETES_VERSION dans .env."
+        ;;
+    esac
+  else
+    d_info "Version ${EKS_KUBERNETES_VERSION} non vérifiée auprès d'EKS (AWS CLI trop ancienne ou droits insuffisants)."
+  fi
+  d_warn "AWS EKS utilise de vraies ressources payantes." \
+    "Quand le TP est terminé : $(hint_cmd destroy terraform eks)"
 }
 
 check_vsphere_access() {
@@ -425,6 +499,15 @@ doctor_mode() {
       ;;
     terraform)
       check_terraform
+      if [[ "${provider}" == "eks" ]]; then
+        # Kubernetes managé : ni Ansible ni SSH, mais AWS CLI et un compte AWS.
+        eks_prepare_env
+        check_kubectl
+        check_aws_cli
+        if [[ "${AWS_TARGET}" == "localstack" ]]; then check_localstack; else check_aws_account; fi
+        check_tfvars eks
+        return "${DOCTOR_ERRORS}"
+      fi
       check_ansible
       check_ssh
       check_kubectl
@@ -467,7 +550,7 @@ cmd_doctor() {
 
   # Sans argument : bilan de tous les modes.
   local summary=() entry m p label
-  for entry in kind minikube vagrant "terraform proxmox" "terraform vsphere" "terraform libvirt"; do
+  for entry in kind minikube vagrant "terraform proxmox" "terraform vsphere" "terraform libvirt" "terraform eks"; do
     m="${entry%% *}"
     p=""
     [[ "${entry}" == *" "* ]] && p="${entry#* }"

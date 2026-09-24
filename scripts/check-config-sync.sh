@@ -53,6 +53,12 @@ expect "proxmox: image_url" "$(tf_default "${ROOT}/terraform/providers/proxmox/v
 expect "proxmox: image_sha256" "$(tf_default "${ROOT}/terraform/providers/proxmox/variables.tf" image_sha256)" "$(lab_value VM_IMAGE_SHA256)"
 expect "libvirt: image_source" "$(tf_default "${ROOT}/terraform/providers/libvirt/variables.tf" image_source)" "$(lab_value VM_IMAGE_URL)"
 expect "module k8s-nodes: worker_count" "$(tf_default "${ROOT}/terraform/modules/k8s-nodes/variables.tf" worker_count)" "$(lab_value WORKER_COUNT)"
+eks="${ROOT}/terraform/providers/eks/variables.tf"
+expect "eks: cluster_name" "$(tf_default "${eks}" cluster_name)" "$(lab_value CLUSTER_NAME)"
+expect "eks: worker_count" "$(tf_default "${eks}" worker_count)" "$(lab_value WORKER_COUNT)"
+expect "eks: kubernetes_version" "$(tf_default "${eks}" kubernetes_version)" "$(lab_value EKS_KUBERNETES_VERSION)"
+expect "eks: aws_target" "$(tf_default "${eks}" aws_target)" "$(lab_value AWS_TARGET)"
+expect "eks: localstack_endpoint" "$(tf_default "${eks}" localstack_endpoint)" "$(lab_value LOCALSTACK_ENDPOINT)"
 expect "module k8s-nodes: hostname_prefix" "$(tf_default "${ROOT}/terraform/modules/k8s-nodes/variables.tf" hostname_prefix)" "$(lab_value NODE_HOSTNAME_PREFIX)"
 
 echo "Ansible (ansible/group_vars/all.yml) :"

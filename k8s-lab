@@ -31,6 +31,8 @@ source "${LAB_ROOT}/scripts/lib/mode_minikube.sh"
 source "${LAB_ROOT}/scripts/lib/mode_vagrant.sh"
 # shellcheck source=scripts/lib/mode_terraform.sh
 source "${LAB_ROOT}/scripts/lib/mode_terraform.sh"
+# shellcheck source=scripts/lib/eks.sh
+source "${LAB_ROOT}/scripts/lib/eks.sh"
 
 trap 'error "Commande interrompue (ligne ${LINENO}). Relancez avec DEBUG=1 pour plus de détails."' ERR
 [[ "${DEBUG:-0}" == "1" ]] && set -x
@@ -48,12 +50,15 @@ ${C_BOLD}Commandes principales${C_RESET}
   destroy <mode>        supprimer le cluster (confirmation demandée)
 
 ${C_BOLD}Modes${C_RESET}
-  kind  |  minikube  |  vagrant  |  terraform proxmox  |  terraform vsphere  |  terraform libvirt
+  local :            kind  |  minikube
+  kubeadm sur VMs :  vagrant  |  terraform proxmox  |  terraform vsphere  |  terraform libvirt
+  cloud managé :     terraform eks  (AWS, payant)
 
 ${C_BOLD}Exemples${C_RESET}
   ./k8s-lab doctor kind
   ./k8s-lab deploy kind
   ./k8s-lab deploy terraform proxmox
+  ./k8s-lab deploy terraform eks
   ./k8s-lab destroy kind
 
 ${C_BOLD}Options${C_RESET}
@@ -154,7 +159,7 @@ dispatch() {
         "Liste des modes : $(hint_cmd help)"
       ;;
     *)
-      die "Mode inconnu : \"${mode}\"." "Modes : kind, minikube, vagrant, terraform <proxmox|vsphere|libvirt>"
+      die "Mode inconnu : \"${mode}\"." "Modes : kind, minikube, vagrant, terraform <proxmox|vsphere|libvirt|eks>"
       ;;
   esac
 }
@@ -202,8 +207,8 @@ menu_choose_provider() {
 
 menu_choose_mode() {
   local choice provider
-  printf '\n  1) Kind   2) Minikube   3) Vagrant   4) Terraform\n\n' >&2
-  read -r -p "Quel cluster ? [1-4] : " choice || true
+  printf '\n  1) Kind   2) Minikube   3) Vagrant   4) Terraform (VMs)   5) AWS EKS\n\n' >&2
+  read -r -p "Quel cluster ? [1-5] : " choice || true
   case "${choice}" in
     1) echo kind ;;
     2) echo minikube ;;
@@ -212,6 +217,7 @@ menu_choose_mode() {
       provider="$(menu_choose_provider)"
       if [[ -n "${provider}" ]]; then echo "terraform ${provider}"; fi
       ;;
+    5) echo "terraform eks" ;;
     *) warn "Choix invalide : ${choice}" ;;
   esac
   return 0
@@ -234,15 +240,16 @@ Choisissez une méthode de déploiement :
      ├─ Proxmox
      ├─ VMware/vSphere
      └─ libvirt/KVM
+  5. AWS EKS           Kubernetes managé dans le cloud      (cloud, payant)
 
-  5. Détruire un cluster
-  6. Vérifier les prérequis (doctor)
-  7. État des clusters (status)
-  8. Tester le cluster actif (nginx)
-  9. Quitter
+  6. Détruire un cluster
+  7. Vérifier les prérequis (doctor)
+  8. État des clusters (status)
+  9. Tester le cluster actif (nginx)
+  q. Quitter
 
 MENU
-    read -r -p "Votre choix [1-9] : " choice || exit 0
+    read -r -p "Votre choix [1-9, q] : " choice || exit 0
     case "${choice}" in
       1) menu_run deploy kind ;;
       2) menu_run deploy minikube ;;
@@ -251,15 +258,16 @@ MENU
         target="$(menu_choose_provider)"
         if [[ -n "${target}" ]]; then menu_run deploy terraform "${target}"; fi
         ;;
-      5)
+      5) menu_run deploy terraform eks ;;
+      6)
         target="$(menu_choose_mode)"
         # shellcheck disable=SC2086 # "terraform proxmox" doit donner deux arguments
         if [[ -n "${target}" ]]; then menu_run destroy ${target}; fi
         ;;
-      6) menu_run doctor ;;
-      7) menu_run status ;;
-      8) menu_run test ;;
-      9 | q | Q) exit 0 ;;
+      7) menu_run doctor ;;
+      8) menu_run status ;;
+      9) menu_run test ;;
+      q | Q) exit 0 ;;
       *) warn "Choix invalide : ${choice}" ;;
     esac
   done
