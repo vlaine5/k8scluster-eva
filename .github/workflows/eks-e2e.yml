@@ -1,0 +1,128 @@
+# =============================================================================
+#  Test de bout en bout du mode AWS EKS, déclenché UNIQUEMENT à la main
+#  (onglet Actions > "EKS E2E (manuel)" > Run workflow). Jamais sur push ni
+#  pull request : un vrai cluster EKS coûte de l'argent.
+#
+#    target = localstack  émulateur local ; secret LOCALSTACK_AUTH_TOKEN
+#                         (licence LocalStack incluant EKS : Ultimate, Student
+#                         ou open source)
+#    target = aws         vrai compte AWS, PAYANT ; variable AWS_ROLE_ARN (rôle
+#                         IAM assumé par OIDC, sans clé d'accès stockée) et
+#                         confirmation explicite des coûts
+#
+#  Le cluster est détruit à la fin, même en cas d'échec (if: always()).
+#  Mise en place : CONTRIBUTING.md.
+# =============================================================================
+name: EKS E2E (manuel)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "localstack (émulateur) ou aws (vrai AWS, PAYANT)"
+        type: choice
+        options: [localstack, aws]
+        default: localstack
+      confirm_aws_costs:
+        description: "target = aws : je confirme que ce test crée des ressources AWS payantes"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write # OIDC vers AWS (target = aws)
+
+concurrency:
+  group: eks-e2e
+  cancel-in-progress: false # ne jamais interrompre un déploiement : la destruction doit suivre
+
+jobs:
+  eks:
+    name: E2E EKS (${{ inputs.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      AWS_TARGET: ${{ inputs.target }}
+      # Nom distinct des clusters des étudiants qui partageraient le compte.
+      CLUSTER_NAME: k8s-lab-ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Refuser un test AWS sans confirmation des coûts
+        if: inputs.target == 'aws' && !inputs.confirm_aws_costs
+        run: |
+          echo "::error::target = aws crée de vraies ressources payantes : cochez confirm_aws_costs."
+          exit 1
+
+      - name: Lire les versions depuis config/lab.env
+        id: versions
+        run: echo "terraform=$(sed -n 's/^TERRAFORM_VERSION=//p' config/lab.env)" >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ steps.versions.outputs.terraform }}
+          terraform_wrapper: false
+
+      - name: Installer kubectl (version de config/lab.env, SHA-256 vérifié)
+        run: |
+          scripts/install-tools.sh kubectl
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          aws --version
+
+      - name: Identifiants AWS (OIDC, rôle AWS_ROLE_ARN)
+        if: inputs.target == 'aws'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-3' }}
+
+      - name: Démarrer LocalStack
+        if: inputs.target == 'localstack'
+        env:
+          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+        run: |
+          if [ -z "$LOCALSTACK_AUTH_TOKEN" ]; then
+            echo "::error::Secret LOCALSTACK_AUTH_TOKEN absent : LocalStack exige un jeton, et EKS une licence qui l'inclut."
+            exit 1
+          fi
+          docker run -d --name localstack \
+            -p 127.0.0.1:4566:4566 -p 127.0.0.1:4510-4559:4510-4559 \
+            -e LOCALSTACK_AUTH_TOKEN \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            localstack/localstack:2026.08.4
+          for _ in $(seq 1 60); do
+            curl -fsS http://localhost:4566/_localstack/health | grep -Eq '"eks": *"(available|running)"' && exit 0
+            sleep 5
+          done
+          echo "::error::LocalStack ne propose pas EKS (licence sans EKS, ou démarrage trop long)."
+          docker logs localstack | tail -50
+          exit 1
+
+      - name: make doctor MODE=terraform PROVIDER=eks
+        run: make doctor MODE=terraform PROVIDER=eks
+
+      - name: make deploy MODE=terraform PROVIDER=eks
+        run: make deploy MODE=terraform PROVIDER=eks YES=1
+
+      - name: kubectl (export KUBECONFIG, get nodes, get pods -A)
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          kubectl get nodes -o wide
+          kubectl get pods -A
+
+      - name: make status / make test (nginx + Service + DNS)
+        run: |
+          make status
+          make test
+
+      - name: make destroy MODE=terraform PROVIDER=eks
+        if: always()
+        run: make destroy MODE=terraform PROVIDER=eks YES=1
+
+      - name: Ressources AWS restantes (en cas d'échec)
+        if: failure() && inputs.target == 'aws'
+        run: |
+          echo "Ressources encore étiquetées Cluster=$CLUSTER_NAME (à supprimer à la main si la liste n'est pas vide) :"
+          aws resourcegroupstaggingapi get-resources \
+            --tag-filters "Key=Project,Values=k8s-lab" "Key=Cluster,Values=$CLUSTER_NAME" \
+            --query 'ResourceTagMappingList[].ResourceARN' --output text || true

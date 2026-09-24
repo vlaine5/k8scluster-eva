@@ -3,8 +3,11 @@
 #  bout réels : Kind, Minikube (avec les commandes make des guides
 #  étudiants), et le playbook Ansible + kubeadm exécuté sur des nœuds
 #  conteneurs systemd (aucune infrastructure externe requise).
-#  Vagrant (vagrant validate), Proxmox, vSphere et libvirt (fmt, validate,
-#  TFLint, terraform test des modules communs) sont validés statiquement.
+#  Vagrant (vagrant validate), Proxmox, vSphere, libvirt et AWS EKS (fmt,
+#  validate, TFLint, terraform test avec AWS simulé) sont validés statiquement.
+#  Aucun job de ce fichier ne crée de ressource AWS : le test EKS réel est le
+#  workflow manuel eks-e2e.yml. LocalStack (EKS) exige une licence payante ou
+#  Student : il n'est pas lancé ici.
 # =============================================================================
 name: CI
 
@@ -49,6 +52,21 @@ jobs:
 
       - name: vagrant validate (VirtualBox, 2 puis 4 workers, sans hyperviseur)
         run: make vagrant-validate
+
+      - name: Installer actionlint (version de config/lab.env, SHA-256 vérifié)
+        run: |
+          version="$(sed -n 's/^ACTIONLINT_VERSION=//p' config/lab.env)"
+          base="https://github.com/rhysd/actionlint/releases/download/v${version}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO --retry 3 "${base}/actionlint_${version}_linux_amd64.tar.gz"
+          curl -fsSLO --retry 3 "${base}/actionlint_${version}_checksums.txt"
+          sha256sum --check --ignore-missing "actionlint_${version}_checksums.txt"
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "actionlint_${version}_linux_amd64.tar.gz" -C "$HOME/.local/bin" actionlint
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: actionlint (workflows, dont le workflow EKS manuel)
+        run: make actionlint
 
       - name: Cohérence config/lab.env <-> Terraform / Ansible / kind
         run: make check-config
@@ -103,10 +121,10 @@ jobs:
       - name: terraform fmt -check
         run: make terraform-fmt
 
-      - name: terraform validate (proxmox, vsphere, libvirt)
+      - name: terraform validate (proxmox, vsphere, libvirt, eks)
         run: make terraform-validate
 
-      - name: terraform test (modules communs, génération d'inventaire)
+      - name: terraform test (modules communs, provider eks avec AWS simulé)
         run: make terraform-test
 
       - name: TFLint
