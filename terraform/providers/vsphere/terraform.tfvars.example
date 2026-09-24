@@ -1,0 +1,24 @@
+# =============================================================================
+#  Réglages de VOTRE infrastructure vSphere (vCenter obligatoire).
+#
+#    cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars est ignoré par Git)
+#
+#  Aucun secret ici : les identifiants vCenter se mettent dans le fichier .env
+#  à la racine (VSPHERE_SERVER, VSPHERE_USER, VSPHERE_PASSWORD).
+#  Préparation du template : docs/terraform-vsphere.md
+# =============================================================================
+
+vsphere_datacenter      = "Datacenter"
+vsphere_compute_cluster = "Cluster"
+vsphere_datastore       = "datastore1"
+vsphere_network         = "VM Network"
+
+# Template créé à partir de l'image cloud Ubuntu 24.04 (OVA), options vApp désactivées.
+vsphere_template = "ubuntu-24.04-cloudimg-template"
+# vsphere_folder = "k8s-lab"
+
+# Réseau des VMs : IP statiques à partir de .100 (control-plane), .101...
+network_cidr = "10.10.0.0/24"
+ip_start     = 100
+# gateway     = "10.10.0.1"
+# dns_servers = ["10.10.0.1"]
