@@ -1,4 +1,53 @@
-# General
+# -----------------------------------------------------------------------------
+#  Secrets et réglages personnels — ne jamais versionner
+# -----------------------------------------------------------------------------
+.env
+*.env.local
+terraform.tfvars
+*.auto.tfvars
+*.auto.tfvars.json
+!*.tfvars.example
+
+# -----------------------------------------------------------------------------
+#  Fichiers générés par ./k8s-lab (clés SSH, kubeconfigs, caches, inventaires)
+# -----------------------------------------------------------------------------
+.lab/
+.kube/
+kubeconfig
+*.kubeconfig
+admin.conf
+join-command
+ansible/inventories/*.ini
+!ansible/inventories/example.ini
+
+# -----------------------------------------------------------------------------
+#  Terraform / OpenTofu (le state peut contenir des données sensibles)
+# -----------------------------------------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# -----------------------------------------------------------------------------
+#  Vagrant / Ansible
+# -----------------------------------------------------------------------------
 .vagrant/
-/roles/join-command
-/roles/completion-command
+*.retry
+*.log
+
+# -----------------------------------------------------------------------------
+#  Éditeurs / OS
+# -----------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+terraform/modules/**/.terraform.lock.hcl

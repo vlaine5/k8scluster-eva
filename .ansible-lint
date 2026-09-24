@@ -1,0 +1,15 @@
+---
+# ansible-lint : profil "production" = le plus strict.
+profile: production
+
+exclude_paths:
+  - .github/
+  - .lab/
+  - .kube/
+  - terraform/
+  - vagrant/.vagrant/
+  - local/
+  - examples/
+
+# Les collections sont décrites dans ansible/requirements.yml
+offline: false
