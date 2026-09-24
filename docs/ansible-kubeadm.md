@@ -102,19 +102,17 @@ checksum, `kubectl apply`, attente), et ajoutez `<nom>` à la liste vérifiée d
 
 ## État de validation
 
-- En CI : `ansible-lint` (profil **production**, le plus strict), `yamllint`,
-  `ansible-playbook --syntax-check`, et le test d'intégration `tests/kubeadm-in-docker`
-  (le playbook complet sur des nœuds conteneurs systemd Ubuntu 24.04, voir ci-dessous).
-- Pendant la refonte, le playbook a été **exécuté réellement** sur 3 puis 4 nœuds conteneurs
-  systemd Ubuntu 24.04 avec un inventaire généré par les modules Terraform du dépôt :
-  `kubeadm init`, Flannel (checksum + Kustomize), `kubeadm join` par jeton éphémère, ajout
-  d'un 4ᵉ nœud sans toucher aux autres, **2ᵉ exécution avec `changed=0`**, refus d'un changement
-  de version, `reset.yml` puis redéploiement, export du kubeconfig, smoke tests et test nginx
-  inter-nœuds (Service + DNS). Cet environnement exigeait des adaptations (hôte en cgroup v1 →
-  driver `cgroupfs`, `conntrack`, seuils d'éviction) passées par les variables ci-dessus.
-- **Reste à valider sur de vraies VMs** (Vagrant, Proxmox, vSphere, libvirt) : le chemin par
-  défaut cgroup v2 + driver `systemd`, cloud-init sur les images réelles et le réseau propre à
-  chaque plateforme.
+- **En CI (GitHub Actions)** : `ansible-lint` (profil **production**, le plus strict), `yamllint`,
+  `ansible-playbook --syntax-check`, et le test d'intégration `tests/kubeadm-in-docker` : le
+  playbook complet sur 1 control-plane + 2 workers (conteneurs systemd Ubuntu 24.04, cgroup v2,
+  driver cgroup `systemd` par défaut), **2ᵉ exécution avec `changed=0`**, nœuds `Ready`, Pods
+  système prêts, test nginx inter-nœuds (Service + DNS).
+- **Pendant la refonte** (en plus) : ajout d'un 4ᵉ nœud sur un cluster existant sans toucher
+  aux autres, refus d'un changement de version, `reset.yml` puis redéploiement, inventaire
+  généré par les modules Terraform du dépôt.
+- **Reste à valider sur de vraies VMs** (Vagrant, Proxmox, vSphere, libvirt) : cloud-init sur
+  les images réelles, le réseau propre à chaque plateforme et le cas multi-cartes de Vagrant
+  (`node-ip`, `FLANNELD_IFACE`).
 
 ### Le test d'intégration `tests/kubeadm-in-docker`
 

@@ -149,13 +149,13 @@ Mettre à jour une version : [docs/maintenance.md](docs/maintenance.md).
 
 | Mode | Statut |
 | --- | --- |
-| Kind | implémenté — **testé** (déploiement réel + test nginx), testé en CI à chaque push |
-| Minikube | implémenté — voir [docs/minikube.md](docs/minikube.md#état-de-validation) |
-| Vagrant | implémenté — Vagrantfile validé (`vagrant validate`) ; nécessite un test sur une machine avec VirtualBox/libvirt |
-| Terraform Proxmox | implémenté — validé statiquement + `terraform plan` ; nécessite un test d'intégration sur un Proxmox |
-| Terraform vSphere | implémenté — validé statiquement ; nécessite un test d'intégration sur un vCenter |
-| Terraform libvirt | implémenté — validé statiquement ; nécessite un test d'intégration sur un hôte KVM |
-| Ansible + kubeadm | **exécuté réellement** sur des nœuds conteneurs systemd (init, Flannel, join, ajout de nœud, idempotence, reset, test nginx) + lint en CI ; reste à valider sur de vraies VMs — voir [docs/ansible-kubeadm.md](docs/ansible-kubeadm.md#état-de-validation) |
+| Kind | **testé** : déploiement réel + redéploiement idempotent + test nginx, en local et en CI (GitHub Actions) |
+| Minikube | **testé en CI** (GitHub Actions, driver docker : déploiement + test nginx) ; voir [docs/minikube.md](docs/minikube.md#état-de-validation) |
+| Ansible + kubeadm | **testé en CI** sur des nœuds conteneurs systemd Ubuntu 24.04 (cgroup v2, driver systemd) : init, Flannel, join, idempotence, test nginx ; voir [docs/ansible-kubeadm.md](docs/ansible-kubeadm.md#état-de-validation) |
+| Vagrant | implémenté — Vagrantfile validé (`vagrant validate`, génération d'inventaire) ; **nécessite un test d'intégration** sur une machine avec VirtualBox/libvirt |
+| Terraform Proxmox | implémenté — validé statiquement + `terraform plan` ; **nécessite un test d'intégration** sur un Proxmox |
+| Terraform vSphere | implémenté — validé statiquement ; **nécessite un test d'intégration** sur un vCenter |
+| Terraform libvirt | implémenté — validé statiquement ; **nécessite un test d'intégration** sur un hôte KVM |
 
 ## Documentation
 
