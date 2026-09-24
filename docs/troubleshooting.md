@@ -1,8 +1,9 @@
 # Dépannage
 
-Premier réflexe : `./k8s-lab doctor <mode>`. Deuxième : relancer avec `DEBUG=1` pour voir
-chaque commande du CLI. `deploy` est idempotent : le relancer après avoir corrigé un problème
-reprend là où il s'est arrêté.
+Premier réflexe : `make doctor MODE=<mode>` (Terraform : `make doctor MODE=terraform
+PROVIDER=<provider>`). Deuxième : relancer la commande avec `DEBUG=1` (par exemple
+`make deploy MODE=kind DEBUG=1`) pour voir chaque commande du CLI. `deploy` est idempotent :
+le relancer après avoir corrigé un problème reprend là où il s'est arrêté.
 
 ## Général
 
@@ -30,19 +31,20 @@ reprend là où il s'est arrêté.
 | `VT-x is not available` / `VERR_VMX_NO_VMX` | virtualisation désactivée, ou KVM utilise déjà VT-x | activez VT-x/AMD-V dans le BIOS ; sous Linux avec KVM, préférez `VAGRANT_PROVIDER=libvirt` |
 | `The IP address configured for the host-only network is not within the allowed ranges` | réseau hors de `192.168.56.0/21` (VirtualBox ≥ 6.1.28) | gardez `VAGRANT_NETWORK_PREFIX=192.168.56` ou autorisez la plage dans `/etc/vbox/networks.conf` |
 | Box introuvable pour le provider | la box ne publie pas ce provider | `VAGRANT_BOX` : choisissez une box compatible (`vagrant box list`) |
-| ESXi : `esxi_password` demandé ou refusé | `ESXI_PASSWORD` absent de `.env` | ajoutez-le ; voir [vagrant.md](vagrant.md#mode-historique-esxi-autonome) |
+| `Le lab a déjà 3 worker(s), mais WORKER_COUNT=2` | nombre de workers réduit : Vagrant ne supprime pas les VMs en trop | `make destroy MODE=vagrant` puis redéployez, ou gardez le nombre actuel |
+| ESXi : `esxi_password` demandé ou refusé | `ESXI_PASSWORD` absent de `.env` | ajoutez-le ; voir [deploy-vagrant.md](deploy-vagrant.md) (mode historique ESXi) |
 
 ## Terraform
 
 | Symptôme | Cause probable | Solution |
 | --- | --- | --- |
-| Proxmox : `storage 'local' does not support content-type 'import'` | type de contenu *Import* non activé | voir [terraform-proxmox.md](terraform-proxmox.md#autoriser-le-type-de-contenu--import-) |
+| Proxmox : `storage 'local' does not support content-type 'import'` | type de contenu *Import* non activé | voir [deploy-proxmox.md](deploy-proxmox.md) (étape 2) |
 | Proxmox : `401` / `permission check failed` | token ou privilèges insuffisants | vérifiez `PROXMOX_VE_API_TOKEN` et le rôle du token |
 | vSphere : erreur de clonage sur un ESXi | pas de vCenter | limitation du provider : utilisez Vagrant ESXi |
-| vSphere : VM sans IP / cloud-init ignoré | options vApp actives sur le template | désactivez-les (voir [terraform-vsphere.md](terraform-vsphere.md)) |
+| vSphere : VM sans IP / cloud-init ignoré | options vApp actives sur le template | désactivez-les (voir [deploy-vsphere.md](deploy-vsphere.md)) |
 | libvirt : `Permission denied` sur `qemu:///system` | utilisateur hors du groupe `libvirt` | `sudo usermod -aG libvirt $USER` puis reconnexion |
 | libvirt : `Empreinte SHA-256 incorrecte` | téléchargement corrompu ou URL changée sans le checksum | relancez ; mettez à jour `VM_IMAGE_SHA256` si vous changez `VM_IMAGE_URL` |
-| Le plan veut **détruire** des VMs | `WORKER_COUNT` réduit, ou paramètre forçant la recréation | lisez le plan ; refusez si ce n'est pas voulu |
+| Le plan veut **détruire** des VMs | `WORKER_COUNT` réduit, ou paramètre forçant la recréation | lisez le plan ; refusez si ce n'est pas voulu ; après une réduction voulue, `kubectl delete node <nom>` pour chaque worker supprimé, puis relancez `deploy` |
 | `Error acquiring the state lock` | un autre Terraform tourne (ou s'est interrompu) | attendez ; sinon `terraform force-unlock <id>` |
 
 ## Ansible / kubeadm
@@ -63,7 +65,7 @@ Recommencer le cluster sans recréer les VMs :
 ```bash
 cd ansible
 ansible-playbook -i inventories/<inventaire>.ini reset.yml -e reset_confirm=true
-cd .. && ./k8s-lab deploy <mode> [provider]
+cd .. && make deploy MODE=<mode>            # Terraform : MODE=terraform PROVIDER=<provider>
 ```
 
 ## Option avancée

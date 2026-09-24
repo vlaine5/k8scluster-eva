@@ -122,7 +122,7 @@ variable "vsphere_network" {
 }
 
 variable "vsphere_template" {
-  description = "Name (or inventory path) of the Ubuntu cloud image template to clone. See docs/terraform-vsphere.md."
+  description = "Name (or inventory path) of the Ubuntu cloud image template to clone. See docs/deploy-vsphere.md."
   type        = string
 }
 

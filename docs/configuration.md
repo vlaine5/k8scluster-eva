@@ -10,12 +10,12 @@
 
 Priorité (la première valeur trouvée gagne) :
 
-1. variable d'environnement : `WORKER_COUNT=3 ./k8s-lab deploy kind` ;
-2. variable `make` : `make deploy MODE=kind WORKERS=3` (ou `WORKER_COUNT=3`) ;
-3. `.env` ;
-4. `config/lab.env`.
+1. la ligne de commande : `make deploy MODE=kind WORKERS=3`, `make deploy MODE=kind
+   NODE_MEMORY_MB=4096`, ou une variable d'environnement (`WORKER_COUNT=3 make deploy MODE=kind`) ;
+2. `.env` ;
+3. `config/lab.env`.
 
-`./k8s-lab config` affiche la configuration effective (secrets masqués).
+`make config` (ou `./k8s-lab config`) affiche la configuration effective (secrets masqués).
 
 ## Référence des variables
 

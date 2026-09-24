@@ -4,6 +4,23 @@ Toutes les versions sont **explicites** (jamais `latest`, jamais une branche `ma
 que le lab soit reproductible d'une promotion à l'autre, et **centralisées** pour être faciles
 à mettre à jour. Avant chaque session de cours, prévoyez une mise à jour puis un test.
 
+## Versions actuelles
+
+Vérifiées en septembre 2026, toutes épinglées dans `config/lab.env` (rien en `latest` ni `master`) :
+
+| Composant | Version |
+| --- | --- |
+| Kubernetes (kubeadm, VMs) | 1.37.1 — dépôt officiel `pkgs.k8s.io` |
+| Kind / image de nœud | kind v0.33.0 / `kindest/node:v1.37.0` (épinglée par digest) |
+| Minikube | v1.39.0, Kubernetes v1.37.0 |
+| OS des VMs | Ubuntu 24.04 LTS (image cloud datée, SHA-256 vérifié ; box `bento/ubuntu-24.04` pour Vagrant) |
+| containerd | 2.3.x (paquet `containerd.io`), driver cgroup systemd, cgroup v2 |
+| CNI | Flannel v0.28.9 (manifeste de release, SHA-256 vérifié) |
+| Terraform | ≥ 1.9 (CI : 1.16.4) — OpenTofu compatible |
+| Providers Terraform | `bpg/proxmox` 0.114, `vmware/vsphere` 2.17, `dmacvicar/libvirt` 0.9.9 |
+| Ansible | ansible-core ≥ 2.18 (CI : version de `requirements-dev.txt`) |
+| Vagrant | CI : 2.4.9 (`vagrant validate`) |
+
 ## Où sont les versions ?
 
 | Composant | Fichier(s) | Source de vérité en ligne |
@@ -18,7 +35,7 @@ que le lab soit reproductible d'une promotion à l'autre, et **centralisées** p
 | Box Vagrant | `config/lab.env` `VAGRANT_BOX` | <https://portal.cloud.hashicorp.com/vagrant/discover/bento> |
 | Providers Terraform | `terraform/providers/*/versions.tf` + `.terraform.lock.hcl` | registry.terraform.io |
 | Collections Ansible | `ansible/requirements.yml` | galaxy.ansible.com |
-| Outils de la CI | `config/lab.env` (`KUBECTL_VERSION`, `TERRAFORM_VERSION`, `TFLINT_VERSION`…) ; `requirements-dev.txt` | — |
+| Outils de la CI | `config/lab.env` (`KUBECTL_VERSION`, `TERRAFORM_VERSION`, `TFLINT_VERSION`, `VAGRANT_VERSION`…) ; `requirements-dev.txt` | — |
 | Actions GitHub | `.github/workflows/*.yml` | Dependabot ouvre les PR |
 
 ## Procédure

@@ -18,18 +18,18 @@ terraform plan / apply
 
 | Provider | Plateforme | Provider Terraform | Guide |
 | --- | --- | --- | --- |
-| `proxmox` | Proxmox VE 8.4+ / 9 | [`bpg/proxmox`](https://registry.terraform.io/providers/bpg/proxmox) | [terraform-proxmox.md](terraform-proxmox.md) |
-| `vsphere` | VMware vCenter | [`vmware/vsphere`](https://registry.terraform.io/providers/vmware/vsphere) | [terraform-vsphere.md](terraform-vsphere.md) |
-| `libvirt` | KVM sur votre PC Linux | [`dmacvicar/libvirt`](https://registry.terraform.io/providers/dmacvicar/libvirt) | [terraform-libvirt.md](terraform-libvirt.md) |
+| `proxmox` | Proxmox VE 8.4+ / 9 | [`bpg/proxmox`](https://registry.terraform.io/providers/bpg/proxmox) | [deploy-proxmox.md](deploy-proxmox.md) |
+| `vsphere` | VMware vCenter | [`vmware/vsphere`](https://registry.terraform.io/providers/vmware/vsphere) | [deploy-vsphere.md](deploy-vsphere.md) |
+| `libvirt` | KVM sur votre PC Linux | [`dmacvicar/libvirt`](https://registry.terraform.io/providers/dmacvicar/libvirt) | [deploy-libvirt.md](deploy-libvirt.md) |
 
 ## Utilisation
 
 ```bash
 cp terraform/providers/proxmox/terraform.tfvars.example terraform/providers/proxmox/terraform.tfvars
 # éditez terraform.tfvars (infrastructure) et .env (identifiants)
-./k8s-lab doctor terraform proxmox
-./k8s-lab deploy terraform proxmox          # ou make deploy MODE=terraform PROVIDER=proxmox
-./k8s-lab destroy terraform proxmox
+make doctor MODE=terraform PROVIDER=proxmox
+make deploy MODE=terraform PROVIDER=proxmox     # ou : ./k8s-lab deploy terraform proxmox
+make destroy MODE=terraform PROVIDER=proxmox
 ```
 
 `deploy` enchaîne `terraform init`, `terraform plan` (affiché), **une confirmation**, puis

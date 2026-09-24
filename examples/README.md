@@ -27,4 +27,4 @@ kubectl -n demo scale deployment nginx --replicas=5  # et répartis sur les work
 kubectl delete namespace demo
 ```
 
-`./k8s-lab test` automatise ce scénario (et nettoie ensuite).
+`make test` automatise ce scénario (et nettoie ensuite).

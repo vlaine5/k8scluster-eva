@@ -1,60 +1,88 @@
-# Mode Kind
+# Déployer Kubernetes avec Kind
 
-[kind](https://kind.sigs.k8s.io/) (*Kubernetes IN Docker*) crée un cluster dont chaque nœud est
-un conteneur Docker. C'est le chemin le plus rapide pour découvrir Kubernetes, et celui que
-la CI du dépôt teste à chaque push.
+Kind exécute les nœuds Kubernetes dans des **conteneurs Docker**.
+C'est le moyen recommandé pour commencer.
+
+## Ce que vous allez obtenir
+
+- 1 control-plane
+- 2 workers
+- Kubernetes 1.37, prêt en 1 à 2 minutes
+- un réseau des Pods déjà en place (kindnet, fourni par Kind)
 
 ## Prérequis
 
-- Docker (démon démarré) — ou Podman avec `KIND_EXPERIMENTAL_PROVIDER=podman`
-- `kind` (conseillé : v0.33.0) et `kubectl`
-- Un hôte en **cgroup v2** (toute distribution récente, Docker Desktop, WSL2 à jour) :
-  Kubernetes ≥ 1.35 refuse par défaut de démarrer sur cgroup v1.
+- Docker, démarré (Docker Desktop sous macOS/Windows ; sous Windows, travaillez dans WSL2)
+- `kind` et `kubectl`
+
+Il vous manque `kind` ou `kubectl` ? `scripts/install-tools.sh kind kubectl` les installe
+dans `~/.local/bin`, sans sudo (Linux et macOS).
+
+## 1. Vérifier votre machine
 
 ```bash
-./k8s-lab doctor kind
+make doctor MODE=kind
 ```
 
-## Utilisation
+## 2. Configurer
+
+Rien à configurer : les valeurs par défaut conviennent.
+
+## 3. Déployer
 
 ```bash
-./k8s-lab deploy kind          # 1 control-plane + WORKER_COUNT workers (2 par défaut)
-./k8s-lab status
-./k8s-lab test                 # nginx + Service + DNS
-./k8s-lab destroy kind
+make deploy MODE=kind
 ```
 
-Changer le nombre de workers : `WORKER_COUNT=1 ./k8s-lab deploy kind` (ou dans `.env`).
-Si le cluster existe déjà, `deploy` ne le recrée pas : utilisez `--recreate` (confirmation
-demandée) après avoir changé `WORKER_COUNT`.
-
-## Ce que fait le CLI
-
-1. Génère `.lab/kind/kind-config.yaml` depuis `config/lab.env` (`./k8s-lab config kind`
-   l'affiche). Avec les valeurs par défaut, c'est exactement
-   [`local/kind/kind-config.yaml`](../local/kind/kind-config.yaml).
-2. `kind create cluster --config … --kubeconfig .kube/config --wait 5m`
-3. Vérifie nœuds et Pods système (`kubectl wait`).
-
-Équivalent manuel :
+## 4. Vérifier
 
 ```bash
-kind create cluster --config local/kind/kind-config.yaml
+export KUBECONFIG="$PWD/.kube/config"
+
 kubectl get nodes
-kind delete cluster --name k8s-lab
+kubectl get pods -A
 ```
 
-## Points pédagogiques
+Les 3 nœuds (`k8s-lab-control-plane`, `k8s-lab-worker`, `k8s-lab-worker2`) sont `Ready`.
 
-- `docker ps` montre les nœuds : `k8s-lab-control-plane`, `k8s-lab-worker`, `k8s-lab-worker2`.
-- `docker exec -it k8s-lab-control-plane crictl ps` : les conteneurs vus par le kubelet.
-- Le CNI de kind s'appelle **kindnet** ; le réseau des Pods utilise `POD_CIDR` (10.244.0.0/16),
-  comme le cluster kubeadm du lab.
-- L'image de nœud est épinglée **par digest** : `kindest/node:v1.37.0@sha256:…`. Une nouvelle
-  version de kind publie une liste d'images associées dans ses notes de version.
+## 5. Tester
 
-## Limites
+```bash
+make test
+```
 
-- Pas de `LoadBalancer` natif (utilisez `kubectl port-forward` ou le projet
-  [cloud-provider-kind](https://github.com/kubernetes-sigs/cloud-provider-kind)).
-- Les nœuds partagent le noyau de l'hôte : ce n'est pas un cluster « comme en production ».
+Le test déploie nginx, un Service, vérifie que le DNS du cluster répond, puis nettoie.
+
+## 6. Supprimer
+
+```bash
+make destroy MODE=kind
+```
+
+## En cas de problème
+
+| Symptôme | Solution |
+| --- | --- |
+| `doctor` : Docker introuvable, ou Docker ne répond pas | installez ou démarrez Docker ; sous Linux, pour l'utiliser sans sudo : `sudo usermod -aG docker $USER`, puis reconnectez-vous |
+| `Docker utilise cgroup v1` | Kubernetes 1.37 exige cgroup v2 : distribution récente, Docker Desktop ou WSL2 à jour |
+| `The connection to the server localhost:8080 was refused` | vous avez oublié `export KUBECONFIG="$PWD/.kube/config"` |
+| Le cluster `k8s-lab` existe déjà | c'est normal : `deploy` ne détruit jamais un cluster ; pour le recréer : `make deploy MODE=kind RECREATE=1` |
+| Machine lente ou peu de RAM | un seul worker : `make deploy MODE=kind WORKERS=1` (ajoutez `RECREATE=1` si le cluster existe déjà) |
+
+Plus de cas : [troubleshooting.md](troubleshooting.md).
+
+## Pour aller plus loin
+
+- Les nœuds sont des conteneurs : `docker ps`, puis
+  `docker exec -it k8s-lab-control-plane crictl ps` pour voir les conteneurs lancés par le kubelet.
+- Le CLI affiche chaque commande exécutée. L'équivalent manuel est :
+  `kind create cluster --config local/kind/kind-config.yaml` puis
+  `kind delete cluster --name k8s-lab`.
+- `./k8s-lab config kind` affiche la configuration Kind générée avec vos réglages.
+- Des exercices avec nginx : [examples/README.md](../examples/README.md).
+- Limites : pas de Service `LoadBalancer` natif (utilisez `kubectl port-forward`), et les
+  nœuds partagent le noyau de votre machine.
+- Étape suivante : [Minikube](deploy-minikube.md), puis un vrai cluster kubeadm sur des VMs
+  avec [Vagrant](deploy-vagrant.md).
+
+**Statut : TESTÉ EN CI** (déploiement réel, second `deploy` sans effet, test nginx, suppression).

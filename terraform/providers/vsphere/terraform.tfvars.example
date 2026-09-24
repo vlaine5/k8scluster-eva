@@ -5,7 +5,7 @@
 #
 #  Aucun secret ici : les identifiants vCenter se mettent dans le fichier .env
 #  à la racine (VSPHERE_SERVER, VSPHERE_USER, VSPHERE_PASSWORD).
-#  Préparation du template : docs/terraform-vsphere.md
+#  Préparation du template : docs/deploy-vsphere.md
 # =============================================================================
 
 vsphere_datacenter      = "Datacenter"

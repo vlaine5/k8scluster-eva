@@ -63,7 +63,7 @@ Kind ──> Minikube ──> Vagrant ──> Ansible + kubeadm ──> Terrafor
 ## Exercices pour aller plus loin
 
 - `CNI=none` puis installez vous-même Calico ou Cilium : que deviennent les nœuds avant/après ?
-- `./k8s-lab deploy vagrant` avec `WORKER_COUNT=3`, puis passez à `WORKER_COUNT=4` et relancez :
-  un seul worker est ajouté, le cluster existant est conservé.
+- `make deploy MODE=vagrant WORKERS=3`, puis relancez avec `WORKERS=4` : un seul worker est
+  ajouté, le cluster existant est conservé.
 - Mettez à jour un cluster kubeadm d'une version mineure avec `kubeadm upgrade`
   (<https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/>).

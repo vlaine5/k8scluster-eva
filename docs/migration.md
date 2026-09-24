@@ -9,10 +9,10 @@ généralisé.
 
 | Avant | Maintenant |
 | --- | --- |
-| `./run.sh` | `./k8s-lab deploy vagrant` (ou `make deploy MODE=vagrant`) |
-| `run.sh` détruisait l'ancien cluster à chaque lancement | `deploy` ne détruit jamais ; `./k8s-lab destroy vagrant` (confirmation) ou `--recreate` |
+| `./run.sh` | `make deploy MODE=vagrant` (ou `./k8s-lab deploy vagrant`) |
+| `run.sh` détruisait l'ancien cluster à chaque lancement | `deploy` ne détruit jamais ; `make destroy MODE=vagrant` (confirmation) ou `RECREATE=1` |
 | `vagrant provision worker-1`, `worker-2`, `worker-3` codés en dur | `WORKER_COUNT` (défaut 2), un seul playbook pour tous les nœuds |
-| `snap.sh` | `cd vagrant && vagrant snapshot save <nom>` (voir [vagrant.md](vagrant.md)) |
+| `snap.sh` | `cd vagrant && vagrant snapshot save <nom>` (voir [deploy-vagrant.md](deploy-vagrant.md)) |
 | `Vagrantfile` à la racine, ESXi uniquement | `vagrant/Vagrantfile` : VirtualBox (défaut), libvirt, VMware Desktop, ESXi (`VAGRANT_PROVIDER=vmware_esxi`) |
 | mot de passe ESXi, IP et MAC dans le `Vagrantfile` | `.env` (non versionné) ; IP calculées ; plus de réservation DHCP par MAC |
 | groupes Ansible `masters` / `workers` | `control_plane` / `workers` (+ `k8s_cluster`) |
@@ -55,6 +55,6 @@ Problèmes relevés et traités par la refonte :
 ## Et mon ESXi autonome ?
 
 Il reste utilisable avec `VAGRANT_PROVIDER=vmware_esxi` (voir
-[vagrant.md](vagrant.md#mode-historique-esxi-autonome)). Deux différences : les identifiants
-vont dans `.env`, et il faut deux port groups (accès + réseau privé du cluster) au lieu d'une
-réservation DHCP par adresse MAC.
+[deploy-vagrant.md](deploy-vagrant.md), section « Mode historique : ESXi autonome »).
+Deux différences : les identifiants vont dans `.env`, et il faut deux port groups (accès +
+réseau privé du cluster) au lieu d'une réservation DHCP par adresse MAC.

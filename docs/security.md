@@ -35,7 +35,8 @@ Un lab pédagogique doit montrer les bonnes pratiques, pas les contourner.
 | Image de nœud kind | tag + **digest** | digest |
 | Collections Ansible | versions exactes (`requirements.yml`) | Galaxy |
 | Providers Terraform | contraintes `~>` + `.terraform.lock.hcl` versionné | hashes du lock file |
-| Actions GitHub | versions majeures | mises à jour proposées par Dependabot |
+| Outils de la CI et de `scripts/install-tools.sh` (kind, kubectl, minikube, Vagrant) | versions exactes (`config/lab.env`) | SHA-256 publié par chaque projet |
+| Actions GitHub | SHA de commit (version en commentaire) | mises à jour proposées par Dependabot |
 
 ## Sur les VMs
 

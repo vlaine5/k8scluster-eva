@@ -4,7 +4,7 @@
 #    cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars est ignoré par Git)
 #
 #  Aucun secret ici : le token API se met dans le fichier .env à la racine
-#  (PROXMOX_VE_ENDPOINT, PROXMOX_VE_API_TOKEN). Voir docs/terraform-proxmox.md
+#  (PROXMOX_VE_ENDPOINT, PROXMOX_VE_API_TOKEN). Voir docs/deploy-proxmox.md
 #
 #  La taille du cluster (WORKER_COUNT, NODE_CPUS...) se règle dans .env /
 #  config/lab.env : ./k8s-lab la transmet à Terraform.

@@ -1,55 +1,98 @@
-# Mode Minikube
+# Déployer Kubernetes avec Minikube
 
-[Minikube](https://minikube.sigs.k8s.io/) crée un cluster local orienté « poste de
-développeur » : addons prêts à l'emploi, tableau de bord, choix du driver.
+Minikube fournit un environnement Kubernetes local avec des fonctionnalités pratiques pour
+apprendre : addons prêts à l'emploi (tableau de bord, ingress…), plusieurs drivers.
+Kind est plus léger ; Minikube est plus « outillé ».
+
+## Ce que vous allez obtenir
+
+- 1 nœud qui est à la fois control-plane et worker
+- Kubernetes 1.37
+- un réseau des Pods fourni par Minikube
+- les addons Minikube (`minikube addons list`)
 
 ## Prérequis
 
-- `minikube` (conseillé : v1.39.0) et `kubectl`
-- Un **driver** : Docker (le plus simple), Podman, KVM (`kvm2`), VirtualBox, ou vfkit/qemu sur macOS
+- `minikube` et `kubectl`
+- Docker, démarré : c'est le driver le plus simple (Minikube sait aussi utiliser KVM,
+  VirtualBox, Podman…)
+
+Il vous manque `minikube` ou `kubectl` ? `scripts/install-tools.sh minikube kubectl` les
+installe dans `~/.local/bin`, sans sudo (Linux et macOS).
+
+## 1. Vérifier votre machine
 
 ```bash
-./k8s-lab doctor minikube
+make doctor MODE=minikube
 ```
 
-## Utilisation
+## 2. Configurer
+
+Rien d'obligatoire. Pour imposer le driver Docker, créez un fichier `.env` :
 
 ```bash
-./k8s-lab deploy minikube
-./k8s-lab destroy minikube
+cp .env.example .env
+# puis décommentez la ligne : MINIKUBE_DRIVER=docker
 ```
 
-Le CLI lance l'équivalent de :
+## 3. Déployer
 
 ```bash
-KUBECONFIG=.kube/config minikube start --profile k8s-lab --kubernetes-version v1.37.0 \
-  --nodes 1 --cpus 2 --memory 2048 --wait all
+make deploy MODE=minikube
 ```
 
-Réglages (`.env`) : `MINIKUBE_DRIVER` (vide = automatique), `MINIKUBE_NODES`,
-`MINIKUBE_CPUS`, `MINIKUBE_MEMORY_MB`, `MINIKUBE_EXTRA_ARGS` (ex :
-`--addons=ingress,metrics-server`). Le profil et le contexte kubectl s'appellent
-`CLUSTER_NAME` (`k8s-lab`).
+Comptez 2 à 5 minutes au premier lancement (téléchargement des images).
 
-## À essayer
+## 4. Vérifier
 
 ```bash
-minikube dashboard --profile k8s-lab           # interface web
-minikube addons list --profile k8s-lab
+export KUBECONFIG="$PWD/.kube/config"
+
+kubectl get nodes
+kubectl get pods -A
+```
+
+Le nœud `k8s-lab` est `Ready`.
+
+## 5. Tester
+
+```bash
+make test
+```
+
+`make test` teste le cluster **actif** : le dernier que vous avez déployé.
+
+## 6. Supprimer
+
+```bash
+make destroy MODE=minikube
+```
+
+## En cas de problème
+
+| Symptôme | Solution |
+| --- | --- |
+| `doctor` : Docker introuvable, ou Docker ne répond pas | installez ou démarrez Docker ; sous Linux, pour l'utiliser sans sudo : `sudo usermod -aG docker $USER`, puis reconnectez-vous |
+| `The "docker" driver should not be used with root privileges` | lancez la commande avec votre utilisateur, pas en root |
+| Minikube choisit un driver inattendu | `MINIKUBE_DRIVER=docker` dans `.env` |
+| Le démarrage échoue | `minikube logs --profile k8s-lab`, puis `make destroy MODE=minikube` et `make deploy MODE=minikube` |
+| `The connection to the server localhost:8080 was refused` | vous avez oublié `export KUBECONFIG="$PWD/.kube/config"` |
+
+Plus de cas : [troubleshooting.md](troubleshooting.md).
+
+## Pour aller plus loin
+
+```bash
+minikube dashboard --profile k8s-lab            # interface web
 minikube addons enable ingress --profile k8s-lab
-minikube ssh --profile k8s-lab                 # dans le nœud : sudo crictl ps
-minikube service list --profile k8s-lab
+minikube ssh --profile k8s-lab                  # dans le nœud : sudo crictl ps
 ```
 
-## Kind ou Minikube ?
+- Réglages disponibles dans `.env` : `MINIKUBE_NODES`, `MINIKUBE_CPUS`, `MINIKUBE_MEMORY_MB`,
+  `MINIKUBE_EXTRA_ARGS` (ex : `--addons=ingress,metrics-server`). Voir
+  [configuration.md](configuration.md).
+- Le CLI lance `minikube start --profile k8s-lab --kubernetes-version v1.37.0 …` : la commande
+  exacte est affichée pendant le déploiement.
+- Étape suivante : un vrai cluster kubeadm sur des VMs avec [Vagrant](deploy-vagrant.md).
 
-Les deux fournissent un Kubernetes local complet. Kind est plus léger et plus rapide
-(idéal pour la CI et les clusters multi-nœuds jetables) ; Minikube offre plus d'outillage
-(addons, dashboard, drivers VM). Voir [modes.md](modes.md).
-
-## État de validation
-
-- Implémenté et testé par la CI GitHub Actions (job `e2e-minikube`, driver docker).
-- Dans l'environnement de développement de cette refonte (hôte cgroup v1, capacités
-  restreintes), minikube n'a pas pu démarrer le control-plane : c'est une limite de cet
-  environnement, détectée par `./k8s-lab doctor` (« Docker utilise cgroup v1 »).
+**Statut : TESTÉ EN CI** (driver docker : déploiement réel, test nginx, suppression).

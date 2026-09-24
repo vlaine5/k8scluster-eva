@@ -6,7 +6,7 @@
 #
 # IMPORTANT : VSPHERE_SERVER doit être un vCenter. Le clonage de template
 # n'est pas supporté par le provider sur un ESXi autonome (voir
-# docs/terraform-vsphere.md ; pour un ESXi seul, utilisez le mode Vagrant).
+# docs/deploy-vsphere.md ; pour un ESXi seul, utilisez le mode Vagrant).
 provider "vsphere" {
   vsphere_server       = var.vsphere_server
   user                 = var.vsphere_user
