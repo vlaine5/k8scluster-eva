@@ -22,6 +22,18 @@ vagrant_has_machines() {
     find "${LAB_ROOT}/vagrant/.vagrant/machines" -name id -type f 2>/dev/null | grep -q .
 }
 
+# Plus grand numéro de worker déjà créé par Vagrant (0 si aucun). Il dépasse
+# WORKER_COUNT si le lab a été déployé avec plus de workers qu'aujourd'hui.
+vagrant_created_workers() {
+  local dir n max=0
+  for dir in "${LAB_ROOT}/vagrant/.vagrant/machines/${NODE_HOSTNAME_PREFIX}-worker-"*; do
+    [[ -n "$(find "${dir}" -name id -type f 2>/dev/null)" ]] || continue
+    n="${dir##*-worker-}"
+    if [[ "${n}" =~ ^[0-9]+$ ]] && ((n > max)); then max="${n}"; fi
+  done
+  echo "${max}"
+}
+
 vagrant_deploy() {
   local context
   context="$(vagrant_context)"
@@ -31,12 +43,21 @@ vagrant_deploy() {
     vagrant_destroy
   fi
 
+  local created
+  created="$(vagrant_created_workers)"
+  if ((created > WORKER_COUNT)); then
+    die "Le lab a déjà ${created} worker(s), mais WORKER_COUNT=${WORKER_COUNT}." \
+      "Vagrant ne supprime pas les VMs en trop : pour avoir moins de workers, il faut recréer le lab." \
+      "Supprimez-le : $(hint_cmd destroy vagrant)   puis relancez le déploiement." \
+      "Pour garder ${created} worker(s) : WORKER_COUNT=${created} dans .env (ou WORKERS=${created} avec make)."
+  fi
+
   step "Création / démarrage des VMs avec Vagrant (provider ${VAGRANT_PROVIDER})"
   info "Les VMs existantes sont conservées : vagrant up ne fait que créer ce qui manque."
   vagrant_cmd up --provider "${VAGRANT_PROVIDER}" ||
     die "vagrant up a échoué." \
       "État des VMs : cd vagrant && vagrant status" \
-      "Voir docs/vagrant.md et docs/troubleshooting.md"
+      "Voir docs/deploy-vagrant.md et docs/troubleshooting.md"
 
   ansible_install_kubernetes "${VAGRANT_INVENTORY}"
   kubeconfig_merge "${LAB_KUBE_DIR}/clusters/${context}.yaml" "${context}"
@@ -51,8 +72,14 @@ vagrant_destroy() {
   if ! vagrant_has_machines; then
     info "Aucune VM Vagrant : rien à détruire."
   else
+    have vagrant || die "Vagrant est introuvable : impossible de supprimer les VMs Vagrant." \
+      "Installez Vagrant (https://developer.hashicorp.com/vagrant/install) puis relancez : $(hint_cmd destroy vagrant)"
     confirm "Détruire TOUTES les VMs Vagrant du lab (provider ${VAGRANT_PROVIDER}) ?" || die "Destruction annulée."
-    vagrant_cmd destroy --force || die "vagrant destroy a échoué." "cd vagrant && vagrant status"
+    # Toutes les VMs créées, même si WORKER_COUNT a diminué depuis le déploiement.
+    local count
+    count="$(vagrant_created_workers)"
+    ((count > WORKER_COUNT)) || count="${WORKER_COUNT}"
+    WORKER_COUNT="${count}" vagrant_cmd destroy --force || die "vagrant destroy a échoué." "cd vagrant && vagrant status"
   fi
   known_hosts_forget "${VAGRANT_INVENTORY}"
   rm -f "${LAB_ROOT}/ansible/${VAGRANT_INVENTORY}" "${LAB_KUBE_DIR}/clusters/${context}.yaml"
