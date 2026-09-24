@@ -1,0 +1,63 @@
+---
+# =============================================================================
+#  Vérification du cluster (smoke test côté control-plane).
+# =============================================================================
+
+- name: Wait until every node is Ready (requires a working CNI)
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - wait
+      - --for=condition=Ready
+      - nodes
+      - --all
+      - --timeout={{ control_plane_wait_timeout }}
+  changed_when: false
+  when: cni != "none"
+
+- name: List the nodes known by the cluster
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, nodes, -o, name]
+  register: control_plane_nodes
+  changed_when: false
+
+- name: Check that every inventory host joined the cluster
+  ansible.builtin.assert:
+    that: control_plane_nodes.stdout_lines | length == groups['k8s_cluster'] | length
+    fail_msg: >-
+      The cluster has {{ control_plane_nodes.stdout_lines | length }} node(s) but the inventory
+      declares {{ groups['k8s_cluster'] | length }}: {{ control_plane_nodes.stdout_lines }}
+    quiet: true
+
+- name: Wait until the system Pods are Ready
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --namespace=kube-system
+      - wait
+      - --for=condition=Ready
+      - pods
+      - --all
+      - --field-selector=status.phase!=Succeeded
+      - --timeout={{ control_plane_wait_timeout }}
+  changed_when: false
+  when: cni != "none"
+
+- name: Show the nodes
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, nodes, -o, wide]
+  register: control_plane_nodes_wide
+  changed_when: false
+
+- name: Display the cluster nodes
+  ansible.builtin.debug:
+    msg: "{{ control_plane_nodes_wide.stdout_lines }}"
+
+- name: Remind that no CNI was installed
+  ansible.builtin.debug:
+    msg: >-
+      cni=none: no network plugin was installed, the nodes stay NotReady until you install one
+      (for example Flannel, Calico or Cilium).
+  when: cni == "none"

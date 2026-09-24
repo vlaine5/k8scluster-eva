@@ -1,0 +1,16 @@
+---
+# Dossier (sur le control-plane) où sont conservés les manifestes appliqués.
+cni_addons_dir: /etc/kubernetes/addons
+
+# --- Flannel ------------------------------------------------------------------
+# Manifeste officiel d'une release ÉPINGLÉE (jamais la branche master).
+cni_flannel_manifest_url: "https://github.com/flannel-io/flannel/releases/download/{{ flannel_version }}/kube-flannel.yml"
+
+# Empreintes SHA-256 connues des manifestes : un manifeste modifié ou corrompu
+# est refusé. Pour une autre version, ajoutez son empreinte ici :
+#   curl -sSL <url> | sha256sum
+cni_flannel_manifest_checksums:
+  v0.28.9: "sha256:1c06a15a771009c263bdb1f51c928af46f7606fe969f3963652167938d536aaa"
+
+# Backend Flannel : vxlan (encapsulation, fonctionne partout).
+cni_flannel_backend: vxlan

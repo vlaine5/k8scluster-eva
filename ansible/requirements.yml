@@ -1,0 +1,8 @@
+---
+# Collections Ansible utilisées par les rôles (versions épinglées).
+# Installation : ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: ansible.posix
+    version: 2.2.2
+  - name: community.general
+    version: 13.4.0

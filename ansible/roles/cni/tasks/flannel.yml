@@ -1,0 +1,61 @@
+---
+# Flannel : https://github.com/flannel-io/flannel
+# Le manifeste officiel est téléchargé (version épinglée + SHA-256 vérifié),
+# puis adapté avec Kustomize (intégré à kubectl) : CIDR des Pods et interface
+# réseau à utiliser. Les fichiers restent lisibles dans {{ cni_addons_dir }}/flannel.
+
+- name: Check that the checksum of the requested Flannel version is known
+  ansible.builtin.assert:
+    that: flannel_version in cni_flannel_manifest_checksums
+    fail_msg: >-
+      No known SHA-256 checksum for Flannel {{ flannel_version }}. Add it to
+      cni_flannel_manifest_checksums (roles/cni/defaults/main.yml) after verifying it:
+      curl -sSL {{ cni_flannel_manifest_url }} | sha256sum
+    quiet: true
+
+- name: Create the Flannel addon directory
+  ansible.builtin.file:
+    path: "{{ cni_addons_dir }}/flannel"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Download the official Flannel manifest (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ cni_flannel_manifest_url }}"
+    dest: "{{ cni_addons_dir }}/flannel/kube-flannel-{{ flannel_version }}.yml"
+    checksum: "{{ cni_flannel_manifest_checksums[flannel_version] }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Write the Kustomize overlay (Pod CIDR and network interface)
+  ansible.builtin.template:
+    src: flannel/kustomization.yaml.j2
+    dest: "{{ cni_addons_dir }}/flannel/kustomization.yaml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Apply Flannel
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - apply
+      - --kustomize={{ cni_addons_dir }}/flannel
+  register: cni_flannel_apply
+  changed_when: cni_flannel_apply.stdout is search('(created|configured)')
+
+- name: Wait for the Flannel DaemonSet to be ready
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --namespace=kube-flannel
+      - rollout
+      - status
+      - daemonset/kube-flannel-ds
+      - --timeout=300s
+  changed_when: false

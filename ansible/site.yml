@@ -1,0 +1,92 @@
+---
+# =============================================================================
+#  Déploiement d'un cluster Kubernetes avec kubeadm.
+#
+#  Les étapes suivent la documentation officielle "Creating a cluster with
+#  kubeadm" : https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/
+#
+#    1. Préparer tous les nœuds : OS, containerd, kubeadm/kubelet/kubectl
+#    2. Initialiser le control-plane (kubeadm init) puis installer le CNI
+#    3. Joindre les workers (kubeadm join)
+#    4. Vérifier le cluster et récupérer le kubeconfig sur votre poste
+#
+#  Utilisation (depuis le dossier ansible/) :
+#    ansible-playbook -i inventories/<inventaire>.ini site.yml
+#
+#  Ce playbook est idempotent : le relancer ne casse pas un cluster existant.
+# =============================================================================
+
+- name: Check inventory and wait for the nodes
+  hosts: k8s_cluster
+  gather_facts: false
+  tasks:
+    - name: Check that the inventory describes exactly one control-plane
+      ansible.builtin.assert:
+        that:
+          - groups['control_plane'] is defined
+          - groups['control_plane'] | length == 1
+        fail_msg: >-
+          The inventory must contain exactly one host in the [control_plane] group
+          (found {{ groups['control_plane'] | default([]) | length }}).
+          Multi control-plane (HA) clusters are not supported by this lab.
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+
+    - name: Wait until the node accepts SSH connections (cloud-init may still be running)
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+
+    # Les images cloud (Terraform) finissent leur configuration en arrière-plan :
+    # on attend la fin de cloud-init pour éviter les conflits sur le verrou APT.
+    # "removes" : la commande n'est lancée que si cloud-init est installé.
+    - name: Wait for cloud-init to finish (if present)
+      ansible.builtin.command:
+        argv: [cloud-init, status, --wait]
+        removes: /usr/bin/cloud-init
+      register: site_cloud_init
+      changed_when: false
+      # 2 = terminé avec des avertissements non bloquants (cloud-init >= 23.4)
+      failed_when: site_cloud_init.rc | default(0) not in [0, 2]
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+- name: Prepare every node (OS, container runtime, Kubernetes packages)
+  hosts: k8s_cluster
+  become: true
+  gather_facts: false
+  roles:
+    - role: common
+    - role: container_runtime
+    - role: kubernetes
+
+- name: Initialize the control-plane and install the CNI
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  roles:
+    - role: control_plane
+    - role: cni
+
+- name: Join the workers
+  hosts: workers
+  become: true
+  gather_facts: false
+  roles:
+    - role: worker
+
+- name: Verify the cluster and export the kubeconfig
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Verify the cluster
+      ansible.builtin.include_role:
+        name: control_plane
+        tasks_from: verify.yml
+
+    - name: Export the kubeconfig to the Ansible controller
+      ansible.builtin.include_role:
+        name: control_plane
+        tasks_from: kubeconfig.yml

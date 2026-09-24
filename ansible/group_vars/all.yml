@@ -1,0 +1,43 @@
+---
+# =============================================================================
+#  Réglages Kubernetes communs à tous les nœuds (installation kubeadm).
+#
+#  ./k8s-lab transmet ici les valeurs de config/lab.env (et de votre .env)
+#  en "extra vars" (-e), qui ont la priorité la plus haute dans Ansible.
+#  Les valeurs ci-dessous ne servent donc que si vous lancez
+#  ansible-playbook à la main. Correspondance : docs/configuration.md
+# =============================================================================
+
+# Version complète de Kubernetes (paquets kubeadm, kubelet, kubectl).
+kubernetes_version: "1.37.1"
+
+# Réseau des Pods (doit correspondre au CNI) et réseau des Services.
+pod_cidr: "10.244.0.0/16"
+service_cidr: "10.96.0.0/12"
+
+# CNI : "flannel" (par défaut) ou "none" (vous installez le vôtre ensuite).
+cni: flannel
+flannel_version: "v0.28.9"
+
+# Runtime de conteneurs : seul containerd est supporté.
+container_runtime: containerd
+# Motif de version APT du paquet containerd.io (dépôt Docker, containerd 2.x).
+containerd_version: "2.3.*"
+
+# Où écrire le kubeconfig récupéré depuis le control-plane (sur VOTRE poste).
+kubeconfig_output_dir: "{{ playbook_dir }}/../.kube/clusters"
+
+# -----------------------------------------------------------------------------
+#  Variables dérivées : ne pas modifier.
+# -----------------------------------------------------------------------------
+# Nom du cluster : fourni par l'inventaire généré (ex : k8s-lab-vagrant).
+k8s_cluster_name: "{{ cluster_name | default('k8s-lab') }}"
+# Version "mineure" (ex : 1.37) : le dépôt APT pkgs.k8s.io est propre à chaque mineure.
+kubernetes_minor_version: "{{ kubernetes_version.split('.')[0:2] | join('.') }}"
+# IP utilisée par Kubernetes sur chaque nœud. Indispensable quand une VM a
+# plusieurs cartes réseau (cas de Vagrant : NAT + réseau privé).
+k8s_node_ip: "{{ node_ip | default(ansible_default_ipv4.address) }}"
+# Le control-plane (unique) du cluster.
+k8s_control_plane_host: "{{ groups['control_plane'] | first }}"
+k8s_control_plane_ip: "{{ hostvars[k8s_control_plane_host]['k8s_node_ip'] }}"
+k8s_api_endpoint: "{{ k8s_control_plane_ip }}:6443"

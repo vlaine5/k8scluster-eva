@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: common
+  author: k8s-lab
+  description: Prepare a Debian/Ubuntu node for Kubernetes (swap, kernel modules, sysctl, hostname)
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+    - name: Debian
+      versions:
+        - bookworm
+        - trixie
+dependencies: []
