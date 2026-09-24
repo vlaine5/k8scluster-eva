@@ -24,7 +24,7 @@ terraform_bin() {
 tf_check_provider() {
   case "$1" in
     proxmox | vsphere | libvirt) ;;
-    "") die "Précisez le provider Terraform." "Exemple : ./k8s-lab deploy terraform proxmox" "Providers : ${TERRAFORM_PROVIDERS}" ;;
+    "") die "Précisez le provider Terraform." "Exemple : $(hint_cmd deploy terraform proxmox)" "Providers : ${TERRAFORM_PROVIDERS}" ;;
     *) die "Provider Terraform inconnu : \"$1\"." "Providers disponibles : ${TERRAFORM_PROVIDERS}" ;;
   esac
 }
@@ -157,7 +157,7 @@ terraform_destroy() {
   if ! tf_has_resources "${provider}"; then
     info "Aucune ressource Terraform ${provider} dans le state : rien à détruire."
   else
-    [[ -n "$(terraform_bin)" ]] || die "Terraform (ou OpenTofu) est introuvable." "./k8s-lab doctor terraform ${provider}"
+    [[ -n "$(terraform_bin)" ]] || die "Terraform (ou OpenTofu) est introuvable." "Diagnostic : $(hint_cmd doctor terraform "${provider}")"
     confirm "Détruire TOUTES les VMs Terraform ${provider} du lab (terraform destroy) ?" || die "Destruction annulée."
     known_hosts_forget "$(tf_inventory "${provider}")"
     tf_export_vars "${provider}"

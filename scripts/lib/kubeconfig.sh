@@ -15,7 +15,7 @@ kubeconfig_merge() {
   local file="$1" context="$2" tmp
   [[ -f "${file}" ]] || die "kubeconfig introuvable : ${file}" \
     "Il est normalement écrit par Ansible à la fin du déploiement." \
-    "Relancez : ./k8s-lab kubeconfig <mode> [provider]"
+    "Relancez : $(hint_cmd kubeconfig "${LAB_MODE:-<mode>}" "${LAB_PROVIDER:-}")"
   ensure_state_dirs
   kubeconfig_remove "${context}" "${context}" "${context}-admin"
   tmp="$(mktemp "${LAB_KUBE_DIR}/.config.XXXXXX")"

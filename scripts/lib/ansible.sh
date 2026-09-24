@@ -46,7 +46,7 @@ ansible_install_kubernetes() {
     cd "${LAB_ROOT}/ansible" &&
       ANSIBLE_CONFIG="${LAB_ROOT}/ansible/ansible.cfg" run ansible-playbook -i "${inventory}" site.yml -e "@${vars_file}" "$@"
   ) || die "Le playbook Ansible a échoué (voir la tâche en erreur ci-dessus)." \
-    "Relancer l'installation : ./k8s-lab deploy <mode> (idempotent, les VMs sont conservées)" \
+    "Relancer l'installation : $(hint_cmd deploy "${LAB_MODE:-<mode>}" "${LAB_PROVIDER:-}") (sans risque : les VMs sont conservées)" \
     "Voir docs/troubleshooting.md"
 }
 
@@ -54,7 +54,7 @@ ansible_install_kubernetes() {
 ansible_fetch_kubeconfig() {
   local inventory="$1"
   [[ -s "${LAB_ROOT}/ansible/${inventory}" ]] ||
-    die "Inventaire Ansible introuvable : ansible/${inventory}" "Le cluster est-il déployé ? ./k8s-lab status"
+    die "Inventaire Ansible introuvable : ansible/${inventory}" "Le cluster est-il déployé ? $(hint_cmd status)"
   ansible_ensure_collections
   (
     cd "${LAB_ROOT}/ansible" &&

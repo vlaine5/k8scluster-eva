@@ -89,11 +89,12 @@ check_container_engine() {
   if have docker; then
     local cgroup_version
     if ! cgroup_version="$(docker info --format '{{.CgroupVersion}}' 2>/dev/null)"; then
-      d_fail "Docker est installé mais le démon ne répond pas." \
+      d_fail "Docker est installé mais ne répond pas (démon arrêté, ou droits insuffisants)." \
         "Kind et Minikube (driver docker) créent leurs nœuds sous forme de conteneurs Docker." \
         "Linux : sudo systemctl enable --now docker" \
         "        puis, pour éviter sudo : sudo usermod -aG docker \$USER  (et reconnectez-vous)" \
-        "macOS / Windows : démarrez Docker Desktop."
+        "macOS / Windows : démarrez Docker Desktop." \
+        "Puis relancez : $(hint_cmd doctor kind)"
       return
     fi
     d_ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null) (démon joignable)"
@@ -107,11 +108,11 @@ check_container_engine() {
       "Kind fonctionne avec Podman en mode expérimental : export KIND_EXPERIMENTAL_PROVIDER=podman" \
       "Minikube : MINIKUBE_DRIVER=podman dans .env"
   else
-    d_fail "Aucun moteur de conteneurs (Docker) détecté." \
-      "Kind (et Minikube avec le driver docker) exécutent les nœuds Kubernetes dans des conteneurs." \
-      "Ubuntu/Debian : https://docs.docker.com/engine/install/" \
+    d_fail "Docker est requis pour Kind (et pour Minikube avec le driver docker), mais il est introuvable." \
+      "Kind exécute les nœuds Kubernetes dans des conteneurs Docker." \
+      "Linux : https://docs.docker.com/engine/install/" \
       "macOS / Windows : https://docs.docker.com/desktop/" \
-      "Ensuite : ./k8s-lab doctor kind"
+      "Installez Docker puis relancez : $(hint_cmd doctor kind)"
   fi
 }
 
@@ -187,7 +188,7 @@ check_minikube_driver() {
   else
     d_fail "Aucun driver utilisable par minikube n'a été détecté." \
       "Minikube a besoin d'un moteur pour héberger le nœud : Docker (le plus simple), Podman, KVM ou VirtualBox." \
-      "Installez Docker : https://docs.docker.com/engine/install/  puis relancez ./k8s-lab doctor minikube"
+      "Installez Docker : https://docs.docker.com/engine/install/  puis relancez : $(hint_cmd doctor minikube)"
   fi
 }
 
@@ -286,7 +287,7 @@ check_vagrant() {
       ;;
     vmware_esxi)
       d_warn "Mode historique ESXi : le plugin vagrant-vmware-esxi n'est plus maintenu depuis 2022." \
-        "Il reste proposé pour les ESXi autonomes (sans vCenter). Voir docs/vagrant.md."
+        "Il reste proposé pour les ESXi autonomes (sans vCenter). Voir docs/deploy-vagrant.md."
       if grep -q '^vagrant-vmware-esxi' <<<"${plugins}"; then
         d_ok "Plugin vagrant-vmware-esxi"
       else
@@ -295,7 +296,7 @@ check_vagrant() {
       if have ovftool; then
         d_ok "VMware OVF Tool"
       else
-        d_fail "ovftool (VMware OVF Tool) est introuvable." "Il est requis par vagrant-vmware-esxi. Voir docs/vagrant.md."
+        d_fail "ovftool (VMware OVF Tool) est introuvable." "Il est requis par vagrant-vmware-esxi. Voir docs/deploy-vagrant.md."
       fi
       if [[ -n "${ESXI_HOSTNAME:-}" ]]; then
         d_ok "ESXI_HOSTNAME=${ESXI_HOSTNAME}"
@@ -353,7 +354,7 @@ check_tfvars() {
     d_fail "terraform/providers/${provider}/terraform.tfvars est absent." \
       "Ce fichier décrit VOTRE infrastructure (nœud, stockage, réseau...)." \
       "cp terraform/providers/${provider}/terraform.tfvars.example terraform/providers/${provider}/terraform.tfvars" \
-      "puis éditez-le (aucun secret dedans). Guide : docs/terraform-${provider}.md"
+      "puis éditez-le (aucun secret dedans). Guide : docs/deploy-${provider}.md"
   fi
 }
 
@@ -370,7 +371,7 @@ check_proxmox_access() {
     d_warn "Authentification Proxmox par mot de passe." "Un token API dédié est préférable (révocable, droits limités)."
   else
     d_fail "Aucun identifiant Proxmox (PROXMOX_VE_API_TOKEN) dans .env." \
-      "Créez un token API dédié : docs/terraform-proxmox.md"
+      "Créez un token API dédié : docs/deploy-proxmox.md"
   fi
   local insecure=() code
   [[ "${PROXMOX_VE_INSECURE:-false}" == "true" ]] && insecure=(--insecure)
@@ -456,7 +457,7 @@ cmd_doctor() {
     step "Prérequis du mode ${mode}${provider:+ ${provider}}"
     if doctor_mode "${mode}" "${provider}"; then
       printf '\n'
-      ok "Tout est prêt pour : ./k8s-lab deploy ${mode}${provider:+ ${provider}}"
+      ok "Tout est prêt pour : $(hint_cmd deploy "${mode}" "${provider}")"
       return 0
     fi
     printf '\n'
@@ -480,6 +481,6 @@ cmd_doctor() {
   done
   step "Bilan"
   printf '  %s\n' "${summary[@]}"
-  printf '\n  Détail d'"'"'un mode : ./k8s-lab doctor <mode> [provider]\n'
+  printf '\n  Détail d'"'"'un mode : %s\n' "$(hint_cmd doctor '<mode>')"
   return 0
 }

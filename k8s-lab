@@ -37,44 +37,33 @@ trap 'error "Commande interrompue (ligne ${LINENO}). Relancez avec DEBUG=1 pour 
 
 usage() {
   cat <<HELP
-${C_BOLD}k8s-lab${C_RESET} — un cluster Kubernetes pour apprendre, de plusieurs façons.
+${C_BOLD}k8s-lab${C_RESET} — un cluster Kubernetes pour apprendre.
 
-${C_BOLD}Utilisation${C_RESET}
-  ./k8s-lab                                  menu interactif
-  ./k8s-lab <commande> [mode] [provider] [options]
+${C_BOLD}Commandes principales${C_RESET}
+  doctor  [mode]        vérifier les prérequis de votre machine
+  deploy  <mode>        créer le cluster (ne détruit jamais un cluster existant)
+  status                voir les clusters existants
+  test                  tester le cluster actif (nginx + Service + DNS)
+  kubeconfig [mode]     configurer kubectl (fichier .kube/config)
+  destroy <mode>        supprimer le cluster (confirmation demandée)
 
-${C_BOLD}Commandes${C_RESET}
-  doctor   [mode] [provider]    vérifie les prérequis (sans argument : tous les modes)
-  deploy   <mode> [provider]    crée le cluster (ne détruit JAMAIS l'existant)
-  destroy  <mode> [provider]    détruit le cluster (demande confirmation)
-  status                        clusters existants et contexte kubectl actif
-  kubeconfig [mode] [provider]  (ré)écrit .kube/config et affiche comment l'utiliser
-  test                          test applicatif (nginx + Service + DNS) sur le cluster actif
-  config [kind]                 affiche la configuration effective (ou la config kind générée)
-  help                          cette aide
-
-${C_BOLD}Modes${C_RESET}                                          ${C_DIM}niveau${C_RESET}
-  kind                  Kubernetes dans Docker            1 - découverte
-  minikube              Kubernetes local + addons         1 - découverte
-  vagrant               VMs Vagrant + Ansible + kubeadm   2 - Kubernetes sur VMs
-  terraform proxmox     VMs Proxmox VE + Ansible          3 - Infrastructure as Code
-  terraform vsphere     VMs VMware vCenter + Ansible      3 - Infrastructure as Code
-  terraform libvirt     VMs KVM locales + Ansible         3 - Infrastructure as Code
-
-${C_BOLD}Options${C_RESET}
-  -y, --yes       répond "oui" aux confirmations (automatisation, CI)
-  --recreate      deploy : détruit d'abord le cluster existant (avec confirmation)
-  --keep          test : conserve les ressources de test (namespace demo)
+${C_BOLD}Modes${C_RESET}
+  kind  |  minikube  |  vagrant  |  terraform proxmox  |  terraform vsphere  |  terraform libvirt
 
 ${C_BOLD}Exemples${C_RESET}
   ./k8s-lab doctor kind
   ./k8s-lab deploy kind
-  WORKER_COUNT=3 ./k8s-lab deploy vagrant
   ./k8s-lab deploy terraform proxmox
-  ./k8s-lab destroy kind --yes
+  ./k8s-lab destroy kind
 
-Configuration : config/lab.env (défauts) + .env (vos réglages, voir .env.example).
-Documentation : README.md et docs/
+${C_BOLD}Options${C_RESET}
+  --yes                 ne poser aucune question (scripts, CI)
+  --recreate            deploy : supprimer puis recréer le cluster (confirmation demandée)
+  --keep                test : conserver l'application de test (namespace demo)
+
+Avec make : make deploy MODE=kind  |  make deploy MODE=terraform PROVIDER=proxmox
+Sans argument, ./k8s-lab ouvre un menu. Réglages effectifs : ./k8s-lab config
+Guides : docs/deployment.md
 HELP
 }
 
@@ -87,7 +76,7 @@ require_doctor() {
   fi
   if ! doctor_mode "$@"; then
     die "${DOCTOR_ERRORS} prérequis manquant(s) pour le mode ${1}${2:+ ${2}} (détails ci-dessus)." \
-      "Corrigez-les puis relancez. Diagnostic complet : ./k8s-lab doctor ${1}${2:+ ${2}}"
+      "Corrigez-les puis relancez : $(hint_cmd doctor "$1" "${2:-}")"
   fi
 }
 
@@ -109,7 +98,9 @@ cmd_status() {
 
   step "kubectl (.kube/config)"
   export KUBECONFIG="${LAB_KUBECONFIG}"
-  if [[ -s "${LAB_KUBECONFIG}" ]] && have kubectl && kubectl config get-contexts -o name 2>/dev/null | grep -q .; then
+  if ! have kubectl; then
+    warn "kubectl est introuvable : installez-le pour utiliser vos clusters (scripts/install-tools.sh kubectl)."
+  elif [[ -s "${LAB_KUBECONFIG}" ]] && kubectl config get-contexts -o name 2>/dev/null | grep -q .; then
     run kubectl config get-contexts || true
     if kubectl config current-context >/dev/null 2>&1; then
       run kubectl get nodes -o wide --request-timeout=5s ||
@@ -117,7 +108,7 @@ cmd_status() {
     fi
     kubeconfig_hint "$(kubectl config current-context 2>/dev/null || echo '<contexte>')"
   else
-    info "Aucun cluster dans .kube/config pour l'instant. Commencez par : ./k8s-lab deploy kind"
+    info "Aucun cluster dans .kube/config pour l'instant. Commencez par : $(hint_cmd deploy kind)"
   fi
 }
 
@@ -146,6 +137,9 @@ cmd_config() {
 # dispatch <action> <mode> [provider]
 dispatch() {
   local action="$1" mode="${2:-}" provider="${3:-}"
+  # Mémorisés pour les conseils affichés en cas d'erreur.
+  LAB_MODE="${mode}"
+  LAB_PROVIDER="${provider}"
   case "${mode}" in
     kind | minikube | vagrant)
       [[ -z "${provider}" ]] || die "Le mode ${mode} ne prend pas de provider (reçu : ${provider})."
@@ -156,8 +150,8 @@ dispatch() {
       "terraform_${action}" "${provider}"
       ;;
     "")
-      die "Précisez le mode." "Exemples : ./k8s-lab ${action} kind   |   ./k8s-lab ${action} terraform proxmox" \
-        "Liste des modes : ./k8s-lab help"
+      die "Précisez le mode." "Exemples : $(hint_cmd "${action}" kind)   |   $(hint_cmd "${action}" terraform proxmox)" \
+        "Liste des modes : $(hint_cmd help)"
       ;;
     *)
       die "Mode inconnu : \"${mode}\"." "Modes : kind, minikube, vagrant, terraform <proxmox|vsphere|libvirt>"
@@ -166,12 +160,13 @@ dispatch() {
 }
 
 cmd_kubeconfig() {
+  require_kubectl
   if [[ -z "${1:-}" ]]; then
     if [[ -s "${LAB_KUBECONFIG}" ]]; then
       KUBECONFIG="${LAB_KUBECONFIG}" run kubectl config get-contexts
       kubeconfig_hint "$(KUBECONFIG="${LAB_KUBECONFIG}" kubectl config current-context 2>/dev/null || echo '<contexte>')"
     else
-      info "Aucun cluster dans .kube/config. Déployez-en un : ./k8s-lab deploy kind"
+      info "Aucun cluster dans .kube/config. Déployez-en un : $(hint_cmd deploy kind)"
     fi
     return
   fi
@@ -283,7 +278,7 @@ main() {
       --recreate) RECREATE=1 ;;
       --keep) KEEP=1 ;;
       -h | --help) args=(help) ;;
-      -*) die "Option inconnue : ${arg}" "Aide : ./k8s-lab help" ;;
+      -*) die "Option inconnue : ${arg}" "Aide : $(hint_cmd help)" ;;
       *) args+=("${arg}") ;;
     esac
   done
@@ -309,7 +304,7 @@ main() {
     doctor) cmd_doctor ${rest[@]+"${rest[@]}"} || exit 1 ;;
     deploy)
       if ((${#rest[@]} == 0)); then
-        info "Aucun mode précisé : kind est utilisé (le plus simple). Autres modes : ./k8s-lab help"
+        info "Aucun mode précisé : kind est utilisé (le plus simple). Autres modes : $(hint_cmd help)"
         rest=(kind)
       fi
       dispatch deploy "${rest[@]}"
@@ -318,10 +313,11 @@ main() {
     status) cmd_status ;;
     kubeconfig) cmd_kubeconfig ${rest[@]+"${rest[@]}"} ;;
     test)
+      require_kubectl
       if [[ "${KEEP}" == "1" ]]; then smoke_app --keep; else smoke_app --cleanup; fi
       ;;
     config) cmd_config ${rest[@]+"${rest[@]}"} ;;
-    *) die "Commande inconnue : \"${command}\"." "Aide : ./k8s-lab help" ;;
+    *) die "Commande inconnue : \"${command}\"." "Aide : $(hint_cmd help)" ;;
   esac
 }
 

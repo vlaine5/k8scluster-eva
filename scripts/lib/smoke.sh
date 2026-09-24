@@ -36,7 +36,7 @@ smoke_app() {
   export KUBECONFIG="${LAB_KUBECONFIG}"
   local context
   context="$(kubectl config current-context 2>/dev/null)" ||
-    die "Aucun cluster actif dans .kube/config." "Déployez d'abord un cluster : ./k8s-lab deploy kind"
+    die "Aucun cluster actif dans .kube/config." "Déployez d'abord un cluster : $(hint_cmd deploy kind)"
 
   step "Test applicatif sur \"${context}\" : nginx + Service + DNS"
   run kubectl apply -f "${LAB_ROOT}/examples/namespace.yaml"

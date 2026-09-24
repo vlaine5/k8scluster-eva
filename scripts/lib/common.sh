@@ -43,6 +43,32 @@ run() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Commande à conseiller, dans la syntaxe utilisée par l'étudiant : "make ..."
+# si le CLI a été lancé par make (variable MAKELEVEL), sinon "./k8s-lab ...".
+#   hint_cmd deploy terraform proxmox  ->  make deploy MODE=terraform PROVIDER=proxmox
+#   hint_cmd deploy kind "" --recreate ->  make deploy MODE=kind RECREATE=1
+hint_cmd() {
+  local action="$1" mode="${2:-}" provider="${3:-}" option="${4:-}"
+  if [[ -n "${MAKELEVEL:-}" ]]; then
+    printf 'make %s%s%s' "${action}" "${mode:+ MODE=${mode}}" "${provider:+ PROVIDER=${provider}}"
+    case "${option}" in
+      --recreate) printf ' RECREATE=1' ;;
+      --yes) printf ' YES=1' ;;
+    esac
+  else
+    printf './k8s-lab %s%s%s%s' "${action}" "${mode:+ ${mode}}" "${provider:+ ${provider}}" "${option:+ ${option}}"
+  fi
+}
+
+# kubectl est indispensable pour utiliser (et tester) un cluster.
+require_kubectl() {
+  have kubectl && return 0
+  die "kubectl est requis pour piloter le cluster, mais il est introuvable." \
+    "Installation : https://kubernetes.io/docs/tasks/tools/" \
+    "Ou, sans sudo (Linux/macOS) : scripts/install-tools.sh kubectl" \
+    "Puis relancez : $(hint_cmd doctor)"
+}
+
 # Vrai si $1 >= $2 (comparaison de versions, "v" initial ignoré).
 version_ge() {
   local a="${1#v}" b="${2#v}"
@@ -127,7 +153,7 @@ confirm() {
   fi
   if [[ ! -t 0 ]]; then
     die "Confirmation impossible : pas de terminal interactif." \
-      "Relancez avec --yes (ou YES=1 avec make) pour confirmer explicitement."
+      "Pour confirmer explicitement : YES=1 avec make, ou --yes avec ./k8s-lab."
   fi
   printf '%s%s%s [o/N] ' "${C_BOLD}${C_YELLOW}" "${question}" "${C_RESET}"
   read -r answer

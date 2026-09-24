@@ -23,7 +23,7 @@ minikube_deploy() {
   fi
 
   if minikube_is_running; then
-    info "Le cluster minikube \"${CLUSTER_NAME}\" tourne déjà : rien à créer (option --recreate pour le recréer)."
+    info "Le cluster minikube \"${CLUSTER_NAME}\" tourne déjà : rien à créer (pour le recréer : $(hint_cmd deploy minikube "" --recreate))."
     KUBECONFIG="${LAB_KUBECONFIG}" run minikube update-context --profile "${CLUSTER_NAME}"
   else
     local args=(start --profile "${CLUSTER_NAME}"
@@ -44,7 +44,7 @@ minikube_deploy() {
     KUBECONFIG="${LAB_KUBECONFIG}" run minikube "${args[@]}" ||
       die "Le démarrage de minikube a échoué." \
         "Logs détaillés : minikube logs --profile ${CLUSTER_NAME}" \
-        "Nettoyez puis réessayez : ./k8s-lab destroy minikube && ./k8s-lab deploy minikube" \
+        "Nettoyez puis réessayez : $(hint_cmd destroy minikube)  puis  $(hint_cmd deploy minikube)" \
         "Voir docs/troubleshooting.md"
   fi
   chmod 600 "${LAB_KUBECONFIG}"
@@ -55,6 +55,8 @@ minikube_deploy() {
 }
 
 minikube_destroy() {
+  have minikube || die "minikube est introuvable : impossible de supprimer le cluster minikube." \
+    "Installez-le (scripts/install-tools.sh minikube) puis relancez : $(hint_cmd destroy minikube)"
   if ! minikube_profile_exists; then
     info "Aucun cluster minikube \"${CLUSTER_NAME}\" : rien à détruire."
     return 0
@@ -72,14 +74,14 @@ minikube_status() {
   if minikube_is_running; then
     status_line up minikube "${CLUSTER_NAME} (contexte ${CLUSTER_NAME})"
   elif minikube_profile_exists; then
-    status_line stopped minikube "${CLUSTER_NAME} arrêté (./k8s-lab deploy minikube pour le redémarrer)"
+    status_line stopped minikube "${CLUSTER_NAME} arrêté (pour le redémarrer : $(hint_cmd deploy minikube))"
   else
     status_line none minikube "aucun cluster"
   fi
 }
 
 minikube_kubeconfig() {
-  minikube_is_running || die "Le cluster minikube \"${CLUSTER_NAME}\" ne tourne pas." "Démarrez-le : ./k8s-lab deploy minikube"
+  minikube_is_running || die "Le cluster minikube \"${CLUSTER_NAME}\" ne tourne pas." "Démarrez-le : $(hint_cmd deploy minikube)"
   KUBECONFIG="${LAB_KUBECONFIG}" run minikube update-context --profile "${CLUSTER_NAME}"
   chmod 600 "${LAB_KUBECONFIG}"
   kubeconfig_hint "${CLUSTER_NAME}"

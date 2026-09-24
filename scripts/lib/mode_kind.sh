@@ -42,7 +42,7 @@ kind_deploy() {
     if [[ "${RECREATE:-0}" == "1" ]]; then
       kind_destroy
     else
-      info "Le cluster kind \"${CLUSTER_NAME}\" existe déjà : rien à créer (option --recreate pour le recréer)."
+      info "Le cluster kind \"${CLUSTER_NAME}\" existe déjà : rien à créer (pour le recréer : $(hint_cmd deploy kind "" --recreate))."
       run kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${LAB_KUBECONFIG}"
     fi
   fi
@@ -64,7 +64,7 @@ kind_deploy() {
       --kubeconfig "${LAB_KUBECONFIG}" --wait 5m ||
       die "La création du cluster kind a échoué." \
         "Vérifiez que Docker fonctionne : docker info" \
-        "Nettoyez puis réessayez : ./k8s-lab destroy kind && ./k8s-lab deploy kind" \
+        "Nettoyez puis réessayez : $(hint_cmd destroy kind)  puis  $(hint_cmd deploy kind)" \
         "Voir docs/troubleshooting.md"
   fi
   chmod 600 "${LAB_KUBECONFIG}"
@@ -75,6 +75,8 @@ kind_deploy() {
 }
 
 kind_destroy() {
+  have kind || die "kind est introuvable : impossible de lister ou de supprimer un cluster kind." \
+    "Installez-le (scripts/install-tools.sh kind) puis relancez : $(hint_cmd destroy kind)"
   if ! kind_cluster_exists; then
     info "Aucun cluster kind \"${CLUSTER_NAME}\" : rien à détruire."
     return 0
@@ -97,7 +99,7 @@ kind_status() {
 }
 
 kind_kubeconfig() {
-  kind_cluster_exists || die "Aucun cluster kind \"${CLUSTER_NAME}\"." "Créez-le : ./k8s-lab deploy kind"
+  kind_cluster_exists || die "Aucun cluster kind \"${CLUSTER_NAME}\"." "Créez-le : $(hint_cmd deploy kind)"
   run kind export kubeconfig --name "${CLUSTER_NAME}" --kubeconfig "${LAB_KUBECONFIG}"
   chmod 600 "${LAB_KUBECONFIG}"
   kubeconfig_hint "$(kind_context)"
