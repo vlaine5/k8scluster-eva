@@ -1,9 +1,10 @@
 # =============================================================================
 #  CI du lab : validation statique de tout le code, puis tests de bout en
-#  bout réels : Kind, Minikube, et le playbook Ansible + kubeadm exécuté sur
-#  des nœuds conteneurs systemd (aucune infrastructure externe requise).
-#  Proxmox, vSphere et libvirt sont validés statiquement (fmt, validate,
-#  TFLint, terraform test des modules communs).
+#  bout réels : Kind, Minikube (avec les commandes make des guides
+#  étudiants), et le playbook Ansible + kubeadm exécuté sur des nœuds
+#  conteneurs systemd (aucune infrastructure externe requise).
+#  Vagrant (vagrant validate), Proxmox, vSphere et libvirt (fmt, validate,
+#  TFLint, terraform test des modules communs) sont validés statiquement.
 # =============================================================================
 name: CI
 
@@ -34,6 +35,20 @@ jobs:
 
       - name: Syntaxe du Vagrantfile
         run: make ruby-check
+
+      - name: Installer Vagrant (version de config/lab.env, SHA-256 vérifié)
+        run: |
+          version="$(sed -n 's/^VAGRANT_VERSION=//p' config/lab.env)"
+          base="https://releases.hashicorp.com/vagrant/${version}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO --retry 3 "${base}/vagrant_${version}-1_amd64.deb"
+          curl -fsSLO --retry 3 "${base}/vagrant_${version}_SHA256SUMS"
+          sha256sum --check --ignore-missing "vagrant_${version}_SHA256SUMS"
+          sudo dpkg -i "vagrant_${version}-1_amd64.deb"
+          vagrant --version
+
+      - name: vagrant validate (VirtualBox, 2 puis 4 workers, sans hyperviseur)
+        run: make vagrant-validate
 
       - name: Cohérence config/lab.env <-> Terraform / Ansible / kind
         run: make check-config
@@ -100,7 +115,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
   docs:
-    name: Documentation (markdownlint)
+    name: Documentation (markdownlint, liens, commandes citées)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -108,6 +123,9 @@ jobs:
       - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: "**/*.md"
+
+      - name: Liens, pages docs/*.md et commandes make cités
+        run: make check-docs
 
   e2e-kind:
     name: E2E Kind (déploiement réel + test nginx)
@@ -122,22 +140,35 @@ jobs:
           scripts/install-tools.sh kind kubectl
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: doctor
-        run: ./k8s-lab doctor kind
-
-      - name: deploy (1 control-plane + 2 workers)
-        run: ./k8s-lab deploy kind --yes
-
-      - name: deploy une seconde fois (idempotence, rien ne doit être recréé)
+      # Les étapes suivantes sont exactement les commandes du guide docs/deploy-kind.md.
+      - name: make help / make doctor
         run: |
-          ./k8s-lab deploy kind --yes | tee second-deploy.log
+          make help
+          make doctor
+          make doctor MODE=kind
+
+      - name: make deploy MODE=kind (1 control-plane + 2 workers)
+        run: make deploy MODE=kind
+
+      - name: deploy une seconde fois avec ./k8s-lab (idempotence, rien ne doit être recréé)
+        run: |
+          ./k8s-lab deploy kind | tee second-deploy.log
           grep -q "existe déjà" second-deploy.log
 
-      - name: status
-        run: ./k8s-lab status
+      - name: kubectl (export KUBECONFIG, get nodes, get pods -A)
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          kubectl get nodes
+          kubectl get pods -A
+          test "$(kubectl get nodes --no-headers | grep -c ' Ready ')" -eq 3
 
-      - name: Test applicatif (nginx + Service + DNS)
-        run: ./k8s-lab test
+      - name: make status / make kubeconfig
+        run: |
+          make status
+          make kubeconfig
+
+      - name: make test (nginx + Service + DNS)
+        run: make test
 
       - name: Diagnostic en cas d'échec
         if: failure()
@@ -156,9 +187,9 @@ jobs:
           path: kind-logs
           retention-days: 7
 
-      - name: destroy
+      - name: make destroy MODE=kind YES=1
         if: always()
-        run: ./k8s-lab destroy kind --yes
+        run: make destroy MODE=kind YES=1
 
   e2e-minikube:
     name: E2E Minikube (driver docker)
@@ -173,25 +204,32 @@ jobs:
           scripts/install-tools.sh minikube kubectl
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: doctor
-        run: ./k8s-lab doctor minikube
+      # Les étapes suivantes sont exactement les commandes du guide docs/deploy-minikube.md.
+      - name: make doctor MODE=minikube
+        run: make doctor MODE=minikube
 
-      - name: deploy
-        run: ./k8s-lab deploy minikube --yes
+      - name: make deploy MODE=minikube
+        run: make deploy MODE=minikube
         env:
           MINIKUBE_DRIVER: docker
 
-      - name: Test applicatif (nginx + Service + DNS)
-        run: ./k8s-lab test
+      - name: kubectl (export KUBECONFIG, get nodes, get pods -A)
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          kubectl get nodes
+          kubectl get pods -A
+
+      - name: make test (nginx + Service + DNS)
+        run: make test
 
       - name: Diagnostic en cas d'échec
         if: failure()
         run: |
           minikube logs --profile k8s-lab --length 200 || true
 
-      - name: destroy
+      - name: make destroy MODE=minikube YES=1
         if: always()
-        run: ./k8s-lab destroy minikube --yes
+        run: make destroy MODE=minikube YES=1
 
   e2e-kubeadm:
     name: E2E Ansible + kubeadm (nœuds conteneurs systemd)
