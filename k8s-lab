@@ -318,7 +318,7 @@ main() {
     status) cmd_status ;;
     kubeconfig) cmd_kubeconfig ${rest[@]+"${rest[@]}"} ;;
     test)
-      if [[ "${KEEP}" == "1" ]]; then smoke_app --keep; else smoke_app; fi
+      if [[ "${KEEP}" == "1" ]]; then smoke_app --keep; else smoke_app --cleanup; fi
       ;;
     config) cmd_config ${rest[@]+"${rest[@]}"} ;;
     *) die "Commande inconnue : \"${command}\"." "Aide : ./k8s-lab help" ;;

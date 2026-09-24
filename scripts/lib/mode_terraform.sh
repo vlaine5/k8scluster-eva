@@ -122,8 +122,8 @@ terraform_deploy() {
     die "terraform plan a échoué (voir l'erreur ci-dessus)." \
       "Vérifiez terraform/providers/${provider}/terraform.tfvars et vos identifiants dans .env."
 
-  summary="$(cd "${LAB_ROOT}" && "$(terraform_bin)" -chdir="terraform/providers/${provider}" show -no-color "${plan}" |
-    grep -E '^(Plan:|No changes)' || true)"
+  summary="$("$(terraform_bin)" -chdir="$(tf_dir "${provider}")" show -no-color "${plan}" |
+    grep -E '^(Plan:|No changes)')" || summary=""
   if [[ "${summary}" == No\ changes* ]]; then
     ok "L'infrastructure est déjà à jour : rien à créer."
   else

@@ -162,7 +162,7 @@ main() {
 
   kubeconfig_merge "${LAB_KUBE_DIR}/clusters/${CONTEXT}.yaml" "${CONTEXT}"
   smoke_basic "${CONTEXT}"
-  smoke_app
+  smoke_app --cleanup
   ok "Test kubeadm-in-docker réussi."
 }
 

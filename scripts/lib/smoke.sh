@@ -28,10 +28,11 @@ smoke_basic() {
 }
 
 # Test applicatif : déploie examples/ (nginx), l'appelle via son Service
-# depuis un Pod client (teste DNS + réseau des Pods + kube-proxy), puis nettoie.
-#   smoke_app [--keep]
+# depuis un Pod client (teste DNS + réseau des Pods + kube-proxy), puis nettoie
+# (--cleanup) ou conserve les ressources (--keep).
+#   smoke_app --cleanup|--keep
 smoke_app() {
-  local keep="${1:-}" output
+  local keep="$1" output
   export KUBECONFIG="${LAB_KUBECONFIG}"
   local context
   context="$(kubectl config current-context 2>/dev/null)" ||
