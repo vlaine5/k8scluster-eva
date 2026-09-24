@@ -1,0 +1,23 @@
+# =============================================================================
+#  Inventaire Ansible GÉNÉRÉ par Terraform (${generated_by}).
+#  Ne pas modifier à la main : relancez "terraform apply" (ou ./k8s-lab deploy).
+# =============================================================================
+
+[control_plane]
+%{ for n in control_plane ~}
+${n.name} ansible_host=${n.ip} node_ip=${n.ip}
+%{ endfor ~}
+
+[workers]
+%{ for n in workers ~}
+${n.name} ansible_host=${n.ip} node_ip=${n.ip}
+%{ endfor ~}
+
+[k8s_cluster:children]
+control_plane
+workers
+
+[k8s_cluster:vars]
+ansible_user=${ssh_user}
+ansible_ssh_private_key_file=${ssh_private_key_file}
+cluster_name=${cluster_name}

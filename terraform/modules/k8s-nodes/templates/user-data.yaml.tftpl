@@ -1,0 +1,24 @@
+#cloud-config
+# Généré par Terraform (module k8s-nodes). cloud-init ne fait que le strict
+# minimum : utilisateur + clé SSH. Tout le reste est fait par Ansible.
+hostname: ${hostname}
+# Ajoute le hostname dans /etc/hosts sans réécrire le fichier (Ansible le gère).
+manage_etc_hosts: localhost
+users:
+  - name: ${ssh_user}
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+# Connexion SSH par clé uniquement.
+ssh_pwauth: false
+disable_root: true
+%{ if length(packages) > 0 ~}
+package_update: true
+packages:
+%{ for p in packages ~}
+  - ${p}
+%{ endfor ~}
+%{ endif ~}
