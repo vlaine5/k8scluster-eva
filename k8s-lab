@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  k8s-lab — créer un cluster Kubernetes de plusieurs façons, pour apprendre.
+#
+#    ./k8s-lab                       menu interactif (débutants)
+#    ./k8s-lab help                  toutes les commandes
+#
+#  Le code est volontairement simple : chaque commande affiche les vraies
+#  commandes exécutées (kind, vagrant, terraform, ansible-playbook, kubectl).
+# =============================================================================
+set -Eeuo pipefail
+
+LAB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+export LAB_ROOT
+
+# shellcheck source=scripts/lib/common.sh
+source "${LAB_ROOT}/scripts/lib/common.sh"
+# shellcheck source=scripts/lib/doctor.sh
+source "${LAB_ROOT}/scripts/lib/doctor.sh"
+# shellcheck source=scripts/lib/kubeconfig.sh
+source "${LAB_ROOT}/scripts/lib/kubeconfig.sh"
+# shellcheck source=scripts/lib/smoke.sh
+source "${LAB_ROOT}/scripts/lib/smoke.sh"
+# shellcheck source=scripts/lib/ansible.sh
+source "${LAB_ROOT}/scripts/lib/ansible.sh"
+# shellcheck source=scripts/lib/mode_kind.sh
+source "${LAB_ROOT}/scripts/lib/mode_kind.sh"
+# shellcheck source=scripts/lib/mode_minikube.sh
+source "${LAB_ROOT}/scripts/lib/mode_minikube.sh"
+# shellcheck source=scripts/lib/mode_vagrant.sh
+source "${LAB_ROOT}/scripts/lib/mode_vagrant.sh"
+# shellcheck source=scripts/lib/mode_terraform.sh
+source "${LAB_ROOT}/scripts/lib/mode_terraform.sh"
+
+trap 'error "Commande interrompue (ligne ${LINENO}). Relancez avec DEBUG=1 pour plus de détails."' ERR
+[[ "${DEBUG:-0}" == "1" ]] && set -x
+
+usage() {
+  cat <<HELP
+${C_BOLD}k8s-lab${C_RESET} — un cluster Kubernetes pour apprendre, de plusieurs façons.
+
+${C_BOLD}Utilisation${C_RESET}
+  ./k8s-lab                                  menu interactif
+  ./k8s-lab <commande> [mode] [provider] [options]
+
+${C_BOLD}Commandes${C_RESET}
+  doctor   [mode] [provider]    vérifie les prérequis (sans argument : tous les modes)
+  deploy   <mode> [provider]    crée le cluster (ne détruit JAMAIS l'existant)
+  destroy  <mode> [provider]    détruit le cluster (demande confirmation)
+  status                        clusters existants et contexte kubectl actif
+  kubeconfig [mode] [provider]  (ré)écrit .kube/config et affiche comment l'utiliser
+  test                          test applicatif (nginx + Service + DNS) sur le cluster actif
+  config [kind]                 affiche la configuration effective (ou la config kind générée)
+  help                          cette aide
+
+${C_BOLD}Modes${C_RESET}                                          ${C_DIM}niveau${C_RESET}
+  kind                  Kubernetes dans Docker            1 - découverte
+  minikube              Kubernetes local + addons         1 - découverte
+  vagrant               VMs Vagrant + Ansible + kubeadm   2 - Kubernetes sur VMs
+  terraform proxmox     VMs Proxmox VE + Ansible          3 - Infrastructure as Code
+  terraform vsphere     VMs VMware vCenter + Ansible      3 - Infrastructure as Code
+  terraform libvirt     VMs KVM locales + Ansible         3 - Infrastructure as Code
+
+${C_BOLD}Options${C_RESET}
+  -y, --yes       répond "oui" aux confirmations (automatisation, CI)
+  --recreate      deploy : détruit d'abord le cluster existant (avec confirmation)
+  --keep          test : conserve les ressources de test (namespace demo)
+
+${C_BOLD}Exemples${C_RESET}
+  ./k8s-lab doctor kind
+  ./k8s-lab deploy kind
+  WORKER_COUNT=3 ./k8s-lab deploy vagrant
+  ./k8s-lab deploy terraform proxmox
+  ./k8s-lab destroy kind --yes
+
+Configuration : config/lab.env (défauts) + .env (vos réglages, voir .env.example).
+Documentation : README.md et docs/
+HELP
+}
+
+# Lance doctor pour un mode et arrête tout si un prérequis manque.
+require_doctor() {
+  step "Vérification des prérequis (${1}${2:+ ${2}})"
+  if [[ "${K8S_LAB_SKIP_DOCTOR:-0}" == "1" ]]; then
+    warn "K8S_LAB_SKIP_DOCTOR=1 : vérification des prérequis ignorée (usage avancé)."
+    return 0
+  fi
+  if ! doctor_mode "$@"; then
+    die "${DOCTOR_ERRORS} prérequis manquant(s) pour le mode ${1}${2:+ ${2}} (détails ci-dessus)." \
+      "Corrigez-les puis relancez. Diagnostic complet : ./k8s-lab doctor ${1}${2:+ ${2}}"
+  fi
+}
+
+status_line() {
+  local state="$1" name="$2" text="$3" color="${C_DIM}" symbol="○"
+  case "${state}" in
+    up) color="${C_GREEN}" symbol="●" ;;
+    stopped) color="${C_YELLOW}" symbol="●" ;;
+  esac
+  printf '  %s%s%s %-12s %s\n' "${color}" "${symbol}" "${C_RESET}" "${name}" "${text}"
+}
+
+cmd_status() {
+  step "Clusters du lab \"${CLUSTER_NAME}\""
+  kind_status
+  minikube_status
+  vagrant_status
+  terraform_status
+
+  step "kubectl (.kube/config)"
+  export KUBECONFIG="${LAB_KUBECONFIG}"
+  if [[ -s "${LAB_KUBECONFIG}" ]] && have kubectl && kubectl config get-contexts -o name 2>/dev/null | grep -q .; then
+    run kubectl config get-contexts || true
+    if kubectl config current-context >/dev/null 2>&1; then
+      run kubectl get nodes -o wide --request-timeout=5s ||
+        warn "Le cluster actif ne répond pas (arrêté ou détruit ?)."
+    fi
+    kubeconfig_hint "$(kubectl config current-context 2>/dev/null || echo '<contexte>')"
+  else
+    info "Aucun cluster dans .kube/config pour l'instant. Commencez par : ./k8s-lab deploy kind"
+  fi
+}
+
+cmd_config() {
+  if [[ "${1:-}" == "kind" ]]; then
+    kind_render_config
+    return
+  fi
+  step "Configuration effective (environnement > .env > config/lab.env)"
+  local key
+  while IFS= read -r key; do
+    printf '  %-28s %s\n' "${key}" "${!key:-}"
+  done < <(sed -n -E 's/^([A-Z][A-Z0-9_]*)=.*/\1/p' "${LAB_ROOT}/config/lab.env")
+  printf '\n  Secrets (.env) : '
+  local found=0
+  for key in PROXMOX_VE_API_TOKEN PROXMOX_VE_PASSWORD VSPHERE_PASSWORD ESXI_PASSWORD; do
+    if [[ -n "${!key:-}" ]]; then
+      printf '%s=**** ' "${key}"
+      found=1
+    fi
+  done
+  [[ "${found}" == "1" ]] || printf 'aucun'
+  printf '\n'
+}
+
+# dispatch <action> <mode> [provider]
+dispatch() {
+  local action="$1" mode="${2:-}" provider="${3:-}"
+  case "${mode}" in
+    kind | minikube | vagrant)
+      [[ -z "${provider}" ]] || die "Le mode ${mode} ne prend pas de provider (reçu : ${provider})."
+      "${mode}_${action}"
+      ;;
+    terraform | tf)
+      tf_check_provider "${provider}"
+      "terraform_${action}" "${provider}"
+      ;;
+    "")
+      die "Précisez le mode." "Exemples : ./k8s-lab ${action} kind   |   ./k8s-lab ${action} terraform proxmox" \
+        "Liste des modes : ./k8s-lab help"
+      ;;
+    *)
+      die "Mode inconnu : \"${mode}\"." "Modes : kind, minikube, vagrant, terraform <proxmox|vsphere|libvirt>"
+      ;;
+  esac
+}
+
+cmd_kubeconfig() {
+  if [[ -z "${1:-}" ]]; then
+    if [[ -s "${LAB_KUBECONFIG}" ]]; then
+      KUBECONFIG="${LAB_KUBECONFIG}" run kubectl config get-contexts
+      kubeconfig_hint "$(KUBECONFIG="${LAB_KUBECONFIG}" kubectl config current-context 2>/dev/null || echo '<contexte>')"
+    else
+      info "Aucun cluster dans .kube/config. Déployez-en un : ./k8s-lab deploy kind"
+    fi
+    return
+  fi
+  dispatch kubeconfig "$@"
+}
+
+# --- Menu interactif --------------------------------------------------------------
+
+pause() {
+  printf '\n%sAppuyez sur Entrée pour revenir au menu...%s' "${C_DIM}" "${C_RESET}"
+  read -r _ || true
+}
+
+# Exécute une commande du CLI dans un sous-processus : une erreur ne ferme pas le menu.
+menu_run() {
+  "${LAB_ROOT}/k8s-lab" "$@" || true
+  pause
+}
+
+menu_choose_provider() {
+  local choice
+  # Affichage sur stderr : stdout ne contient que la réponse (capturée par l'appelant).
+  printf '\n  a) Proxmox VE\n  b) VMware vSphere (vCenter)\n  c) libvirt/KVM (votre machine Linux)\n\n' >&2
+  read -r -p "Provider Terraform [a/b/c] : " choice || true
+  case "${choice}" in
+    a | A) echo proxmox ;;
+    b | B) echo vsphere ;;
+    c | C) echo libvirt ;;
+    *) warn "Choix invalide : ${choice}" ;;
+  esac
+  return 0
+}
+
+menu_choose_mode() {
+  local choice provider
+  printf '\n  1) Kind   2) Minikube   3) Vagrant   4) Terraform\n\n' >&2
+  read -r -p "Quel cluster ? [1-4] : " choice || true
+  case "${choice}" in
+    1) echo kind ;;
+    2) echo minikube ;;
+    3) echo vagrant ;;
+    4)
+      provider="$(menu_choose_provider)"
+      if [[ -n "${provider}" ]]; then echo "terraform ${provider}"; fi
+      ;;
+    *) warn "Choix invalide : ${choice}" ;;
+  esac
+  return 0
+}
+
+menu() {
+  local choice target
+  while true; do
+    printf '\n%s════════════════════════════════════════════════════════%s\n' "${C_BLUE}" "${C_RESET}"
+    printf '  %sKubernetes Lab%s — cluster "%s"\n' "${C_BOLD}" "${C_RESET}" "${CLUSTER_NAME}"
+    printf '%s════════════════════════════════════════════════════════%s\n' "${C_BLUE}" "${C_RESET}"
+    cat <<MENU
+
+Choisissez une méthode de déploiement :
+
+  1. Kind              Cluster local rapide dans Docker     (débutant)
+  2. Minikube          Cluster local avec addons            (débutant)
+  3. Vagrant           VMs + Ansible + kubeadm              (intermédiaire)
+  4. Terraform         VMs + Ansible + kubeadm              (avancé)
+     ├─ Proxmox
+     ├─ VMware/vSphere
+     └─ libvirt/KVM
+
+  5. Détruire un cluster
+  6. Vérifier les prérequis (doctor)
+  7. État des clusters (status)
+  8. Tester le cluster actif (nginx)
+  9. Quitter
+
+MENU
+    read -r -p "Votre choix [1-9] : " choice || exit 0
+    case "${choice}" in
+      1) menu_run deploy kind ;;
+      2) menu_run deploy minikube ;;
+      3) menu_run deploy vagrant ;;
+      4)
+        target="$(menu_choose_provider)"
+        if [[ -n "${target}" ]]; then menu_run deploy terraform "${target}"; fi
+        ;;
+      5)
+        target="$(menu_choose_mode)"
+        # shellcheck disable=SC2086 # "terraform proxmox" doit donner deux arguments
+        if [[ -n "${target}" ]]; then menu_run destroy ${target}; fi
+        ;;
+      6) menu_run doctor ;;
+      7) menu_run status ;;
+      8) menu_run test ;;
+      9 | q | Q) exit 0 ;;
+      *) warn "Choix invalide : ${choice}" ;;
+    esac
+  done
+}
+
+# --- Point d'entrée -----------------------------------------------------------------
+
+main() {
+  local args=() arg
+  ASSUME_YES="${ASSUME_YES:-0}"
+  RECREATE="${RECREATE:-0}"
+  KEEP=0
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) ASSUME_YES=1 ;;
+      --recreate) RECREATE=1 ;;
+      --keep) KEEP=1 ;;
+      -h | --help) args=(help) ;;
+      -*) die "Option inconnue : ${arg}" "Aide : ./k8s-lab help" ;;
+      *) args+=("${arg}") ;;
+    esac
+  done
+  export ASSUME_YES RECREATE
+
+  load_config
+  ensure_state_dirs
+  cd "${LAB_ROOT}"
+
+  if ((${#args[@]} == 0)); then
+    if [[ -t 0 && -t 1 ]]; then
+      menu
+    else
+      usage
+    fi
+    return
+  fi
+
+  local command="${args[0]}"
+  local rest=("${args[@]:1}")
+  case "${command}" in
+    help) usage ;;
+    doctor) cmd_doctor ${rest[@]+"${rest[@]}"} || exit 1 ;;
+    deploy)
+      if ((${#rest[@]} == 0)); then
+        info "Aucun mode précisé : kind est utilisé (le plus simple). Autres modes : ./k8s-lab help"
+        rest=(kind)
+      fi
+      dispatch deploy "${rest[@]}"
+      ;;
+    destroy) dispatch destroy ${rest[@]+"${rest[@]}"} ;;
+    status) cmd_status ;;
+    kubeconfig) cmd_kubeconfig ${rest[@]+"${rest[@]}"} ;;
+    test)
+      if [[ "${KEEP}" == "1" ]]; then smoke_app --keep; else smoke_app; fi
+      ;;
+    config) cmd_config ${rest[@]+"${rest[@]}"} ;;
+    *) die "Commande inconnue : \"${command}\"." "Aide : ./k8s-lab help" ;;
+  esac
+}
+
+main "$@"

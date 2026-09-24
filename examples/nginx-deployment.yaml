@@ -1,0 +1,49 @@
+# Un Deployment maintient N copies (replicas) d'un Pod en fonctionnement.
+#   kubectl apply -f examples/nginx-deployment.yaml
+#   kubectl -n demo get deployments,pods -o wide
+#   kubectl -n demo scale deployment nginx --replicas=4
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: demo
+  labels:
+    app: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          # Version épinglée (jamais "latest") : un déploiement doit être reproductible.
+          image: nginx:1.30-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          # Ressources demandées (planification) et limites (protection du nœud).
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          # Le Pod ne reçoit du trafic que lorsqu'il répond (readiness)...
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+          # ...et il est redémarré s'il ne répond plus (liveness).
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
