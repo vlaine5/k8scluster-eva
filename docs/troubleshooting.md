@@ -47,6 +47,21 @@ le relancer après avoir corrigé un problème reprend là où il s'est arrêté
 | Le plan veut **détruire** des VMs | `WORKER_COUNT` réduit, ou paramètre forçant la recréation | lisez le plan ; refusez si ce n'est pas voulu ; après une réduction voulue, `kubectl delete node <nom>` pour chaque worker supprimé, puis relancez `deploy` |
 | `Error acquiring the state lock` | un autre Terraform tourne (ou s'est interrompu) | attendez ; sinon `terraform force-unlock <id>` |
 
+## AWS EKS
+
+| Symptôme | Cause probable | Solution |
+| --- | --- | --- |
+| `doctor` : aucun identifiant AWS valide | AWS CLI non configurée, profil inconnu, session SSO expirée | `aws configure` (ou `aws sso login`), `AWS_PROFILE=<profil>` ; test : `aws sts get-caller-identity` |
+| `AccessDenied` / `is not authorized to perform` pendant `deploy` | droits IAM insuffisants pour créer VPC, IAM, EKS, EC2 | utilisez un compte de TP avec ces droits |
+| `UnsupportedAvailabilityZoneException` | zone refusée par EKS | le lab exclut les zones connues ; sinon changez `aws_region` |
+| Node group `CREATE_FAILED` / `InsufficientInstanceCapacity` / quota vCPU | type d'instance indisponible ou quota atteint | autre `node_instance_types`, autre région, ou demande de quota |
+| `kubectl` : `i/o timeout` | votre IP publique a changé (l'API n'est ouverte qu'à elle) | relancez `make deploy MODE=terraform PROVIDER=eks` (met à jour l'accès) |
+| `kubectl` : `You must be logged in to the server (Unauthorized)` | autre identité AWS que celle qui a créé le cluster | reprenez le même `AWS_PROFILE` ; `make kubeconfig MODE=terraform PROVIDER=eks` |
+| `destroy` refuse : Services LoadBalancer | des load balancers AWS créés par Kubernetes, inconnus de Terraform | `kubectl delete service -n <namespace> <nom>`, puis relancez `destroy` |
+| `destroy` : `DependencyViolation` sur le VPC | une ressource créée hors Terraform (load balancer, interface réseau) utilise encore le VPC | attendez quelques minutes puis relancez ; sinon supprimez-la dans la console AWS (étiquette `Project = k8s-lab`) |
+| `AWS_TARGET=localstack` : `connection refused` sur `localhost:4566` | LocalStack n'est pas démarré | démarrez-le (voir [deploy-eks.md](deploy-eks.md)) |
+| LocalStack : service EKS indisponible | licence LocalStack sans EKS (offre Hobby) | EKS exige une licence Ultimate, Student ou open source |
+
 ## Ansible / kubeadm
 
 | Symptôme | Cause probable | Solution |

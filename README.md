@@ -1,8 +1,8 @@
 # Kubernetes Lab
 
 Déployez facilement un cluster Kubernetes pour apprendre Kubernetes : en local en une
-commande (Kind, Minikube), puis sur de vraies VMs installées avec Ansible et kubeadm
-(Vagrant, Proxmox, vSphere, libvirt).
+commande (Kind, Minikube), sur de vraies VMs installées avec Ansible et kubeadm (Vagrant,
+Proxmox, vSphere, libvirt), ou dans le cloud avec AWS EKS (Kubernetes managé).
 
 ## Démarrage rapide
 
@@ -41,8 +41,10 @@ Guide pas à pas : [docs/deploy-kind.md](docs/deploy-kind.md).
 | Déployer sur mon Proxmox | [Terraform + Proxmox](docs/deploy-proxmox.md) |
 | Déployer sur VMware vCenter | [Terraform + vSphere](docs/deploy-vsphere.md) |
 | Utiliser des VMs KVM locales | [Terraform + libvirt](docs/deploy-libvirt.md) |
+| Découvrir Kubernetes managé sur AWS | [Terraform + EKS](docs/deploy-eks.md) |
 
-Parcours conseillé : Kind → Minikube → Vagrant → Terraform. Pourquoi ? [docs/modes.md](docs/modes.md).
+Parcours conseillé : Kind → Minikube → Vagrant → Terraform → EKS. Pourquoi ?
+[docs/modes.md](docs/modes.md).
 
 ## Les commandes
 
@@ -56,7 +58,7 @@ Parcours conseillé : Kind → Minikube → Vagrant → Terraform. Pourquoi ? [d
 | `make destroy MODE=…` | supprime le cluster (confirmation demandée) |
 
 Modes : `MODE=kind`, `MODE=minikube`, `MODE=vagrant`,
-`MODE=terraform PROVIDER=proxmox` (ou `vsphere`, `libvirt`).
+`MODE=terraform PROVIDER=proxmox` (ou `vsphere`, `libvirt`, `eks`).
 Options : `WORKERS=3` (nombre de workers), `RECREATE=1` (recréer le cluster), `YES=1` (sans
 question, pour les scripts).
 
@@ -78,20 +80,22 @@ Tous les clusters du lab sont rangés dans `.kube/config` (un contexte par clust
 | Terraform Proxmox | VALIDÉ STATIQUEMENT — TEST SUR PROXMOX RÉEL À FAIRE |
 | Terraform vSphere | VALIDÉ STATIQUEMENT — TEST SUR VCENTER RÉEL À FAIRE |
 | Terraform libvirt | VALIDÉ STATIQUEMENT — TEST SUR KVM RÉEL À FAIRE |
+| Terraform AWS EKS | VALIDÉ STATIQUEMENT — TEST SUR AWS RÉEL À FAIRE |
 
 **TESTÉ EN CI** : à chaque push, GitHub Actions crée réellement le cluster, le teste (nginx,
 Service, DNS) puis le supprime. L'installation Ansible + kubeadm est testée avec 1
 control-plane + 2 workers simulés par des conteneurs systemd.
 **VALIDÉ STATIQUEMENT** : le code est vérifié (`vagrant validate`, `terraform validate`,
 TFLint, `terraform test`), mais le déploiement demande une infrastructure réelle que la CI
-n'a pas.
+n'a pas. Aucune CI automatique ne crée de ressource AWS payante.
 
 ## Documentation
 
 Guides étudiants (courts, pas à pas) : [choisir un déploiement](docs/deployment.md), puis
 [Kind](docs/deploy-kind.md) · [Minikube](docs/deploy-minikube.md) ·
 [Vagrant](docs/deploy-vagrant.md) · [Proxmox](docs/deploy-proxmox.md) ·
-[vSphere](docs/deploy-vsphere.md) · [libvirt](docs/deploy-libvirt.md).
+[vSphere](docs/deploy-vsphere.md) · [libvirt](docs/deploy-libvirt.md) ·
+[AWS EKS](docs/deploy-eks.md).
 
 Documentation technique :
 
@@ -103,6 +107,7 @@ Documentation technique :
 - [Dépannage](docs/troubleshooting.md)
 - [Maintenance des versions](docs/maintenance.md)
 - [Migration depuis la version historique](docs/migration.md)
+- [Contribuer](CONTRIBUTING.md)
 
 ## Licence
 

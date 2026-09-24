@@ -11,17 +11,20 @@
           ▼               ▼                      ▼                          ▼
         kind          minikube             vagrant up               terraform plan/apply
    (local/kind/)                        (vagrant/Vagrantfile)   (terraform/providers/<p>/)
-          │               │                      │                          │
-          │               │                      └────────────┬─────────────┘
-          │               │                                   ▼
-          │               │                     ansible/inventories/*.ini   (généré)
-          │               │                                   ▼
-          │               │                     ansible-playbook site.yml   (commun)
-          │               │                     common → container_runtime → kubernetes
-          │               │                     → control_plane (kubeadm init) → cni
-          │               │                     → worker (kubeadm join) → vérifications
-          ▼               ▼                                   ▼
-      .kube/config  ◄──────────── un contexte par cluster ────┘
+          │               │                      │                  │                │
+          │               │                      │          proxmox, vsphere,       eks
+          │               │                      │               libvirt             │
+          │               │                      └────────┬─────────┘                │
+          │               │                               ▼                          │
+          │               │                 ansible/inventories/*.ini (généré)       │
+          │               │                               ▼                          ▼
+          │               │                 ansible-playbook site.yml      cluster EKS + Managed
+          │               │                 common → container_runtime     Node Group (AWS),
+          │               │                 → kubernetes → control_plane   addons vpc-cni,
+          │               │                 (kubeadm init) → cni → worker  kube-proxy, coredns
+          │               │                 (kubeadm join) → vérifications           │
+          ▼               ▼                               ▼                          ▼
+      .kube/config  ◄──────────── un contexte par cluster ─────── aws eks update-kubeconfig
                                       ▼
                           smoke test : nœuds Ready, Pods système prêts
 ```
@@ -38,11 +41,12 @@
 | `vagrant/` | `Vagrantfile` | VMs locales ; écrit `ansible/inventories/vagrant.ini` |
 | `terraform/modules/k8s-nodes/` | module sans provider | noms, rôles, IP statiques et cloud-init de chaque nœud |
 | `terraform/modules/ansible-inventory/` | module | écrit l'inventaire Ansible à partir des nœuds |
-| `terraform/providers/<p>/` | un « root module » par plateforme | **uniquement** la création des VMs |
+| `terraform/providers/<p>/` | un « root module » par plateforme | proxmox, vsphere, libvirt : **uniquement** la création des VMs |
+| `terraform/providers/eks/` | root module autonome | cluster AWS EKS managé : VPC, IAM, cluster, Managed Node Group, addons (ni VM à installer, ni Ansible) |
 | `ansible/` | playbooks + rôles | installation de Kubernetes avec kubeadm, pour toutes les VMs |
 | `examples/` | manifestes | nginx + Service pour tester un cluster |
 | `tests/kubeadm-in-docker/` | test d'intégration | le vrai `site.yml` sur des nœuds conteneurs systemd (CI) |
-| `.github/workflows/` | CI | lint, validation, tests Terraform, tests de bout en bout (Kind, Minikube, kubeadm) |
+| `.github/workflows/` | CI | lint, validation, tests Terraform, tests de bout en bout (Kind, Minikube, kubeadm) ; test EKS réel déclenché à la main |
 
 Fichiers générés (tous ignorés par Git) : `.lab/` (clé SSH du lab, caches, variables Ansible),
 `.kube/` (kubeconfigs), `ansible/inventories/*.ini` (sauf l'exemple), `terraform.tfstate`.
@@ -54,6 +58,14 @@ Fichiers générés (tous ignorés par Git) : `.lab/` (clé SSH du lab, caches, 
 Vagrant et Terraform ne font **que** créer des VMs (avec une IP fixe et une clé SSH), puis
 écrivent un inventaire Ansible. Ansible installe Kubernetes, **de la même façon partout**.
 Il n'y a qu'un seul code kubeadm dans le dépôt : `ansible/roles/`.
+
+### 1 bis. Exception voulue : EKS, Kubernetes managé
+
+Avec EKS, AWS fournit le control-plane et gère les workers (Managed Node Group) : il n'y a
+rien à installer. Le provider `eks` n'utilise donc ni les modules `k8s-nodes` /
+`ansible-inventory`, ni Ansible, ni kubeadm ; le CLI obtient le kubeconfig avec
+`aws eks update-kubeconfig`. Cette différence est le sujet même du niveau 4 : comparer
+« je construis mon cluster » et « le cloud me fournit le control-plane ».
 
 ### 2. Pas de duplication entre providers Terraform
 

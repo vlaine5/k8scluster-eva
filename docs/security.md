@@ -5,7 +5,8 @@ Un lab pédagogique doit montrer les bonnes pratiques, pas les contourner.
 ## Règles
 
 1. **Aucun secret dans Git.** Identifiants Proxmox, vCenter et ESXi : uniquement dans `.env`
-   (ignoré par Git), lus comme variables d'environnement par les outils.
+   (ignoré par Git), lus comme variables d'environnement par les outils. Identifiants AWS :
+   mécanismes standards d'AWS (`aws configure`, `AWS_PROFILE`), hors du dépôt.
 2. Les fichiers **versionnés** sont des exemples génériques : `.env.example`,
    `terraform.tfvars.example`, `ansible/inventories/example.ini` (adresses de documentation
    `192.0.2.0/24`).
@@ -17,6 +18,7 @@ Un lab pédagogique doit montrer les bonnes pratiques, pas les contourner.
 | Élément | Emplacement | Protection |
 | --- | --- | --- |
 | Token API Proxmox, mot de passe vCenter / ESXi | `.env` | ignoré par Git ; jamais écrit dans un fichier Terraform ou Vagrant ; variables Terraform non utilisées pour les secrets |
+| Identifiants AWS | `~/.aws/` (profils) ou variables d'environnement | hors du dépôt ; kubectl obtient à chaque commande un jeton EKS temporaire (`aws eks get-token`), aucun jeton n'est écrit dans le kubeconfig |
 | Clé SSH du lab | `.lab/ssh/id_ed25519` | générée pour le lab (0600) : votre clé personnelle n'est pas distribuée sur les VMs |
 | kubeconfig (certificat administrateur du cluster) | `.kube/config`, `.kube/clusters/*.yaml` | 0600 ; `~/.kube/config` n'est jamais modifié |
 | State Terraform | `terraform/providers/<p>/terraform.tfstate` | ignoré par Git ; **peut contenir des données sensibles**, ne pas le partager |
@@ -35,8 +37,25 @@ Un lab pédagogique doit montrer les bonnes pratiques, pas les contourner.
 | Image de nœud kind | tag + **digest** | digest |
 | Collections Ansible | versions exactes (`requirements.yml`) | Galaxy |
 | Providers Terraform | contraintes `~>` + `.terraform.lock.hcl` versionné | hashes du lock file |
-| Outils de la CI et de `scripts/install-tools.sh` (kind, kubectl, minikube, Vagrant) | versions exactes (`config/lab.env`) | SHA-256 publié par chaque projet |
+| Outils de la CI et de `scripts/install-tools.sh` (kind, kubectl, minikube, Vagrant, actionlint) | versions exactes (`config/lab.env`) | SHA-256 publié par chaque projet |
+| Image LocalStack (facultative, EKS) | version datée (`2026.08.4`), jamais `latest` | registre Docker Hub |
 | Actions GitHub | SHA de commit (version en commentaire) | mises à jour proposées par Dependabot |
+
+## AWS EKS
+
+- **Moindre privilège** : le rôle du control-plane n'a que `AmazonEKSClusterPolicy` ; celui
+  des workers, les trois politiques gérées recommandées par AWS (`AmazonEKSWorkerNodePolicy`,
+  `AmazonEC2ContainerRegistryPullOnly`, `AmazonEKS_CNI_Policy`). Aucun `AdministratorAccess`.
+- **API Kubernetes filtrée** : le point d'accès public n'accepte que votre adresse IP
+  (`api_allowed_cidrs`, détectée par le CLI) ; les workers passent par le point d'accès privé.
+- **Workers sans port ouvert** : ils ont une IP publique (pas de NAT, pour la simplicité) mais
+  le groupe de sécurité créé par EKS n'accepte que le trafic interne au cluster.
+- **Accès au cluster** : l'identité AWS qui crée le cluster en devient administratrice
+  (entrée d'accès EKS) ; kubectl s'authentifie avec cette même identité.
+- **LocalStack** : les identifiants factices `test` et la désactivation des contrôles du
+  provider ne s'appliquent qu'avec `aws_target = "localstack"`, jamais au vrai AWS.
+- **Coûts** : aucune CI automatique ne crée de ressource AWS ; le test EKS réel est un
+  workflow déclenché à la main, qui détruit le cluster même en cas d'échec (`if: always()`).
 
 ## Sur les VMs
 

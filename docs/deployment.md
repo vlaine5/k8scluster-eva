@@ -19,4 +19,8 @@
 - [Terraform + Proxmox](deploy-proxmox.md) : des VMs sur votre Proxmox VE.
 - [Terraform + vSphere](deploy-vsphere.md) : des VMs sur votre VMware vCenter.
 
+## Kubernetes managé dans le cloud
+
+- [Terraform + AWS EKS](deploy-eks.md) : AWS fournit le control-plane (ressources payantes).
+
 Comparaison des modes et parcours conseillé : [modes.md](modes.md).

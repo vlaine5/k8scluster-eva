@@ -1,8 +1,12 @@
 # Mode Terraform (Infrastructure as Code)
 
-Terraform décrit les VMs **en code** : on lit un plan (`terraform plan`) avant de l'appliquer,
-et on peut recréer exactement la même infrastructure à tout moment. Une fois les VMs créées,
-**le même Ansible que pour Vagrant** installe Kubernetes.
+Terraform décrit l'infrastructure **en code** : on lit un plan (`terraform plan`) avant de
+l'appliquer, et on peut recréer exactement la même infrastructure à tout moment.
+
+- **proxmox, vsphere, libvirt** : Terraform crée des VMs, puis **le même Ansible que pour
+  Vagrant** installe Kubernetes avec kubeadm (schéma ci-dessous).
+- **eks** : Terraform crée un cluster AWS EKS, Kubernetes managé ; pas de VM à installer, ni
+  Ansible ni kubeadm (voir [deploy-eks.md](deploy-eks.md)).
 
 ```text
 terraform plan / apply
@@ -21,6 +25,7 @@ terraform plan / apply
 | `proxmox` | Proxmox VE 8.4+ / 9 | [`bpg/proxmox`](https://registry.terraform.io/providers/bpg/proxmox) | [deploy-proxmox.md](deploy-proxmox.md) |
 | `vsphere` | VMware vCenter | [`vmware/vsphere`](https://registry.terraform.io/providers/vmware/vsphere) | [deploy-vsphere.md](deploy-vsphere.md) |
 | `libvirt` | KVM sur votre PC Linux | [`dmacvicar/libvirt`](https://registry.terraform.io/providers/dmacvicar/libvirt) | [deploy-libvirt.md](deploy-libvirt.md) |
+| `eks` | AWS (Kubernetes managé) | [`hashicorp/aws`](https://registry.terraform.io/providers/hashicorp/aws) | [deploy-eks.md](deploy-eks.md) |
 
 ## Utilisation
 
@@ -56,6 +61,9 @@ Les variables communes (`worker_count`, `node_cpus`…) ont les mêmes valeurs p
 
 ## Outputs
 
+Pour proxmox, vsphere et libvirt (EKS a ses propres outputs : `cluster_name`,
+`cluster_endpoint`, `cluster_version`, `aws_region`, `node_group_name`, `kubectl_command`) :
+
 | Output | Contenu |
 | --- | --- |
 | `control_plane_ip` | IP du control-plane |
@@ -73,6 +81,8 @@ Le **state** (`terraform.tfstate`) décrit l'infrastructure réelle. Il est loca
 et **peut contenir des données sensibles** (le contenu cloud-init, des identifiants de VM…).
 Ne le partagez pas et ne le versionnez pas. En équipe, utilisez un backend distant chiffré
 (S3 + DynamoDB, GitLab, Terraform Cloud…). Voir [security.md](security.md).
+Pour EKS, le state est la seule trace des ressources créées : sans lui, `make destroy` ne
+peut plus rien supprimer (il faudrait passer par la console AWS).
 
 ## OpenTofu
 

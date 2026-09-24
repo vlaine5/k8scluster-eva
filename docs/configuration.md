@@ -6,7 +6,8 @@
 | --- | --- | --- |
 | `config/lab.env` | oui | valeurs par défaut de **tous** les modes |
 | `.env` (copie de `.env.example`) | **non** | vos surcharges + vos identifiants (Proxmox, vCenter, ESXi) |
-| `terraform/providers/<p>/terraform.tfvars` (copie du `.example`) | **non** | description de votre infrastructure : nœud Proxmox, datastore, réseau… (aucun secret) |
+| `terraform/providers/<p>/terraform.tfvars` (copie du `.example`) | **non** | description de votre infrastructure : nœud Proxmox, datastore, réseau, région AWS… (aucun secret) |
+| `~/.aws/` (`aws configure`) | hors du dépôt | identifiants AWS, utilisés par Terraform, AWS CLI et `kubectl` pour EKS |
 
 Priorité (la première valeur trouvée gagne) :
 
@@ -23,8 +24,8 @@ Priorité (la première valeur trouvée gagne) :
 
 | Variable | Défaut | Utilisée par |
 | --- | --- | --- |
-| `CLUSTER_NAME` | `k8s-lab` | tous : nom des contextes kubectl (`kind-k8s-lab`, `k8s-lab-vagrant`, `k8s-lab-proxmox`…) |
-| `WORKER_COUNT` | `2` | kind, vagrant, terraform (0 = cluster mono-nœud) |
+| `CLUSTER_NAME` | `k8s-lab` | tous : nom des contextes kubectl (`kind-k8s-lab`, `k8s-lab-vagrant`, `k8s-lab-proxmox`, `k8s-lab-eks`…) ; 25 caractères au plus pour EKS |
+| `WORKER_COUNT` | `2` | kind, vagrant, terraform (0 = cluster mono-nœud, sauf EKS : 1 au minimum) |
 
 ### VMs (Vagrant et Terraform)
 
@@ -76,6 +77,19 @@ Priorité (la première valeur trouvée gagne) :
 | `VAGRANT_IP_START` | `10` | `.10` = control-plane, `.11`, `.12`… = workers |
 | `ESXI_HOSTNAME`, `ESXI_USERNAME`, `ESXI_PASSWORD`, `ESXI_DATASTORE`, `ESXI_NETWORKS` | — | mode `vmware_esxi` uniquement, dans `.env` |
 
+### AWS EKS
+
+| Variable | Défaut | Remarque |
+| --- | --- | --- |
+| `EKS_KUBERNETES_VERSION` | `1.36` | version proposée par EKS ; indépendante de `KUBERNETES_VERSION` (kubeadm) |
+| `AWS_TARGET` | `aws` | `aws` (vrai AWS, payant) ou `localstack` (émulateur local) |
+| `LOCALSTACK_ENDPOINT` | `http://localhost:4566` | utilisé seulement avec `AWS_TARGET=localstack` |
+
+Réglages de `terraform/providers/eks/terraform.tfvars` (tous facultatifs) : `aws_region`
+(`eu-west-3` ; sinon `AWS_REGION`), `node_instance_types` (`["t3.medium"]`),
+`node_capacity_type` (`ON_DEMAND` ou `SPOT`), `api_allowed_cidrs` (par défaut, le CLI détecte
+votre adresse IP publique), `vpc_cidr` (`10.20.0.0/16`).
+
 ### Identifiants (dans `.env` uniquement)
 
 | Variable | Lue par |
@@ -83,6 +97,7 @@ Priorité (la première valeur trouvée gagne) :
 | `PROXMOX_VE_ENDPOINT`, `PROXMOX_VE_API_TOKEN`, `PROXMOX_VE_INSECURE` | provider Terraform `bpg/proxmox` |
 | `VSPHERE_SERVER`, `VSPHERE_USER`, `VSPHERE_PASSWORD`, `VSPHERE_ALLOW_UNVERIFIED_SSL` | provider Terraform `vmware/vsphere` |
 | `ESXI_PASSWORD` | plugin `vagrant-vmware-esxi` (syntaxe `env:ESXI_PASSWORD`) |
+| `AWS_PROFILE` (identifiants dans `~/.aws/`, via `aws configure`) | provider Terraform `hashicorp/aws`, AWS CLI, `kubectl` (EKS) |
 
 ### Options avancées (environnement)
 
@@ -102,7 +117,8 @@ retombe sur ses propres valeurs par défaut, identiques (vérifié par
 | `config/lab.env` | Terraform (`TF_VAR_…`) | Ansible (`-e`, `group_vars/all.yml`) | Vagrantfile | kind / minikube |
 | --- | --- | --- | --- | --- |
 | `CLUSTER_NAME` | `cluster_name` | `cluster_name` (dans l'inventaire généré) | lu directement | nom du cluster / profil |
-| `WORKER_COUNT` | `worker_count` | — (déduit de l'inventaire) | lu directement | nœuds `worker` |
+| `WORKER_COUNT` | `worker_count` (EKS : taille voulue du node group) | — (déduit de l'inventaire) | lu directement | nœuds `worker` |
+| `EKS_KUBERNETES_VERSION` / `AWS_TARGET` / `LOCALSTACK_ENDPOINT` | `kubernetes_version` / `aws_target` / `localstack_endpoint` (eks) | — | — | — |
 | `NODE_HOSTNAME_PREFIX` | `hostname_prefix` | — | lu directement | — |
 | `NODE_CPUS` / `NODE_MEMORY_MB` / `NODE_DISK_GB` | `node_cpus` / `node_memory_mb` / `node_disk_gb` | — | lu directement (sauf disque) | — |
 | `VM_IMAGE_URL` / `VM_IMAGE_SHA256` | `image_url` / `image_sha256` (proxmox), `image_source` (libvirt) | — | — | — |
