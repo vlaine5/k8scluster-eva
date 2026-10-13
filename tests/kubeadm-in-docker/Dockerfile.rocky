@@ -31,5 +31,13 @@ RUN useradd -m -s /bin/bash -G wheel "${NODE_USER}" \
        > /etc/systemd/system/ssh-host-keys.service \
     && systemctl enable sshd ssh-host-keys.service
 
+# Montages en propagation partagée, comme sur une vraie machine : systemd le fait au
+# démarrage, sauf dans un conteneur. Sans cela, les Pods qui montent /sys/fs en
+# propagation bidirectionnelle (init container eBPF de calico-node) ne démarrent pas
+# (« /sys/fs is mounted on /sys but it is not a shared mount »). kind fait de même.
+RUN printf '[Unit]\nDefaultDependencies=no\nBefore=local-fs.target\n[Service]\nType=oneshot\nExecStart=/usr/bin/mount --make-rshared /\n[Install]\nWantedBy=sysinit.target\n' \
+       > /etc/systemd/system/k8s-lab-test-rshared.service \
+    && systemctl enable k8s-lab-test-rshared.service
+
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]

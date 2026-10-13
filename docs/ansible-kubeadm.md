@@ -135,3 +135,8 @@ Il simule des VMs avec des conteneurs Docker privilégiés exécutant systemd, p
 tests/kubeadm-in-docker/run.sh           # crée 1 control-plane + 2 workers, déploie, teste
 tests/kubeadm-in-docker/run.sh --destroy # nettoie
 ```
+
+Ce que les nœuds conteneurs ont de plus qu'une VM, pour s'en rapprocher (test uniquement,
+jamais appliqué à vos machines) : montages en propagation partagée (`mount --make-rshared /`,
+fait par systemd sur une vraie machine), SSH et sudo sans pile PAM « account » sur Rocky (voir
+l'en-tête de `Dockerfile.rocky`).
