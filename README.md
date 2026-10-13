@@ -99,11 +99,13 @@ addons et exécute leurs tests fonctionnels à chaque push.
 
 | Élément | Statut |
 | --- | --- |
-| Résolveur, catalogue, rendu de chaque addon (helm template, Pod Security), Terraform (tests avec API simulées), Ansible (lint) | testés en CI (statique) |
-| kind, minikube | testés en CI |
-| kind + addons (5 scénarios : réseau, stockage, Cilium, observabilité, sécurité) | testés en CI — résultats détaillés dans [compatibility.md](docs/compatibility.md) |
-| kubeadm multi-OS, HA 3 control-planes, Calico/Cilium, mise à niveau, restauration etcd | testés en CI sur des nœuds conteneurs systemd (mode existing) |
-| mode attach (refus de reprendre un composant d'un autre outil) | testé en CI |
+| Résolveur, catalogue, rendu de chaque addon et des rôles kubeadm (helm template, Pod Security), Terraform (tests avec API simulées), Ansible (lint) | testés en CI (statique) |
+| kind, minikube (commandes des guides) | testés en CI |
+| kind + addons : sécurité (Kyverno enforce, Falco, Trivy, Istio), Cilium sans kube-proxy (Gateway, LB L2, Hubble, Tetragon), observabilité (Prometheus, Grafana, Loki, Tempo, OpenTelemetry) | **testés en CI** : déploiement, tests fonctionnels, état, 2e installation sans changement |
+| kind + addons : réseau (Envoy Gateway, MetalLB, cert-manager, External Secrets, Reloader) | tests fonctionnels verts en CI ; scénario complet en cours de validation |
+| kind + addons : stockage (NFS CSI, snapshots, Velero, Argo CD, KEDA, Descheduler, NFD) | en cours de validation en CI (Velero) |
+| mode attach (refus de reprendre un composant d'un autre outil, `skip`, idempotence, destroy refusé) | **testé en CI** |
+| kubeadm sur nœuds conteneurs (mode existing) : Ubuntu, Debian, Rocky, Flannel/Calico/Cilium, HA, mise à niveau, restauration | contrôles préalables et `kubeadm init` validés en CI ; cluster complet en cours de validation |
 | Vagrant, Proxmox, vSphere, libvirt, EKS | **validés statiquement uniquement** : aucun déploiement réel par la CI |
 | Longhorn (disques, réplicas, perte de nœud) | rendu vérifié ; nécessite des VMs (non testé en CI) |
 
