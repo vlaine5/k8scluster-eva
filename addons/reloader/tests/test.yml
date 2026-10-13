@@ -1,0 +1,62 @@
+---
+# =============================================================================
+#  Test de Reloader : modifier la ConfigMap d'un Deployment annoté doit
+#  provoquer un redémarrage progressif (nouveau ReplicaSet).
+# =============================================================================
+
+- name: Deploy an annotated workload and its ConfigMap
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    wait: true
+    definition:
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata: {name: reload-test, namespace: "{{ addon_test_ns }}"}
+        data: {revision: "1"}
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: reload-test
+          namespace: "{{ addon_test_ns }}"
+          annotations: {reloader.stakater.com/auto: "true"}
+        spec:
+          replicas: 1
+          selector: {matchLabels: {app: reload-test}}
+          template:
+            metadata: {labels: {app: reload-test}}
+            spec:
+              containers:
+                - name: test
+                  image: "{{ lab_test_images.busybox }}"
+                  command: [sleep, "3600"]
+                  envFrom: [{configMapRef: {name: reload-test}}]
+
+- name: Read the current revision of the Deployment
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'deploy', 'reload-test', '-o',
+           'jsonpath={.metadata.annotations.deployment\\.kubernetes\\.io/revision}'] }}"
+  register: reloader_test_before
+  changed_when: false
+
+- name: Change the ConfigMap
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata: {name: reload-test, namespace: "{{ addon_test_ns }}"}
+      data: {revision: "2"}
+
+- name: Wait for the rolling restart triggered by Reloader
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'deploy', 'reload-test', '-o',
+           'jsonpath={.metadata.annotations.deployment\\.kubernetes\\.io/revision}'] }}"
+  register: reloader_test_after
+  changed_when: false
+  until: reloader_test_after.stdout | int > reloader_test_before.stdout | int
+  retries: 18
+  delay: 5

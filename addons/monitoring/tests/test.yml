@@ -1,0 +1,67 @@
+---
+# =============================================================================
+#  Test de la supervision :
+#    1. Prometheus collecte les cibles attendues (API, kubelets, node-exporter,
+#       kube-state-metrics, + plan de contrôle sur kubeadm) et aucune n'est « down »
+#    2. une requête PromQL renvoie une valeur (up{job="apiserver"} == 1)
+#    3. Grafana répond (santé de sa base) ; Alertmanager est prêt
+#  Accès par le proxy de l'API Kubernetes : rien n'est exposé pour le test.
+# =============================================================================
+
+- name: Name the Prometheus proxy URL
+  ansible.builtin.set_fact:
+    monitoring_test_prom: /api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-prometheus:http-web/proxy
+    monitoring_test_jobs: >-
+      {{ ['apiserver', 'kubelet', 'node-exporter', 'kube-state-metrics']
+         + (['kube-controller-manager', 'kube-scheduler', 'kube-etcd'] if lab.kubeadm | default(false) else []) }}
+
+- name: Wait until every expected job has healthy targets
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', '--raw', monitoring_test_prom ~ '/api/v1/targets?state=active'] }}"
+  register: monitoring_test_targets
+  changed_when: false
+  failed_when: false
+  until: >-
+    monitoring_test_targets.rc == 0
+    and (monitoring_test_targets.stdout | from_json).data.activeTargets | selectattr('health', 'equalto', 'up')
+        | map(attribute='labels.job') | unique | intersect(monitoring_test_jobs) | length == monitoring_test_jobs | length
+  retries: 30
+  delay: 10
+
+- name: Summarise the targets
+  ansible.builtin.set_fact:
+    monitoring_test_down: >-
+      {{ (monitoring_test_targets.stdout | from_json).data.activeTargets | rejectattr('health', 'equalto', 'up')
+         | map(attribute='labels') | map(attribute='job') | list }}
+    monitoring_test_up_jobs: >-
+      {{ (monitoring_test_targets.stdout | from_json).data.activeTargets | selectattr('health', 'equalto', 'up')
+         | map(attribute='labels.job') | unique | list }}
+
+- name: Check the scraped jobs
+  ansible.builtin.assert:
+    that:
+      - monitoring_test_jobs | difference(monitoring_test_up_jobs) | length == 0
+      - monitoring_test_down | length == 0
+    fail_msg: >-
+      Missing jobs: {{ monitoring_test_jobs | difference(monitoring_test_up_jobs) }} ; targets down: {{ monitoring_test_down | unique }}.
+      Details: kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090 then http://localhost:9090/targets
+    quiet: true
+
+- name: Run a PromQL query
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', '--raw', monitoring_test_prom ~ '/api/v1/query?query=min(up%7Bjob%3D%22apiserver%22%7D)'] }}"
+  register: monitoring_test_query
+  changed_when: false
+  failed_when: (monitoring_test_query.stdout | from_json).data.result[0].value[1] | default('0') != '1'
+
+- name: Check the health of Grafana
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', '--raw', '/api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-grafana:http-web/proxy/api/health'] }}"
+  register: monitoring_test_grafana
+  changed_when: false
+  failed_when: (monitoring_test_grafana.stdout | from_json).database | default('') != 'ok'
+
+- name: Check that Alertmanager is ready
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', '--raw', '/api/v1/namespaces/monitoring/services/http:kube-prometheus-stack-alertmanager:http-web/proxy/-/ready'] }}"
+  changed_when: false

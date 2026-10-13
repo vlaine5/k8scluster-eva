@@ -18,13 +18,20 @@ install:
   pod_security: baseline
   releases:
     - {name: kyverno, component: kyverno, namespace: kyverno, values: values.yaml.j2, timeout: 15m}
-    - {name: kyverno-policies, component: kyverno-policies, namespace: kyverno, values: values-policies.yaml.j2, timeout: 5m, when: "cfg.KYVERNO_POLICY_MODE != 'none'"}
+    - name: kyverno-policies
+      component: kyverno-policies
+      namespace: kyverno
+      values: values-policies.yaml.j2
+      timeout: 5m
+      only_if: {KYVERNO_POLICY_MODE: [audit, enforce]}
   manifests: [policies.yaml.j2]
 health:
   - {kind: Deployment, namespace: kyverno, name: kyverno-admission-controller}
   - {kind: Deployment, namespace: kyverno, name: kyverno-background-controller}
   - {kind: Deployment, namespace: kyverno, name: kyverno-reports-controller}
 tests: tests/test.yml
+# Le test crée un Pod hostNetwork : le namespace de test autorise les Pods privilégiés.
+test_pod_security: privileged
 remove:
   notes: "Désinstaller supprime les webhooks d'admission : les politiques cessent de s'appliquer."
 docs: docs/security.md#kyverno

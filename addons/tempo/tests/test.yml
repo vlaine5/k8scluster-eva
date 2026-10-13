@@ -1,0 +1,34 @@
+---
+# =============================================================================
+#  Test de Tempo : une trace OTLP (identifiant connu) est envoyée en HTTP, puis
+#  relue par l'API de Tempo (proxy de l'API Kubernetes).
+# =============================================================================
+
+- name: Choose the trace identifier
+  ansible.builtin.set_fact:
+    addon_trace_id: "{{ '%032x' | format(340282366920938463463374607431768211455 | random) }}"
+
+- name: Send a trace to Tempo (OTLP/HTTP)
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/curl.yml"
+  vars:
+    addon_curl_label: OTLP trace to Tempo
+    addon_curl_args: >-
+      {{ ['-X', 'POST', '-H', 'Content-Type: application/json', '-o', '/dev/null', '-w', '%{http_code}',
+          'http://tempo.tracing:4318/v1/traces', '-d', lookup('ansible.builtin.template', addon_helpers ~ '/otlp-trace.json.j2') | from_json | to_json] }}
+    addon_curl_expect: "200"
+
+- name: Read the trace back from Tempo
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', '--raw', '/api/v1/namespaces/tracing/services/http:tempo:3200/proxy/api/v2/traces/' ~ addon_trace_id] }}"
+  register: tempo_test_read
+  changed_when: false
+  failed_when: false
+  until: tempo_test_read.rc == 0 and 'k8s-lab-test' in tempo_test_read.stdout
+  retries: 18
+  delay: 10
+
+- name: Check the trace
+  ansible.builtin.assert:
+    that: tempo_test_read.rc == 0 and 'k8s-lab-test' in tempo_test_read.stdout
+    fail_msg: "Trace {{ addon_trace_id }} not found in Tempo: {{ tempo_test_read.stderr | default('') | truncate(300) }}"
+    quiet: true

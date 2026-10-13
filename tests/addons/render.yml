@@ -1,0 +1,18 @@
+---
+# =============================================================================
+#  Rendu hors cluster de tous les modèles des addons d'un plan (valeurs Helm et
+#  manifestes), avec le même moteur de modèles qu'à l'installation.
+#  Utilisé par tests/addons/render-check (CI) : aucun accès à un cluster.
+#    ansible-playbook tests/addons/render.yml -e @vars.json -e render_dir=/tmp/out
+# =============================================================================
+- name: Render the templates of every addon of the plan
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Render the templates of each addon
+      ansible.builtin.include_tasks: render_addon.yml
+      loop: "{{ lab_addons }}"
+      loop_control:
+        loop_var: addon_item
+        label: "{{ addon_item.id }}"

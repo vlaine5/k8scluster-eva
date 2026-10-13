@@ -22,8 +22,15 @@ validated: []
 resources: {cpu_m: 600, memory_mb: 1536}
 install:
   namespace: monitoring
+  expose_setting: GRAFANA_EXPOSE
   pod_security: privileged
-  secrets: [grafana-admin]
+  secrets:
+    - name: grafana-admin
+      namespace: monitoring
+      only_if_env: [GRAFANA_ADMIN_PASSWORD]
+      data:
+        admin-user: admin
+        admin-password: env:GRAFANA_ADMIN_PASSWORD
   releases:
     - {name: kube-prometheus-stack, component: kube-prometheus-stack, namespace: monitoring, values: values.yaml.j2, timeout: 15m, skip_crds: true}
   manifests: [httproute.yaml.j2]

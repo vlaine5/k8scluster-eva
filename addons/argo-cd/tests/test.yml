@@ -1,0 +1,35 @@
+---
+# =============================================================================
+#  Test d'Argo CD :
+#    1. l'API (argocd-server) répond et donne sa version
+#    2. si ARGOCD_REPO_URL est défini : le dépôt est lu et l'application lab-apps
+#       comparée (Synced/OutOfSync), puis Healthy si la synchronisation automatique est active
+# =============================================================================
+
+- name: Call the Argo CD API from the cluster
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/curl.yml"
+  vars:
+    addon_curl_label: Argo CD API
+    addon_curl_args: >-
+      {{ ['http://argo-cd-argocd-server.argocd/api/version'] if cfg.ARGOCD_EXPOSE | bool
+         else ['-k', 'https://argo-cd-argocd-server.argocd/api/version'] }}
+    addon_curl_expect: '"Version"'
+
+- name: Check the example application
+  when: cfg.ARGOCD_REPO_URL | length > 0
+  block:
+    - name: Wait until Argo CD has compared the repository with the cluster
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', 'argocd', 'get', 'application', 'lab-apps', '-o', 'json'] }}"
+      register: argocd_test_app
+      changed_when: false
+      until: (argocd_test_app.stdout | from_json).status.sync.status | default('Unknown') in ['Synced', 'OutOfSync']
+      retries: 30
+      delay: 10
+
+    - name: Wait until the application is healthy (automatic synchronisation)
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', 'argocd', 'wait', '--timeout=300s', '--for=jsonpath={.status.health.status}=Healthy',
+               'application/lab-apps'] }}"
+      changed_when: false
+      when: cfg.ARGOCD_AUTO_SYNC | bool

@@ -1,0 +1,144 @@
+---
+# =============================================================================
+#  Test du stockage NFS :
+#    1. PVC RWX provisionné dynamiquement (sous-dossier sur l'export)
+#    2. écriture par un Pod, lecture par un Pod d'un AUTRE nœud (si possible)
+#    3. persistance : Pod supprimé puis recréé, données toujours présentes
+#    4. droits : écriture par un utilisateur non root (fsGroup)
+#  Le volume de test utilise une copie de la StorageClass en politique Delete :
+#  son sous-dossier (k8s-lab-test-nfs-csi-...) est supprimé à la fin du test.
+# =============================================================================
+
+- name: Define the NFS test resources
+  ansible.builtin.set_fact:
+    nfs_test_pod:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        namespace: "{{ addon_test_ns }}"
+        labels: {app: nfs-test}
+      spec:
+        restartPolicy: Never
+        securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true,
+                          seccompProfile: {type: RuntimeDefault}}
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector: {matchLabels: {app: nfs-test}}
+                  topologyKey: kubernetes.io/hostname
+        containers:
+          - name: test
+            image: "{{ lab_test_images.busybox }}"
+            securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+            volumeMounts: [{name: data, mountPath: /data}]
+        volumes: [{name: data, persistentVolumeClaim: {claimName: nfs-test}}]
+
+- name: Use for the test volumes a copy with reclaimPolicy Delete of {{ cfg.NFS_STORAGE_CLASS }}
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/test_storageclass.yml"
+  vars:
+    addon_test_sc_source: "{{ cfg.NFS_STORAGE_CLASS }}"
+
+- name: Create a ReadWriteMany volume on {{ cfg.NFS_STORAGE_CLASS }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata: {name: nfs-test, namespace: "{{ addon_test_ns }}"}
+      spec:
+        accessModes: [ReadWriteMany]
+        storageClassName: "{{ addon_test_sc_name }}"
+        resources: {requests: {storage: 100Mi}}
+
+- name: Wait until the volume is bound (dynamic provisioning)
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=jsonpath={.status.phase}=Bound', '--timeout=180s', 'pvc/nfs-test'] }}"
+  changed_when: false
+
+- name: Write a file as a non-root user
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition: >-
+      {{ nfs_test_pod | combine({'metadata': {'name': 'nfs-writer'},
+         'spec': {'containers': [nfs_test_pod.spec.containers[0] | combine({'command':
+           ['sh', '-c', 'echo k8s-lab-nfs-ok > /data/probe && id -u > /data/owner && sync']})]}}, recursive=true) }}
+
+- name: Wait for the writer
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=jsonpath={.status.phase}=Succeeded', '--timeout=300s', 'pod/nfs-writer'] }}"
+  changed_when: false
+
+- name: Read the file from a second Pod (another node when there is one)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition: >-
+      {{ nfs_test_pod | combine({'metadata': {'name': 'nfs-reader'},
+         'spec': {'containers': [nfs_test_pod.spec.containers[0] | combine({'command':
+           ['sh', '-c', 'cat /data/probe && touch /data/reader-was-here']})]}}, recursive=true) }}
+
+- name: Wait for the reader
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=jsonpath={.status.phase}=Succeeded', '--timeout=300s', 'pod/nfs-reader'] }}"
+  changed_when: false
+
+- name: Check the data read by the second Pod
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'logs', 'pod/nfs-reader'] }}"
+  register: nfs_test_read
+  changed_when: false
+  failed_when: "'k8s-lab-nfs-ok' not in nfs_test_read.stdout"
+
+- name: Show where the two Pods ran
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'pods', '-l', 'app=nfs-test', '-o',
+           'jsonpath={range .items[*]}{.metadata.name}={.spec.nodeName} {end}'] }}"
+  register: nfs_test_nodes
+  changed_when: false
+
+- name: Delete both Pods (the volume stays)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    kind: Pod
+    namespace: "{{ addon_test_ns }}"
+    name: "{{ item }}"
+    wait: true
+  loop: [nfs-writer, nfs-reader]
+
+- name: Recreate a Pod and check that the data persisted
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition: >-
+      {{ nfs_test_pod | combine({'metadata': {'name': 'nfs-persist'},
+         'spec': {'containers': [nfs_test_pod.spec.containers[0] | combine({'command':
+           ['sh', '-c', 'cat /data/probe /data/owner && ls /data/reader-was-here']})]}}, recursive=true) }}
+
+- name: Wait for the persistence check
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=jsonpath={.status.phase}=Succeeded', '--timeout=300s', 'pod/nfs-persist'] }}"
+  changed_when: false
+
+- name: Check the persisted data and its owner
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'logs', 'pod/nfs-persist'] }}"
+  register: nfs_test_persist
+  changed_when: false
+  failed_when: "'k8s-lab-nfs-ok' not in nfs_test_persist.stdout or '1000' not in nfs_test_persist.stdout"
+
+- name: Report the NFS test
+  ansible.builtin.debug:
+    msg: >-
+      NFS {{ cfg.NFS_SERVER }}:{{ cfg.NFS_SHARE }} OK — RWX, non-root write, persistence. Pods: {{ nfs_test_nodes.stdout }}
+      {{ '(both on the same node: only one schedulable node)'
+         if nfs_test_nodes.stdout.split() | map('regex_replace', '^[^=]*=', '') | unique | length < 2 else '' }}

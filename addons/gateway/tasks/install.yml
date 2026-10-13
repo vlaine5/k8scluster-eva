@@ -1,0 +1,7 @@
+---
+# Le certificat de la Gateway doit être émis avant que l'écouteur HTTPS soit utilisable.
+- name: Wait for the Gateway certificate
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'gateway-system', 'wait', '--for=condition=Ready', 'certificate/lab-gateway-tls', '--timeout=300s'] }}"
+  changed_when: false
+  when: lab.gateway_tls | bool

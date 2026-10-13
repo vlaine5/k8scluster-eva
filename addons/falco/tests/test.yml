@@ -1,0 +1,31 @@
+---
+# =============================================================================
+#  Test de Falco : un conteneur lit /etc/shadow, ce que la règle « Read sensitive
+#  file untrusted » doit signaler (événement dans le journal de Falco).
+# =============================================================================
+
+- name: Read a sensitive file in a container
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Pod
+      metadata: {name: falco-trigger, namespace: "{{ addon_test_ns }}"}
+      spec:
+        restartPolicy: Never
+        containers:
+          - name: test
+            image: "{{ lab_test_images.busybox }}"
+            command: [sh, -c, "sleep 5; cat /etc/shadow > /dev/null; sleep 30"]
+
+- name: Find the event in the Falco logs
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'falco', 'logs', '-l', 'app.kubernetes.io/name=falco', '-c', 'falco', '--since=10m',
+           '--tail=-1', '--max-log-requests=20'] }}"
+  register: falco_test_logs
+  changed_when: false
+  until: "'falco-trigger' in falco_test_logs.stdout and '/etc/shadow' in falco_test_logs.stdout"
+  retries: 18
+  delay: 10

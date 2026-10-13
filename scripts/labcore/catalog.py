@@ -132,7 +132,7 @@ class Catalog:
             for manifest in install.get("manifests", []) + install.get("manifests_pre", []):
                 if not (addon.path / "manifests" / manifest).is_file():
                     problems.append(f"addon {addon.id}: manifeste absent : manifests/{manifest}")
-            for key in ("tasks",):
+            for key in ("tasks", "post_tasks"):
                 if install.get(key) and not (addon.path / install[key]).is_file():
                     problems.append(f"addon {addon.id}: tâches absentes : {install[key]}")
             tests = addon.data.get("tests")

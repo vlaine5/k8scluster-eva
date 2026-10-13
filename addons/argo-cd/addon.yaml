@@ -16,8 +16,18 @@ validated: []
 resources: {cpu_m: 300, memory_mb: 768}
 install:
   namespace: argocd
+  expose_setting: ARGOCD_EXPOSE
   pod_security: baseline
-  secrets: [argocd-repo-credentials]
+  secrets:
+    - name: argocd-repo-credentials
+      namespace: argocd
+      only_if_env: [ARGOCD_REPO_PASSWORD]
+      labels: {argocd.argoproj.io/secret-type: repository}
+      data:
+        type: git
+        url: cfg:ARGOCD_REPO_URL
+        username: env:ARGOCD_REPO_USERNAME
+        password: env:ARGOCD_REPO_PASSWORD
   releases:
     - {name: argo-cd, component: argo-cd, namespace: argocd, values: values.yaml.j2, timeout: 15m}
   manifests: [application.yaml.j2, httproute.yaml.j2]

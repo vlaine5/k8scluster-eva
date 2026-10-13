@@ -1,0 +1,203 @@
+---
+# =============================================================================
+#  Test de Longhorn :
+#    1. nœuds Longhorn prêts et assez de nœuds planifiables pour les réplicas
+#    2. PVC provisionné, écriture, volume « healthy » avec ses réplicas sur des nœuds distincts
+#    3. persistance : Pod supprimé puis recréé (sur un autre nœud si possible)
+#    4. (addon_destructive_tests=true) perte d'un réplica : reconstruction et données intactes
+#  La perte d'un nœud entier est un test séparé : ansible/tests/storage-node-failure.yml
+# =============================================================================
+
+- name: Read the Longhorn nodes
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'longhorn-system', 'get', 'nodes.longhorn.io', '-o', 'json'] }}"
+  register: longhorn_test_nodes
+  changed_when: false
+
+- name: Count the schedulable Longhorn nodes
+  ansible.builtin.set_fact:
+    longhorn_test_ready: >-
+      {{ (longhorn_test_nodes.stdout | from_json)['items']
+         | selectattr('spec.allowScheduling', 'equalto', true)
+         | map(attribute='status.conditions') | map('selectattr', 'type', 'equalto', 'Ready')
+         | map('selectattr', 'status', 'equalto', 'True') | map('list') | select | list | length }}
+    longhorn_test_replicas: "{{ cfg.LONGHORN_REPLICA_COUNT | int }}"
+
+- name: Check that every replica can land on a distinct node
+  ansible.builtin.assert:
+    that: longhorn_test_ready | int >= longhorn_test_replicas | int
+    fail_msg: >-
+      Only {{ longhorn_test_ready }} Longhorn node(s) ready and schedulable for {{ longhorn_test_replicas }} replicas.
+      Check the node prerequisites (open-iscsi, iscsid, nfs client) and the Longhorn node conditions:
+      kubectl -n longhorn-system get nodes.longhorn.io
+    quiet: true
+
+- name: Define the Longhorn test Pod
+  ansible.builtin.set_fact:
+    longhorn_test_pod:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        namespace: "{{ addon_test_ns }}"
+        labels: {app: longhorn-test}
+      spec:
+        restartPolicy: Never
+        securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true,
+                          seccompProfile: {type: RuntimeDefault}}
+        containers:
+          - name: test
+            image: "{{ lab_test_images.busybox }}"
+            securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+            volumeMounts: [{name: data, mountPath: /data}]
+        volumes: [{name: data, persistentVolumeClaim: {claimName: longhorn-test}}]
+
+- name: Use for the test volumes a copy with reclaimPolicy Delete of {{ cfg.LONGHORN_STORAGE_CLASS }}
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/test_storageclass.yml"
+  vars:
+    addon_test_sc_source: "{{ cfg.LONGHORN_STORAGE_CLASS }}"
+
+- name: Create a volume on {{ cfg.LONGHORN_STORAGE_CLASS }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata: {name: longhorn-test, namespace: "{{ addon_test_ns }}"}
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: "{{ addon_test_sc_name }}"
+        resources: {requests: {storage: 1Gi}}
+
+- name: Wait until the volume is bound
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=jsonpath={.status.phase}=Bound', '--timeout=300s', 'pvc/longhorn-test'] }}"
+  changed_when: false
+
+- name: Write data
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition: >-
+      {{ longhorn_test_pod | combine({'metadata': {'name': 'longhorn-writer'},
+         'spec': {'containers': [longhorn_test_pod.spec.containers[0] | combine({'command':
+           ['sh', '-c', 'dd if=/dev/urandom of=/data/blob bs=1M count=16 && md5sum /data/blob | cut -d" " -f1 > /data/blob.md5 && sync']})]}},
+         recursive=true) }}
+
+- name: Wait for the writer
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=jsonpath={.status.phase}=Succeeded', '--timeout=600s', 'pod/longhorn-writer'] }}"
+  changed_when: false
+
+- name: Find the Longhorn volume and the writer node
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'pvc/longhorn-test', 'pod/longhorn-writer', '-o',
+           'jsonpath={.items[0].spec.volumeName} {.items[1].spec.nodeName}'] }}"
+  register: longhorn_test_volume
+  changed_when: false
+
+- name: Remember the volume
+  ansible.builtin.set_fact:
+    longhorn_test_pv: "{{ longhorn_test_volume.stdout.split()[0] }}"
+    longhorn_test_first_node: "{{ longhorn_test_volume.stdout.split()[1] }}"
+
+- name: Delete the writer (the volume detaches)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    kind: Pod
+    namespace: "{{ addon_test_ns }}"
+    name: longhorn-writer
+    wait: true
+
+- name: Check the persistence from a new Pod, on another node when possible
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition: >-
+      {{ longhorn_test_pod | combine({'metadata': {'name': 'longhorn-reader'},
+         'spec': {'affinity': {'nodeAffinity': {'preferredDuringSchedulingIgnoredDuringExecution': [{'weight': 100,
+                  'preference': {'matchExpressions': [{'key': 'kubernetes.io/hostname', 'operator': 'NotIn',
+                                                        'values': [longhorn_test_first_node]}]}}]}},
+                  'containers': [longhorn_test_pod.spec.containers[0] | combine({'command':
+                    ['sh', '-c', 'test "$(md5sum /data/blob | cut -d" " -f1)" = "$(cat /data/blob.md5)" && echo checksum-ok && sleep 3600']})]}},
+         recursive=true) }}
+
+- name: Wait for the reader
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=condition=Ready', '--timeout=600s', 'pod/longhorn-reader'] }}"
+  changed_when: false
+
+- name: Check the data read by the new Pod
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'logs', 'pod/longhorn-reader'] }}"
+  register: longhorn_test_read
+  changed_when: false
+  until: "'checksum-ok' in longhorn_test_read.stdout"
+  retries: 12
+  delay: 5
+
+- name: Wait until the attached volume is healthy
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'longhorn-system', 'wait', '--for=jsonpath={.status.robustness}=healthy', '--timeout=600s',
+           'volumes.longhorn.io/' ~ longhorn_test_pv] }}"
+  changed_when: false
+
+- name: Read the replicas of the volume
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'longhorn-system', 'get', 'replicas.longhorn.io', '-l', 'longhornvolume=' ~ longhorn_test_pv,
+           '-o', 'jsonpath={range .items[*]}{.spec.nodeID}{\" \"}{.status.currentState}{\"\\n\"}{end}'] }}"
+  register: longhorn_test_replica_list
+  changed_when: false
+
+- name: Check the number and the placement of the replicas
+  ansible.builtin.assert:
+    that:
+      - longhorn_test_running | length == longhorn_test_replicas | int
+      - longhorn_test_running | unique | length == longhorn_test_running | length
+    fail_msg: >-
+      Expected {{ longhorn_test_replicas }} running replicas on distinct nodes, got:
+      {{ longhorn_test_replica_list.stdout_lines }}
+    quiet: true
+  vars:
+    longhorn_test_running: >-
+      {{ longhorn_test_replica_list.stdout_lines | select('search', ' running$') | map('split', ' ') | map('first') | list }}
+
+- name: Rebuild test (destructive for the test volume only)
+  when: addon_destructive_tests | bool and longhorn_test_replicas | int > 1
+  block:
+    - name: Pick one replica of the test volume
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', 'longhorn-system', 'get', 'replicas.longhorn.io', '-l', 'longhornvolume=' ~ longhorn_test_pv,
+               '-o', 'jsonpath={.items[0].metadata.name}'] }}"
+      register: longhorn_test_victim
+      changed_when: false
+
+    - name: Delete the replica {{ longhorn_test_victim.stdout }}
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', 'longhorn-system', 'delete', 'replicas.longhorn.io', longhorn_test_victim.stdout] }}"
+      changed_when: true
+
+    - name: Wait for the volume to be rebuilt (degraded then healthy)
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', 'longhorn-system', 'wait', '--for=jsonpath={.status.robustness}=healthy', '--timeout=900s',
+               'volumes.longhorn.io/' ~ longhorn_test_pv] }}"
+      changed_when: false
+
+    - name: Check the data after the rebuild
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'exec', 'longhorn-reader', '--', 'sh', '-c',
+               'test \"$(md5sum /data/blob | cut -d\" \" -f1)\" = \"$(cat /data/blob.md5)\" && echo checksum-ok'] }}"
+      register: longhorn_test_rebuilt
+      changed_when: false
+      failed_when: "'checksum-ok' not in longhorn_test_rebuilt.stdout"
+
+- name: Report the Longhorn test
+  ansible.builtin.debug:
+    msg: >-
+      Longhorn OK — volume {{ longhorn_test_pv }} healthy, {{ longhorn_test_replicas }} replica(s) on distinct nodes,
+      data persisted across Pods{{ ' and replica rebuild' if addon_destructive_tests | bool and longhorn_test_replicas | int > 1 else '' }}.

@@ -1,0 +1,49 @@
+---
+# =============================================================================
+#  Test de KEDA : un ScaledObject à déclencheur « cron » (fenêtre ouverte autour
+#  de l'heure courante) fait passer un Deployment de 0 à 2 répliques.
+# =============================================================================
+
+- name: Compute a cron window around now (UTC)
+  ansible.builtin.set_fact:
+    keda_test_start: "{{ (now(utc=true).timestamp() - 120) | int }}"
+    keda_test_end: "{{ (now(utc=true).timestamp() + 1800) | int }}"
+
+- name: Deploy a workload scaled to zero and its ScaledObject
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: keda-test, namespace: "{{ addon_test_ns }}"}
+        spec:
+          replicas: 0
+          selector: {matchLabels: {app: keda-test}}
+          template:
+            metadata: {labels: {app: keda-test}}
+            spec:
+              containers:
+                - {name: test, image: "{{ lab_test_images.busybox }}", command: [sleep, "3600"]}
+      - apiVersion: keda.sh/v1alpha1
+        kind: ScaledObject
+        metadata: {name: keda-test, namespace: "{{ addon_test_ns }}"}
+        spec:
+          scaleTargetRef: {name: keda-test}
+          minReplicaCount: 0
+          maxReplicaCount: 2
+          pollingInterval: 10
+          triggers:
+            - type: cron
+              metadata:
+                timezone: Etc/UTC
+                start: "{{ '%M %H' | strftime(keda_test_start | int, utc=true) }} * * *"
+                end: "{{ '%M %H' | strftime(keda_test_end | int, utc=true) }} * * *"
+                desiredReplicas: "2"
+
+- name: Wait until KEDA scales the workload to 2 replicas
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=jsonpath={.status.readyReplicas}=2', '--timeout=300s',
+           'deployment/keda-test'] }}"
+  changed_when: false

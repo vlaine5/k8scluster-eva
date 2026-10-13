@@ -185,3 +185,13 @@ workers
 ansible_user=admin
 node_network_cidr=10.20.0.0/16
 """
+
+
+@pytest.mark.parametrize("cron,expected", [
+    ("0 3 * * *", "*-*-* 3:0:00"),
+    ("*/15 * * * 1-5", "Mon..Fri *-*-* *:0/15:00"),
+    ("30 2 1 */2 0", "Sun *-1/2-1 2:30:00"),
+])
+def test_cron_to_oncalendar(cron, expected):
+    from labcore.resolve import cron_to_oncalendar
+    assert cron_to_oncalendar(cron) == expected

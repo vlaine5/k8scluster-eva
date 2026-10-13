@@ -17,8 +17,10 @@ validated: []
 install:
   namespace: gateway-system
   pod_security: restricted
+  # La route de redirection HTTP -> HTTPS vit dans ce namespace.
+  namespace_labels: {gateway.k8s-lab.io/expose: "true"}
   manifests: [gateway.yaml.j2]
-  tasks: tasks/install.yml
+  post_tasks: tasks/install.yml
 health:
   - {kind: Gateway, namespace: gateway-system, name: lab-gateway, condition: Programmed}
 tests: tests/test.yml

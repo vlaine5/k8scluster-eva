@@ -1,0 +1,85 @@
+---
+# =============================================================================
+#  Test de metrics-server :
+#    1. l'API metrics.k8s.io répond pour CHAQUE nœud (certificats kubelet vérifiés)
+#    2. kubectl top pods fonctionne
+#    3. un HorizontalPodAutoscaler lit la consommation CPU (ScalingActive=True)
+# =============================================================================
+
+- name: Count the nodes
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'nodes', '-o', 'name'] }}"
+  register: metrics_test_nodes
+  changed_when: false
+
+- name: Wait for the metrics of every node
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', '--raw', '/apis/metrics.k8s.io/v1beta1/nodes'] }}"
+  register: metrics_test_api
+  changed_when: false
+  failed_when: false
+  until: >-
+    metrics_test_api.rc == 0
+    and (metrics_test_api.stdout | from_json)['items'] | length == metrics_test_nodes.stdout_lines | length
+  retries: 30
+  delay: 10
+
+- name: Check the node metrics
+  ansible.builtin.assert:
+    that:
+      - metrics_test_api.rc == 0
+      - (metrics_test_api.stdout | from_json)['items'] | length == metrics_test_nodes.stdout_lines | length
+    fail_msg: >-
+      metrics.k8s.io does not return every node. Usual cause: a kubelet serving certificate not signed
+      by the cluster CA or without the node IP (kubectl get csr ; kubectl -n kube-system logs deploy/metrics-server).
+      {{ metrics_test_api.stderr | default('') | truncate(300) }}
+    quiet: true
+
+- name: Deploy a workload with an HorizontalPodAutoscaler
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    wait: true
+    definition:
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: hpa-test, namespace: "{{ addon_test_ns }}"}
+        spec:
+          replicas: 1
+          selector: {matchLabels: {app: hpa-test}}
+          template:
+            metadata: {labels: {app: hpa-test}}
+            spec:
+              containers:
+                - name: test
+                  image: "{{ lab_test_images.busybox }}"
+                  command: [sleep, "3600"]
+                  resources: {requests: {cpu: 10m, memory: 16Mi}}
+      - apiVersion: autoscaling/v2
+        kind: HorizontalPodAutoscaler
+        metadata: {name: hpa-test, namespace: "{{ addon_test_ns }}"}
+        spec:
+          scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: hpa-test}
+          minReplicas: 1
+          maxReplicas: 2
+          metrics: [{type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: 80}}}]
+
+- name: Wait until the autoscaler reads the CPU metrics
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--timeout=240s',
+           '--for=jsonpath={.status.conditions[?(@.type==\"ScalingActive\")].status}=True', 'hpa/hpa-test'] }}"
+  changed_when: false
+
+- name: Run kubectl top pods
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['top', 'pods', '-n', addon_test_ns] }}"
+  register: metrics_test_top
+  changed_when: false
+  until: metrics_test_top.rc == 0
+  retries: 12
+  delay: 10
+
+- name: Report the metrics-server test
+  ansible.builtin.debug:
+    msg: "metrics-server OK — {{ metrics_test_nodes.stdout_lines | length }} node(s) measured, HPA active, kubectl top works."

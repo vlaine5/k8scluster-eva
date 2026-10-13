@@ -16,7 +16,13 @@ resources: {cpu_m: 100, memory_mb: 256}
 install:
   namespace: cert-manager
   pod_security: restricted
-  secrets: [cert-manager-dns01-credentials]
+  secrets:
+    - name: cert-manager-dns01-credentials
+      namespace: cert-manager
+      only_if_any_env: [CLOUDFLARE_API_TOKEN, RFC2136_TSIG_SECRET]
+      data:
+        cloudflare-api-token: env:CLOUDFLARE_API_TOKEN
+        rfc2136-tsig-secret: env:RFC2136_TSIG_SECRET
   releases:
     - {name: cert-manager, component: cert-manager, namespace: cert-manager, values: values.yaml.j2, timeout: 10m}
   manifests: [issuers.yaml.j2]

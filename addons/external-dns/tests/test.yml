@@ -1,0 +1,25 @@
+---
+# =============================================================================
+#  Test d'ExternalDNS (non intrusif) : le contrôleur se connecte au fournisseur
+#  DNS et termine ses cycles de synchronisation sans erreur. Aucun enregistrement
+#  de test n'est créé : en upsert-only il ne serait jamais supprimé.
+# =============================================================================
+
+- name: Wait for a synchronisation cycle of ExternalDNS
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'external-dns', 'logs', 'deploy/external-dns', '--since=10m'] }}"
+  register: extdns_test_logs
+  changed_when: false
+  until: >-
+    'All records are already up to date' in extdns_test_logs.stdout
+    or 'Desired change' in extdns_test_logs.stdout
+    or 'level=error' in extdns_test_logs.stdout
+  retries: 18
+  delay: 10
+
+- name: Check that ExternalDNS talks without errors to {{ cfg.EXTERNAL_DNS_PROVIDER }}
+  ansible.builtin.assert:
+    that: "'level=error' not in extdns_test_logs.stdout and 'level=fatal' not in extdns_test_logs.stdout"
+    fail_msg: >-
+      ExternalDNS reports errors: {{ extdns_test_logs.stdout_lines | select('search', 'level=(error|fatal)') | list | last | default('') }}
+    quiet: true

@@ -1,0 +1,53 @@
+---
+# Contrôle de santé d'une ressource (addon.yaml -> health).
+#   addon_health_mode = wait   : attend l'état prêt (échec = erreur)
+#   addon_health_mode = status : constat rapide, sans échec
+- name: Build the health command
+  ansible.builtin.set_fact:
+    addon_health_argv: >-
+      {{ addon_kubectl + (['-n', addon_check.namespace] if addon_check.namespace is defined else [])
+         + (addon_health_commands[addon_check.kind] | default(['get', addon_check.kind | lower, addon_check.name])) }}
+  vars:
+    addon_timeout: "{{ addon_health_timeout if addon_health_mode == 'wait' else addon_status_timeout }}"
+    addon_health_commands:
+      Deployment: [rollout, status, "deployment/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      DaemonSet: [rollout, status, "daemonset/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      StatefulSet: [rollout, status, "statefulset/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      CustomResourceDefinition: [wait, --for=condition=Established, "crd/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      APIService: [wait, --for=condition=Available, "apiservice/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      GatewayClass: [wait, --for=condition=Accepted, "gatewayclass/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      Gateway: [wait, "--for=condition={{ addon_check.condition | default('Programmed') }}", "gateway/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      BackupStorageLocation: [wait, "--for=jsonpath={.status.phase}=Available", "backupstoragelocation/{{ addon_check.name }}",
+                              "--timeout={{ addon_timeout }}"]
+
+- name: Check {{ addon_check.kind ~ ' ' ~ addon_check.name }}
+  ansible.builtin.command:
+    argv: "{{ addon_health_argv }}"
+  register: addon_health_result
+  changed_when: false
+  failed_when: false
+  until: addon_health_result.rc == 0 or addon_health_mode == 'status'
+  retries: "{{ 30 if addon_health_mode == 'wait' else 0 }}"
+  delay: 10
+
+- name: Record the health result
+  ansible.builtin.set_fact:
+    addon_health_report: >-
+      {{ addon_health_report | default([]) + [{'addon': addon_item.id, 'kind': addon_check.kind,
+         'name': addon_check.name, 'ok': addon_health_result.rc == 0,
+         'detail': (addon_health_result.stderr | default('') | trim | truncate(200))}] }}
+
+- name: Fail with a diagnosis for the unready resource {{ addon_check.kind ~ ' ' ~ addon_check.name }}
+  ansible.builtin.fail:
+    msg: |
+      {{ addon_item.id }} : {{ addon_check.kind }} {{ addon_check.namespace | default('') }}/{{ addon_check.name }} is not ready.
+      {{ addon_health_result.stderr | default('') | trim | truncate(800) }}
+      Diagnosis:
+        kubectl --context {{ addon_context }} get pods -A | grep -v Running
+        kubectl --context {{ addon_context }} -n {{ addon_health_ns }} get events --sort-by=.lastTimestamp | tail -20
+      Re-run safely: make addons-apply (only what is missing is installed). docs/troubleshooting.md#addons
+  vars:
+    addon_health_ns: "{{ addon_check.namespace | default(addon_install.namespace | default('default')) }}"
+  when:
+    - addon_health_mode == 'wait'
+    - addon_health_result.rc != 0

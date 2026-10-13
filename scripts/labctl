@@ -37,7 +37,9 @@ from labcore.resolve import Resolver  # noqa: E402
 
 
 def load(args):
-    cfg = Config.load(ROOT)
+    # LAB_ENV_FILE : autre fichier que .env (profils d'exemple, scénarios de test).
+    env_file = os.environ.get("LAB_ENV_FILE")
+    cfg = Config.load(ROOT, dotenv=Path(env_file).resolve() if env_file else None)
     try:
         catalog = Catalog.load(ROOT)
     except CatalogError as exc:

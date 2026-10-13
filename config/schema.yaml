@@ -139,7 +139,7 @@ variables:
 
   # --- Addons ------------------------------------------------------------------------
   ADDON_PROFILE: {group: addons, type: enum, values: [minimal, homelab, observability, enterprise-lab, ci, custom], description: "Profil d'addons."}
-  ADDONS: {group: addons, type: list, empty: true, description: "Addons ajoutés (nom) ou retirés (-nom)."}
+  ADDONS: {group: addons, type: list, empty: true, description: "Addons ajoutés (nom ou +nom) ou retirés (-nom) par rapport au profil."}
   COMPATIBILITY_POLICY: {group: addons, type: enum, values: [warn, strict], description: "Traitement des combinaisons non testées en amont."}
   EXISTING_ADDON_POLICY: {group: addons, type: enum, values: [fail, skip], description: "Mode attach : composant déjà installé par un autre outil."}
 

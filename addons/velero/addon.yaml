@@ -12,6 +12,7 @@ requires:
   settings: [VELERO_S3_URL, VELERO_BUCKET]
   secrets: [VELERO_S3_ACCESS_KEY, VELERO_S3_SECRET_KEY]
 settings: [VELERO_S3_URL, VELERO_BUCKET, VELERO_REGION, VELERO_FS_BACKUP, BACKUP_SCHEDULE, BACKUP_RETENTION_DAYS]
+secrets: [VELERO_S3_ACCESS_KEY, VELERO_S3_SECRET_KEY]
 support:
   default: supported
   kind: {status: experimental, note: "Nécessite un stockage S3 joignable."}
@@ -21,7 +22,16 @@ resources: {cpu_m: 300, memory_mb: 512}
 install:
   namespace: velero
   pod_security: privileged
-  secrets: [velero-s3-credentials]
+  secrets:
+    - name: velero-s3-credentials
+      namespace: velero
+      only_if_env: [VELERO_S3_ACCESS_KEY]
+      # Fichier d'identifiants au format AWS attendu par velero-plugin-for-aws (clé "cloud").
+      format: aws-credentials-file
+      key: cloud
+      data:
+        aws_access_key_id: env:VELERO_S3_ACCESS_KEY
+        aws_secret_access_key: env:VELERO_S3_SECRET_KEY
   releases:
     - {name: velero, component: velero, namespace: velero, values: values.yaml.j2, timeout: 10m}
 health:

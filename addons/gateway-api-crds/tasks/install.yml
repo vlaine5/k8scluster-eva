@@ -1,0 +1,32 @@
+---
+# CRD Gateway API installées depuis votre poste (même manifeste et même SHA-256
+# que le rôle cni). Server-side apply avec le gestionnaire "k8s-lab" : si les CRD
+# appartiennent déjà à un autre outil, l'application échoue (conflit) au lieu de
+# les reprendre en silence.
+- name: Create the local cache of the Gateway API manifests
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../.lab/cache/gateway-api"
+    state: directory
+    mode: "0700"
+
+- name: Download the Gateway API CRDs (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ gateway_api_crds.url | replace('{version}', gateway_api_crds.version) | replace('{channel}', gateway_api_crds.channel) }}"
+    dest: "{{ playbook_dir }}/../.lab/cache/gateway-api/{{ gateway_api_crds.version }}-{{ gateway_api_crds.channel }}.yaml"
+    checksum: "sha256:{{ gateway_api_crds.sha256[gateway_api_crds.channel] }}"
+    mode: "0644"
+
+- name: Compare the Gateway API CRDs with the cluster
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['diff', '--server-side', '--field-manager=k8s-lab', '-f',
+           playbook_dir ~ '/../.lab/cache/gateway-api/' ~ gateway_api_crds.version ~ '-' ~ gateway_api_crds.channel ~ '.yaml'] }}"
+  register: gateway_api_crds_diff
+  changed_when: false
+  failed_when: gateway_api_crds_diff.rc > 1
+
+- name: Apply the Gateway API CRDs
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['apply', '--server-side', '--field-manager=k8s-lab', '-f',
+           playbook_dir ~ '/../.lab/cache/gateway-api/' ~ gateway_api_crds.version ~ '-' ~ gateway_api_crds.channel ~ '.yaml'] }}"
+  when: gateway_api_crds_diff.rc == 1
+  changed_when: true

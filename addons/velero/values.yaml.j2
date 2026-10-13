@@ -1,0 +1,47 @@
+# Velero : sauvegarde des ressources Kubernetes (et des volumes par copie de fichiers,
+# VELERO_FS_BACKUP) vers un stockage S3 existant ({{ cfg.VELERO_S3_URL }}, compartiment
+# {{ cfg.VELERO_BUCKET }}). Le compartiment n'est jamais créé ni vidé par le framework.
+{% set schedule = lab.backup.enabled | default(false) and cfg.BACKUP_PROVIDER in ['velero', 'both'] %}
+initContainers:
+  - name: velero-plugin-for-aws
+    image: "{{ addon_item.components['velero'].aws_plugin_image }}"
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - {mountPath: /target, name: plugins}
+credentials:
+  useSecret: true
+  existingSecret: velero-s3-credentials
+configuration:
+  backupStorageLocation:
+    - name: default
+      provider: aws
+      bucket: "{{ cfg.VELERO_BUCKET }}"
+      prefix: "{{ cfg.CLUSTER_NAME }}"
+      default: true
+      config:
+        region: "{{ cfg.VELERO_REGION }}"
+        s3ForcePathStyle: "true"
+        s3Url: "{{ cfg.VELERO_S3_URL }}"
+  volumeSnapshotLocation: []
+  defaultVolumesToFsBackup: {{ cfg.VELERO_FS_BACKUP | bool }}
+  uploaderType: kopia
+snapshotsEnabled: false
+deployNodeAgent: {{ cfg.VELERO_FS_BACKUP | bool }}
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 512Mi}
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+{% if schedule %}
+schedules:
+  daily:
+    disabled: false
+    schedule: "{{ cfg.BACKUP_SCHEDULE }}"
+    useOwnerReferencesInBackup: false
+    template:
+      ttl: "{{ cfg.BACKUP_RETENTION_DAYS | int * 24 }}h0m0s"
+      includedNamespaces: ["*"]
+      excludedNamespaces: [k8s-lab-test-velero]
+{% endif %}

@@ -1,0 +1,73 @@
+---
+# Test fonctionnel d'un addon (addons/<id>/tests/test.yml) dans un namespace
+# dédié, supprimé à la fin (sauf addon_keep_test_resources). Un échec est
+# enregistré et n'empêche pas de tester les addons suivants.
+- name: Prepare the test of {{ addon_item.id }}
+  ansible.builtin.set_fact:
+    addon_test_ns: "k8s-lab-test-{{ addon_item.id }}"
+    addon_test_failed: false
+    addon_test_sc_name: ""
+
+- name: Test {{ addon_item.id }}
+  when: addon_spec.tests is defined
+  block:
+    - name: Create the test namespace {{ addon_test_ns }}
+      kubernetes.core.k8s:
+        kubeconfig: "{{ addon_kubeconfig }}"
+        context: "{{ addon_context }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ addon_test_ns }}"
+            labels: >-
+              {{ addon_namespace_labels | combine({'gateway.k8s-lab.io/expose': 'true',
+                 'pod-security.kubernetes.io/enforce': addon_spec.test_pod_security | default('baseline')})
+                 | combine(addon_spec.test_namespace_labels | default({})) }}
+
+    - name: Run the functional test of {{ addon_item.id }}
+      ansible.builtin.include_tasks: "{{ addon_dir }}/{{ addon_spec.tests }}"
+
+  rescue:
+    - name: Record the failure of {{ addon_item.id }}
+      ansible.builtin.set_fact:
+        addon_test_failed: true
+        addon_test_failure: "{{ ansible_failed_result.msg | default(ansible_failed_result.stderr | default('?')) | string | truncate(600) }}"
+
+    - name: Collect a diagnosis for {{ addon_item.id }}
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'pods,events', '-o', 'wide'] }}"
+      register: addon_test_diag
+      changed_when: false
+      failed_when: false
+
+    - name: Show the diagnosis
+      ansible.builtin.debug:
+        msg: "{{ addon_test_diag.stdout_lines | default([]) }}"
+
+  always:
+    - name: Delete the test volumes and StorageClass
+      ansible.builtin.include_tasks: helpers/test_storageclass_cleanup.yml
+      when:
+        - addon_test_sc_name | length > 0
+        - not addon_keep_test_resources | bool
+
+    - name: Delete the test namespace {{ addon_test_ns }}
+      kubernetes.core.k8s:
+        kubeconfig: "{{ addon_kubeconfig }}"
+        context: "{{ addon_context }}"
+        state: absent
+        kind: Namespace
+        name: "{{ addon_test_ns }}"
+        wait: true
+        wait_timeout: 180
+      when: not addon_keep_test_resources | bool
+      failed_when: false
+
+- name: Record the test result of {{ addon_item.id }}
+  ansible.builtin.set_fact:
+    addon_test_report: >-
+      {{ addon_test_report | default([]) + [{'addon': addon_item.id,
+         'result': ('absent' if addon_spec.tests is not defined else ('ÉCHEC' if addon_test_failed else 'réussi')),
+         'detail': addon_test_failure | default('') if addon_test_failed else ''}] }}

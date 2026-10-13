@@ -11,7 +11,18 @@ selected_by:
   STORAGE_BACKENDS: [longhorn]
 requires:
   min_workers: 1
-settings: [LONGHORN_VERSION, LONGHORN_REPLICA_COUNT, LONGHORN_DATA_PATH, LONGHORN_STORAGE_CLASS, LONGHORN_RECLAIM_POLICY, LONGHORN_UI_ENABLED, LONGHORN_UI_EXPOSE, LONGHORN_BACKUP_ENABLED, LONGHORN_BACKUP_TARGET, LONGHORN_DEDICATED_DISK, LONGHORN_DISK_SIZE_GB]
+settings:
+  - LONGHORN_VERSION
+  - LONGHORN_REPLICA_COUNT
+  - LONGHORN_DATA_PATH
+  - LONGHORN_STORAGE_CLASS
+  - LONGHORN_RECLAIM_POLICY
+  - LONGHORN_UI_ENABLED
+  - LONGHORN_UI_EXPOSE
+  - LONGHORN_BACKUP_ENABLED
+  - LONGHORN_BACKUP_TARGET
+  - LONGHORN_DEDICATED_DISK
+  - LONGHORN_DISK_SIZE_GB
 secrets: [LONGHORN_BACKUP_S3_ACCESS_KEY, LONGHORN_BACKUP_S3_SECRET_KEY]
 stateful: true
 support:
@@ -31,8 +42,16 @@ node_prereqs:
   services: [iscsid]
 install:
   namespace: longhorn-system
+  expose_setting: LONGHORN_UI_EXPOSE
   pod_security: privileged
-  secrets: [longhorn-backup-credentials]
+  secrets:
+    - name: longhorn-backup-credentials
+      namespace: longhorn-system
+      only_if_env: [LONGHORN_BACKUP_S3_ACCESS_KEY]
+      data:
+        AWS_ACCESS_KEY_ID: env:LONGHORN_BACKUP_S3_ACCESS_KEY
+        AWS_SECRET_ACCESS_KEY: env:LONGHORN_BACKUP_S3_SECRET_KEY
+        AWS_ENDPOINTS: env:LONGHORN_BACKUP_S3_ENDPOINT
   releases:
     - {name: longhorn, component: longhorn, namespace: longhorn-system, values: values.yaml.j2, timeout: 20m}
   manifests: [storageclass.yaml.j2]

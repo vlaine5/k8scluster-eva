@@ -1,0 +1,58 @@
+---
+# =============================================================================
+#  Test de Kyverno : un Pod qui utilise le réseau de l'hôte viole la politique
+#  baseline « disallow-host-namespaces ».
+#    enforce : il est REFUSÉ à l'admission (essai à blanc côté serveur)
+#    audit   : il est admis et un PolicyReport le signale en échec
+# =============================================================================
+
+- name: Define a Pod that breaks the baseline policies
+  ansible.builtin.set_fact:
+    kyverno_test_pod:
+      apiVersion: v1
+      kind: Pod
+      metadata: {name: host-network, namespace: "{{ addon_test_ns }}"}
+      spec:
+        hostNetwork: true
+        containers:
+          - {name: test, image: "{{ lab_test_images.busybox }}", command: [sleep, "600"]}
+
+- name: Enforce mode - the Pod must be rejected
+  when: cfg.KYVERNO_POLICY_MODE == 'enforce'
+  block:
+    - name: Try to create the Pod (server-side dry run)
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['create', '--dry-run=server', '-f', '-'] }}"
+        stdin: "{{ kyverno_test_pod | to_json }}"
+      register: kyverno_test_enforce
+      changed_when: false
+      failed_when: kyverno_test_enforce.rc == 0 or 'disallow-host-namespaces' not in kyverno_test_enforce.stderr
+
+- name: Audit mode - the violation must be reported
+  when: cfg.KYVERNO_POLICY_MODE == 'audit'
+  block:
+    - name: Create the Pod
+      kubernetes.core.k8s:
+        kubeconfig: "{{ addon_kubeconfig }}"
+        context: "{{ addon_context }}"
+        state: present
+        definition: "{{ kyverno_test_pod }}"
+
+    - name: Wait for the policy report
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'policyreports.wgpolicyk8s.io', '-o', 'json'] }}"
+      register: kyverno_test_reports
+      changed_when: false
+      until: >-
+        (kyverno_test_reports.stdout | from_json)['items'] | map(attribute='results') | flatten
+        | selectattr('policy', 'equalto', 'disallow-host-namespaces') | selectattr('result', 'equalto', 'fail') | list | length > 0
+      retries: 30
+      delay: 10
+
+- name: Policies disabled (KYVERNO_POLICY_MODE=none) - only the engine is checked
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'validatingwebhookconfigurations', '-l', 'webhook.kyverno.io/managed-by=kyverno', '-o', 'name'] }}"
+  register: kyverno_test_webhooks
+  changed_when: false
+  failed_when: kyverno_test_webhooks.stdout | length == 0
+  when: cfg.KYVERNO_POLICY_MODE == 'none'

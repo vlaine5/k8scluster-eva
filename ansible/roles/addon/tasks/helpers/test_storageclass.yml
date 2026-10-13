@@ -1,0 +1,34 @@
+---
+# Aide pour les tests de stockage : copie d'une StorageClass du lab avec la
+# politique Delete, pour que les volumes de test ne laissent rien derrière eux
+# (les StorageClasses du lab restent en Retain). Supprimée par le moteur de test.
+#   addon_test_sc_source : StorageClass à copier
+- name: Read the StorageClass {{ addon_test_sc_source }}
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'storageclass', addon_test_sc_source, '-o', 'json'] }}"
+  register: addon_test_sc_json
+  changed_when: false
+
+- name: Create the test StorageClass, a copy with reclaimPolicy Delete of {{ addon_test_sc_source }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: "{{ addon_test_ns }}"
+        labels: {app.kubernetes.io/managed-by: k8s-lab, k8s-lab.io/test: "true"}
+      provisioner: "{{ addon_test_sc.provisioner }}"
+      parameters: "{{ addon_test_sc.parameters | default({}) }}"
+      mountOptions: "{{ addon_test_sc.mountOptions | default(omit) }}"
+      reclaimPolicy: Delete
+      volumeBindingMode: "{{ addon_test_sc.volumeBindingMode | default('Immediate') }}"
+      allowVolumeExpansion: true
+  vars:
+    addon_test_sc: "{{ addon_test_sc_json.stdout | from_json }}"
+
+- name: Remember the test StorageClass
+  ansible.builtin.set_fact:
+    addon_test_sc_name: "{{ addon_test_ns }}"

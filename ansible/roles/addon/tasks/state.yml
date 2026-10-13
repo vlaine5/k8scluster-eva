@@ -1,0 +1,43 @@
+---
+# Trace des addons gérés par le framework : ConfigMap k8s-lab-system/k8s-lab-addons
+# (une clé par addon : versions, date, raisons). Sert au statut, aux mises à
+# jour et au mode attach (distinguer ce qui est géré par le lab).
+- name: Create the k8s-lab system namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ addon_state_namespace }}"
+        labels: "{{ addon_namespace_labels | combine({'pod-security.kubernetes.io/enforce': 'restricted'}) }}"
+  when: addon_state_operation == 'record'
+
+- name: Record in the state ConfigMap the addon {{ addon_item.id }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    apply: true
+    server_side_apply:
+      field_manager: "k8s-lab-{{ addon_item.id }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ addon_state_configmap }}"
+        namespace: "{{ addon_state_namespace }}"
+        labels: "{{ addon_namespace_labels }}"
+      data: "{{ {addon_item.id: ({'versions': addon_item.versions, 'reasons': addon_item.reasons, 'platform': lab.platform} | to_json)} }}"
+  when: addon_state_operation == 'record'
+
+- name: Remove from the state ConfigMap the addon {{ addon_item.id }}
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_state_namespace, 'patch', 'configmap', addon_state_configmap, '--type=json',
+           '-p', '[{\"op\": \"remove\", \"path\": \"/data/' ~ addon_item.id ~ '\"}]'] }}"
+  register: addon_state_remove
+  changed_when: addon_state_remove.rc == 0
+  failed_when: false
+  when: addon_state_operation == 'forget'

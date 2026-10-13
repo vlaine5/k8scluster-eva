@@ -31,6 +31,12 @@ def test_profile_plus_additions_and_removals(lab):
     assert "keda" in ids(plan) and "argo-cd" not in ids(plan) and "metrics-server" in ids(plan)
 
 
+def test_plus_prefix_is_an_explicit_addition(lab):
+    lab.env("ADDON_PROFILE=homelab\nADDONS=+reloader,-argo-cd")
+    plan = lab.plan("kind")
+    assert "reloader" in ids(plan) and "argo-cd" not in ids(plan)
+
+
 def test_unknown_addon_suggests_the_right_name(lab):
     lab.env("ADDONS=cert-manger")
     errors = messages(lab.plan("kind"))

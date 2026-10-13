@@ -1,0 +1,41 @@
+# ExternalDNS en politique upsert-only : crée et met à jour, ne SUPPRIME JAMAIS d'enregistrement.
+{% set provider = cfg.EXTERNAL_DNS_PROVIDER %}
+{% set ns_host, _, ns_port = cfg.RFC2136_NAMESERVER.partition(':') %}
+policy: upsert-only
+registry: {{ 'noop' if provider == 'pihole' else 'txt' }}
+txtOwnerId: "{{ cfg.CLUSTER_NAME }}"
+domainFilters: ["{{ cfg.EXTERNAL_DNS_DOMAIN_FILTER }}"]
+sources:
+  - service
+{% if 'gateway-api-crds' in lab_addon_ids %}
+  - gateway-httproute
+{% endif %}
+provider:
+  name: {{ provider }}
+{% if provider == 'rfc2136' %}
+extraArgs:
+  - --rfc2136-host={{ ns_host }}
+  - --rfc2136-port={{ ns_port or 53 }}
+  - --rfc2136-zone={{ cfg.EXTERNAL_DNS_DOMAIN_FILTER }}
+  - --rfc2136-tsig-keyname={{ cfg.RFC2136_TSIG_KEY_NAME }}
+  - --rfc2136-tsig-secret-alg={{ cfg.RFC2136_TSIG_ALGORITHM | lower | regex_replace('^hmac', 'hmac-') }}
+  - --rfc2136-tsig-axfr
+env:
+  - name: EXTERNAL_DNS_RFC2136_TSIG_SECRET
+    valueFrom: {secretKeyRef: {name: external-dns-credentials, key: rfc2136-tsig-secret}}
+{% elif provider == 'cloudflare' %}
+env:
+  - name: CF_API_TOKEN
+    valueFrom: {secretKeyRef: {name: external-dns-credentials, key: cloudflare-api-token}}
+{% elif provider == 'pihole' %}
+extraArgs:
+  - --pihole-server={{ cfg.PIHOLE_SERVER }}
+  - --pihole-api-version=6
+env:
+  - name: EXTERNAL_DNS_PIHOLE_PASSWORD
+    valueFrom: {secretKeyRef: {name: external-dns-credentials, key: pihole-password}}
+{% endif %}
+serviceMonitor:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+resources:
+  requests: {cpu: 10m, memory: 32Mi}

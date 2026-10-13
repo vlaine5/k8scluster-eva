@@ -1,0 +1,52 @@
+# Loki en mode monolithique (un seul Pod), stockage sur système de fichiers.
+# Suffisant pour un lab (quelques Go/jour) ; pour plus : stockage objet (docs/observability.md).
+{% set monitored = 'prometheus-operator-crds' in lab_addon_ids %}
+deploymentMode: Monolithic
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2025-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    retention_period: {{ cfg.LOGGING_RETENTION }}
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: {{ cfg.LOGGING_PERSISTENCE | bool }}
+    size: 10Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+# Pas de passerelle nginx, de caches memcached ni de canari : composants inutiles en monolithique.
+gateway:
+  enabled: false
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+monitoring:
+  serviceMonitor:
+    enabled: {{ monitored }}

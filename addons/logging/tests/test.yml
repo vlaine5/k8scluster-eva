@@ -1,0 +1,44 @@
+---
+# =============================================================================
+#  Test de la journalisation : un Pod écrit une ligne unique, qui doit être
+#  retrouvée dans Loki (requête LogQL par le proxy de l'API Kubernetes).
+# =============================================================================
+
+- name: Choose a unique marker
+  ansible.builtin.set_fact:
+    logging_test_marker: "k8s-lab-log-{{ 99999999 | random(seed=addon_test_ns ~ now(utc=true).isoformat()) }}"
+
+- name: Write the marker from a Pod
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Pod
+      metadata: {name: log-writer, namespace: "{{ addon_test_ns }}"}
+      spec:
+        containers:
+          - name: writer
+            image: "{{ lab_test_images.busybox }}"
+            command: [sh, -c, "while true; do echo {{ logging_test_marker }}; sleep 5; done"]
+
+- name: Find the marker in Loki
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', '--raw', '/api/v1/namespaces/logging/services/http:loki:3100/proxy/loki/api/v1/query_range?limit=10&query='
+           ~ ('{namespace=\"' ~ addon_test_ns ~ '\"} |= \"' ~ logging_test_marker ~ '\"') | urlencode] }}"
+  register: logging_test_query
+  changed_when: false
+  failed_when: false
+  until: logging_test_query.rc == 0 and logging_test_marker in logging_test_query.stdout
+  retries: 30
+  delay: 10
+
+- name: Check that the logs reached Loki
+  ansible.builtin.assert:
+    that: logging_test_query.rc == 0 and logging_test_marker in logging_test_query.stdout
+    fail_msg: >-
+      The log line of {{ addon_test_ns }}/log-writer was not found in Loki after 5 minutes
+      (kubectl -n logging logs ds/alloy ; kubectl -n logging logs sts/loki).
+      {{ logging_test_query.stderr | default('') | truncate(300) }}
+    quiet: true

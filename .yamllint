@@ -12,6 +12,9 @@ rules:
   line-length:
     max: 160
     level: warning
+    # Une variable par ligne (format compact voulu) dans le schéma de configuration.
+    ignore: |
+      config/schema.yaml
   truthy:
     allowed-values: ["true", "false"]
     check-keys: false

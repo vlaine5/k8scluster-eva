@@ -1,0 +1,14 @@
+# istiod (mode sidecar). L'injection est activée par namespace :
+#   kubectl label namespace <ns> istio-injection=enabled
+# Avec Cilium sans kube-proxy, Cilium est configuré en socketLB.hostNamespaceOnly
+# (rôle cni) pour rester compatible avec les sidecars.
+autoscaleEnabled: false
+replicaCount: 1
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+meshConfig:
+  accessLogFile: /dev/stdout
+global:
+  proxy:
+    resources:
+      requests: {cpu: 10m, memory: 64Mi}

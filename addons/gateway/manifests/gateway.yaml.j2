@@ -1,0 +1,72 @@
+{# Gateway partagée du lab. Les applications y attachent leurs HTTPRoute depuis
+   les namespaces étiquetés gateway.k8s-lab.io/expose=true (docs/gateway-api.md). #}
+{% set ctrl = {'traefik': 'traefik', 'envoy-gateway': 'envoy-gateway', 'cilium': 'cilium-gateway'}[lab.gateway_controller] %}
+{% set gw = lab_addons | selectattr('id', 'equalto', ctrl) | map(attribute='spec') | first %}
+{% set ports = gw.gateway.listener_ports %}
+{% set admitted = {'namespaces': {'from': 'Selector', 'selector': {'matchLabels': {'gateway.k8s-lab.io/expose': 'true'}}}} %}
+{% if lab.gateway_tls %}
+# Certificat générique *.{{ cfg.GATEWAY_DOMAIN }} émis par cert-manager (CA interne ou ACME DNS-01).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lab-gateway-tls
+  namespace: gateway-system
+spec:
+  secretName: lab-gateway-tls
+  dnsNames:
+    - "*.{{ cfg.GATEWAY_DOMAIN }}"
+    - "{{ cfg.GATEWAY_DOMAIN }}"
+  issuerRef:
+    kind: ClusterIssuer
+    name: "{{ 'letsencrypt-' ~ cfg.ACME_ENVIRONMENT if cfg.CERT_MANAGER_ISSUER == 'acme-dns01' else 'k8s-lab-ca' }}"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+---
+{% endif %}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: lab-gateway
+  namespace: gateway-system
+  labels:
+    app.kubernetes.io/managed-by: k8s-lab
+spec:
+  gatewayClassName: "{{ gw.gateway.class }}"
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: {{ ports.http }}
+      hostname: "*.{{ cfg.GATEWAY_DOMAIN }}"
+      allowedRoutes: {{ admitted | to_json }}
+{% if lab.gateway_tls %}
+    - name: https
+      protocol: HTTPS
+      port: {{ ports.https }}
+      hostname: "*.{{ cfg.GATEWAY_DOMAIN }}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: lab-gateway-tls
+      allowedRoutes: {{ admitted | to_json }}
+---
+# Redirection permanente HTTP -> HTTPS pour tous les noms *.{{ cfg.GATEWAY_DOMAIN }}.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-to-https
+  namespace: gateway-system
+spec:
+  parentRefs:
+    - name: lab-gateway
+      sectionName: http
+  hostnames:
+    - "*.{{ cfg.GATEWAY_DOMAIN }}"
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+{% endif %}

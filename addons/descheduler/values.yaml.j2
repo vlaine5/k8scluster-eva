@@ -1,0 +1,31 @@
+# Descheduler (CronJob toutes les 10 minutes) : rééquilibre les Pods entre les nœuds
+# (doublons, nœuds sous/sur-utilisés, règles d'affinité violées). Les Pods avec un
+# volume persistant ou du stockage local ne sont jamais évincés.
+kind: CronJob
+schedule: "*/10 * * * *"
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+deschedulerPolicy:
+  profiles:
+    - name: default
+      pluginConfig:
+        - name: DefaultEvictor
+          args:
+            podProtections:
+              extraEnabled: [PodsWithPVC, PodsWithLocalStorage]
+        - name: RemoveDuplicates
+        - name: RemovePodsViolatingNodeAffinity
+          args:
+            nodeAffinityType: [requiredDuringSchedulingIgnoredDuringExecution]
+        - name: RemovePodsViolatingNodeTaints
+        - name: RemovePodsViolatingInterPodAntiAffinity
+        - name: RemovePodsViolatingTopologySpreadConstraint
+        - name: LowNodeUtilization
+          args:
+            thresholds: {cpu: 20, memory: 20, pods: 20}
+            targetThresholds: {cpu: 60, memory: 60, pods: 60}
+      plugins:
+        balance:
+          enabled: [RemoveDuplicates, RemovePodsViolatingTopologySpreadConstraint, LowNodeUtilization]
+        deschedule:
+          enabled: [RemovePodsViolatingNodeTaints, RemovePodsViolatingNodeAffinity, RemovePodsViolatingInterPodAntiAffinity]

@@ -1,0 +1,27 @@
+# metrics-server SANS --kubelet-insecure-tls : les certificats des kubelets sont signés
+# par la CA du cluster (kubeadm : serverTLSBootstrap + kubelet-csr-approver ;
+# kind : CSR approuvées par ./k8s-lab ; EKS : natif).
+# Sens inverse (API Kubernetes -> metrics-server) : certificat généré par Helm et CA déclarée
+# dans l'APIService (caBundle) : pas d'insecureSkipTLSVerify non plus.
+tls:
+  type: helm
+  helm:
+    lookup: true
+    certDurationDays: 3650
+apiService:
+  insecureSkipTLSVerify: false
+replicas: {{ 2 if (lab.worker_count | default(0) | int) > 1 else 1 }}
+podDisruptionBudget:
+  enabled: {{ (lab.worker_count | default(0) | int) > 1 }}
+  minAvailable: 1
+defaultArgs:
+  - --cert-dir=/tmp
+  - --kubelet-preferred-address-types=InternalIP,Hostname
+  - --kubelet-use-node-status-port
+  - --metric-resolution=15s
+metrics:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+serviceMonitor:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+resources:
+  requests: {cpu: 50m, memory: 100Mi}

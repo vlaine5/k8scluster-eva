@@ -1,0 +1,20 @@
+# Falco : détection d'activités suspectes à l'exécution (pilote eBPF moderne, CO-RE :
+# aucun module noyau compilé ni téléchargé).
+driver:
+  kind: modern_ebpf
+collectors:
+  enabled: true
+falcosidekick:
+  enabled: false
+tty: true
+falco:
+  json_output: true
+  json_include_output_property: true
+  priority: notice
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 1Gi}
+metrics:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+serviceMonitor:
+  create: {{ 'prometheus-operator-crds' in lab_addon_ids }}

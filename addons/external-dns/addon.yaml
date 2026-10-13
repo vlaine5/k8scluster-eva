@@ -21,7 +21,14 @@ resources: {cpu_m: 50, memory_mb: 64}
 install:
   namespace: external-dns
   pod_security: restricted
-  secrets: [external-dns-credentials]
+  secrets:
+    - name: external-dns-credentials
+      namespace: external-dns
+      only_if_any_env: [RFC2136_TSIG_SECRET, CLOUDFLARE_API_TOKEN, PIHOLE_PASSWORD]
+      data:
+        rfc2136-tsig-secret: env:RFC2136_TSIG_SECRET
+        cloudflare-api-token: env:CLOUDFLARE_API_TOKEN
+        pihole-password: env:PIHOLE_PASSWORD
   releases:
     - {name: external-dns, component: external-dns, namespace: external-dns, values: values.yaml.j2, timeout: 5m}
 health:

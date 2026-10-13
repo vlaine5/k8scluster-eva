@@ -24,6 +24,9 @@ install:
 health:
   - {kind: Deployment, namespace: istio-system, name: istiod}
 tests: tests/test.yml
+# Injection des sidecars (istio-init exige NET_ADMIN/NET_RAW : namespace de test privilégié).
+test_pod_security: privileged
+test_namespace_labels: {istio-injection: enabled}
 remove:
   notes: "Retirez d'abord le label istio-injection de vos namespaces puis redémarrez les Pods concernés."
 docs: docs/service-mesh.md

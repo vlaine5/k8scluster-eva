@@ -1,0 +1,22 @@
+# Kyverno (moteur de politiques). Une réplique par contrôleur : suffisant pour un lab.
+# failurePolicy des webhooks : Fail (par défaut) ; namespaces système exclus par Kyverno.
+{% set monitored = 'prometheus-operator-crds' in lab_addon_ids %}
+admissionController:
+  replicas: 1
+  container:
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+  serviceMonitor:
+    enabled: {{ monitored }}
+backgroundController:
+  replicas: 1
+  serviceMonitor:
+    enabled: {{ monitored }}
+cleanupController:
+  replicas: 1
+  serviceMonitor:
+    enabled: {{ monitored }}
+reportsController:
+  replicas: 1
+  serviceMonitor:
+    enabled: {{ monitored }}

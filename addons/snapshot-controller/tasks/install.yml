@@ -1,0 +1,43 @@
+---
+# CRD et contrôleur d'instantanés officiels (kubernetes-csi/external-snapshotter),
+# fichiers verrouillés par SHA-256 dans config/versions.yaml, appliqués en
+# server-side apply (gestionnaire "k8s-lab") : CRD d'abord, puis RBAC et contrôleur.
+- name: Describe the snapshot controller files
+  ansible.builtin.set_fact:
+    snapshot_component: "{{ addon_item.components['snapshot-controller'] }}"
+    snapshot_cache: "{{ playbook_dir }}/../.lab/cache/snapshot-controller/{{ addon_item.components['snapshot-controller'].version }}"
+
+- name: Create the local cache
+  ansible.builtin.file:
+    path: "{{ snapshot_cache }}"
+    state: directory
+    mode: "0700"
+
+- name: Download the manifests (checksums verified)
+  ansible.builtin.get_url:
+    url: "{{ snapshot_component.base_url | replace('{version}', snapshot_component.version) }}/{{ item.key }}"
+    dest: "{{ snapshot_cache }}/{{ item.key | basename }}"
+    checksum: "sha256:{{ item.value }}"
+    mode: "0644"
+  loop: "{{ snapshot_component.files | dict2items }}"
+  loop_control:
+    label: "{{ item.key | basename }}"
+
+- name: Compare the manifests with the cluster
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['diff', '--server-side', '--field-manager=k8s-lab', '-f', snapshot_cache ~ '/' ~ item.key | basename] }}"
+  loop: "{{ snapshot_component.files | dict2items | sort(attribute='key') }}"
+  loop_control:
+    label: "{{ item.key | basename }}"
+  register: snapshot_diff
+  changed_when: false
+  failed_when: snapshot_diff.rc > 1
+
+- name: Apply the manifests that differ (CRDs first)
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['apply', '--server-side', '--field-manager=k8s-lab', '-f', snapshot_cache ~ '/' ~ item.item.key | basename] }}"
+  loop: "{{ snapshot_diff.results }}"
+  loop_control:
+    label: "{{ item.item.key | basename }}"
+  when: item.rc == 1
+  changed_when: true

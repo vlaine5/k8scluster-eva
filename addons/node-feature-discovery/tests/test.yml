@@ -1,0 +1,20 @@
+---
+# =============================================================================
+#  Test de Node Feature Discovery : chaque nœud reçoit les étiquettes NFD
+#  (ex. feature.node.kubernetes.io/kernel-version.major).
+# =============================================================================
+
+- name: Count the nodes
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'nodes', '-o', 'name'] }}"
+  register: nfd_test_nodes
+  changed_when: false
+
+- name: Wait until every node is labelled by NFD
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'nodes', '-l', 'feature.node.kubernetes.io/kernel-version.major', '-o', 'name'] }}"
+  register: nfd_test_labelled
+  changed_when: false
+  until: nfd_test_labelled.stdout_lines | length == nfd_test_nodes.stdout_lines | length
+  retries: 18
+  delay: 10

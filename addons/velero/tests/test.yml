@@ -1,0 +1,95 @@
+---
+# =============================================================================
+#  Test de Velero : sauvegarde du namespace de test, suppression d'une ressource,
+#  restauration, vérification. La sauvegarde de test expire au bout d'une heure
+#  et est supprimée à la fin (uniquement elle : les autres sauvegardes du
+#  compartiment ne sont jamais touchées).
+# =============================================================================
+
+- name: Name the test backup
+  ansible.builtin.set_fact:
+    velero_test_backup: "k8s-lab-test-{{ now(utc=true).strftime('%Y%m%d%H%M%S') }}"
+
+- name: Wait until the backup storage location is available
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'velero', 'wait', '--for=jsonpath={.status.phase}=Available', '--timeout=180s',
+           'backupstoragelocation/default'] }}"
+  changed_when: false
+
+- name: Create the data to protect
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata: {name: precious, namespace: "{{ addon_test_ns }}"}
+      data: {content: "k8s-lab-velero-ok"}
+
+- name: Back up the test namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: velero.io/v1
+      kind: Backup
+      metadata: {name: "{{ velero_test_backup }}", namespace: velero}
+      spec:
+        includedNamespaces: ["{{ addon_test_ns }}"]
+        ttl: 1h0m0s
+        storageLocation: default
+
+- name: Wait for the backup
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'velero', 'wait', '--for=jsonpath={.status.phase}=Completed', '--timeout=600s',
+           'backup/' ~ velero_test_backup] }}"
+  changed_when: false
+
+- name: Delete the protected data
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    kind: ConfigMap
+    namespace: "{{ addon_test_ns }}"
+    name: precious
+    wait: true
+
+- name: Restore from the backup
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: velero.io/v1
+      kind: Restore
+      metadata: {name: "{{ velero_test_backup }}", namespace: velero}
+      spec:
+        backupName: "{{ velero_test_backup }}"
+
+- name: Wait for the restore
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'velero', 'wait', '--for=jsonpath={.status.phase}=Completed', '--timeout=600s',
+           'restore/' ~ velero_test_backup] }}"
+  changed_when: false
+
+- name: Check the restored data
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'configmap', 'precious', '-o', 'jsonpath={.data.content}'] }}"
+  register: velero_test_restored
+  changed_when: false
+  failed_when: velero_test_restored.stdout != 'k8s-lab-velero-ok'
+
+- name: Delete the test backup (this backup only)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: velero.io/v1
+      kind: DeleteBackupRequest
+      metadata: {name: "{{ velero_test_backup }}", namespace: velero}
+      spec:
+        backupName: "{{ velero_test_backup }}"

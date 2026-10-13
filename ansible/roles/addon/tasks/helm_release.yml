@@ -1,0 +1,27 @@
+---
+# Une release Helm d'un addon : chart et version verrouillés (config/versions.yaml),
+# valeurs rendues depuis addons/<id>/<values>.j2. kubernetes.core.helm compare la
+# version et les valeurs installées : rien n'est réinstallé si rien n'a changé.
+# Attention : addon_release['values'] (et non .values, qui désigne la méthode dict.values).
+- name: Describe the chart of the release {{ addon_release.name }}
+  ansible.builtin.set_fact:
+    addon_component: "{{ addon_item.components[addon_release.component] }}"
+
+- name: Install or upgrade the Helm release {{ addon_release.name }}
+  kubernetes.core.helm:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    name: "{{ addon_release.name }}"
+    chart_ref: "{{ addon_component[addon_release.chart_key | default('chart')] if addon_component.type == 'helm-oci' else addon_component.chart }}"
+    chart_repo_url: "{{ addon_component.repo if addon_component.type == 'helm' else omit }}"
+    chart_version: "{{ addon_component.version }}"
+    release_namespace: "{{ addon_release.namespace }}"
+    create_namespace: false
+    values: "{{ (lookup('ansible.builtin.template', addon_dir ~ '/' ~ addon_release['values']) | from_yaml) if addon_release['values'] is defined else {} }}"
+    skip_crds: "{{ addon_release.skip_crds | default(false) }}"
+    # Rollback automatique si l'installation échoue (sauf composants avec données).
+    atomic: "{{ not (addon_spec.stateful | default(false)) }}"
+    wait: "{{ addon_release.wait | default(true) }}"
+    timeout: "{{ addon_release.timeout | default('10m') }}"
+  # Condition only_if de addon.yaml, évaluée par le résolveur (scripts/labcore/render.py).
+  when: addon_release.enabled | default(true)

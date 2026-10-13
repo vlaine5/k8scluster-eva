@@ -2,6 +2,7 @@
 manifeste de déploiement, matrice de compatibilité, variables shell."""
 from __future__ import annotations
 
+import copy
 import datetime as _dt
 import json
 import shlex
@@ -132,10 +133,17 @@ def _node_prereqs(plan: Plan) -> dict[str, Any]:
     return {"packages": packages, "kernel_modules": modules, "services": services, "firewall_ports": ports}
 
 
+def _public(cfg: Config, key: str) -> bool:
+    """Variable transmissible à Ansible ou au manifeste : ni secret, ni identifiant (groupe credentials).
+    Les rôles lisent les identifiants dans l'environnement, au moment de créer les Secrets."""
+    spec = cfg.schema.get(key)
+    return not (spec and (spec.secret or spec.group == "credentials"))
+
+
 def ansible_vars(plan: Plan, cfg: Config, catalog: Catalog) -> dict[str, Any]:
     r = plan.resolved
     comps = catalog.versions["components"]
-    public_cfg = {k: v for k, v in cfg.values.items() if not (cfg.schema.get(k) and cfg.schema.get(k).secret)}
+    public_cfg = {k: v for k, v in cfg.values.items() if _public(cfg, k)}
     resolved = {k: v for k, v in r.items() if not k.startswith("_") and k != "tfvars"}
     addons = []
     for item in plan.addons:
@@ -145,8 +153,14 @@ def ansible_vars(plan: Plan, cfg: Config, catalog: Catalog) -> dict[str, Any]:
             if name == "longhorn" and r.get("longhorn_version"):
                 comp["version"] = r["longhorn_version"]
             components[name] = comp
+        spec = copy.deepcopy(item.addon.data)
+        for release in spec.get("install", {}).get("releases", []):
+            # only_if : {VARIABLE: [valeurs acceptées]} -> release installée ou non.
+            release["enabled"] = all(cfg.get(key) in allowed for key, allowed in release.get("only_if", {}).items())
         addons.append({"id": item.id, "path": str(item.addon.path), "reasons": item.reasons,
-                       "support": item.support, "spec": item.addon.data, "components": components})
+                       "support": item.support, "spec": spec, "components": components,
+                       "versions": {name: comp.get("version", "") for name, comp in components.items()},
+                       "stateful": item.addon.stateful})
     cni_comp = comps.get(r.get("cni", ""), {})
     gateway_api = r.get("gateway_api") or {}
     gw_comp = comps["gateway-api"]
@@ -155,6 +169,10 @@ def ansible_vars(plan: Plan, cfg: Config, catalog: Catalog) -> dict[str, Any]:
         "cfg": public_cfg,
         "lab_addons": addons,
         "lab_addon_ids": [a["id"] for a in addons],
+        # Namespaces des composants qui exigent des Pods privilégiés (exclus des politiques Kyverno).
+        "lab_privileged_namespaces": sorted({"kube-system"} | {
+            a["spec"].get("install", {}).get("namespace") for a in addons
+            if a["spec"].get("install", {}).get("pod_security") == "privileged"} - {None}),
         "lab_test_images": catalog.versions.get("test_images", {}),
         "lab_versions": {"helm": catalog.versions["helm"], "kube_vip": catalog.versions["kube_vip"],
                          "os": catalog.versions["os"]},
@@ -252,7 +270,7 @@ def deployment_manifest(plan: Plan, cfg: Config, catalog: Catalog) -> dict[str, 
         "backup": r.get("backup"),
         "issues": [{"level": i.level, "message": i.message} for i in plan.issues if i.level != "info"],
         "effective_configuration": {k: cfg.masked(k) for k in cfg.lab_keys
-                                    if not (cfg.schema.get(k) and cfg.schema.get(k).secret)},
+                                    if _public(cfg, k)},
     }
     return manifest
 

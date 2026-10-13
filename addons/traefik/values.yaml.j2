@@ -1,0 +1,35 @@
+# Traefik {{ addon_item.components.traefik.app_version }} (chart {{ addon_item.components.traefik.version }}) : contrôleur Gateway API.
+deployment:
+  replicas: {{ 2 if (lab.worker_count | default(1) or 1) > 1 else 1 }}
+podDisruptionBudget:
+  enabled: {{ ((lab.worker_count | default(1) or 1) > 1) | lower }}
+  maxUnavailable: 1
+providers:
+  # Gateway API (GatewayClass « traefik »). Les Gateways sont créées par l'addon « gateway ».
+  kubernetesGateway:
+    enabled: true
+    experimentalChannel: {{ (lab.gateway_api.channel | default('standard') == 'experimental') | lower }}
+  # Ingress historiques (migration progressive vers Gateway API).
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: true
+gateway:
+  enabled: false
+gatewayClass:
+  enabled: true
+  name: traefik
+# Tableau de bord : jamais exposé par défaut (kubectl port-forward pour le consulter).
+ingressRoute:
+  dashboard:
+    enabled: false
+service:
+  spec:
+    type: {{ lab.gateway_service_type if lab.gateway_service_type != 'ClusterIP' else 'ClusterIP' }}
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits: {memory: 256Mi}
+metrics:
+  prometheus:
+    serviceMonitor:
+      enabled: {{ ('prometheus-operator-crds' in lab_addon_ids) | lower }}

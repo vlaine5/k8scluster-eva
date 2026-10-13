@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Vérification hors cluster des addons : pour chaque scénario de tests/addons/scenarios,
+résout la configuration (scripts/labctl), rend tous les modèles (Ansible), puis valide
+chaque release avec « helm template » (chart et version verrouillés) et chaque manifeste.
+
+    tests/addons/render-check                  # tous les scénarios
+    tests/addons/render-check kind-traefik     # un scénario
+    tests/addons/render-check --keep DIR ...   # conserver les rendus (valeurs, manifestes, sorties helm)
+
+Prérequis : helm, ansible-playbook, PyYAML ; accès réseau aux dépôts de charts (cache
+dans .lab/cache/charts). Aucun cluster n'est contacté.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+SCENARIOS = ROOT / "tests" / "addons" / "scenarios"
+CACHE = ROOT / ".lab" / "cache" / "charts"
+
+# Valeurs factices des secrets : elles ne doivent apparaître dans AUCUN fichier rendu.
+DUMMY_SECRETS = {
+    "GRAFANA_ADMIN_PASSWORD": "dummy-grafana-password-7f3a",
+    "ARGOCD_REPO_USERNAME": "dummy-git-user",
+    "ARGOCD_REPO_PASSWORD": "dummy-git-token-91bc",
+    "RFC2136_TSIG_SECRET": "ZHVtbXktdHNpZy1zZWNyZXQtNDRlMQ==",
+    "CLOUDFLARE_API_TOKEN": "dummy-cloudflare-token-3d2e",
+    "PIHOLE_PASSWORD": "dummy-pihole-password-b81c",
+    "VELERO_S3_ACCESS_KEY": "dummy-velero-access-5c6d",
+    "VELERO_S3_SECRET_KEY": "dummy-velero-secret-0a9f",
+    "LONGHORN_BACKUP_S3_ACCESS_KEY": "dummy-longhorn-access-77e2",
+    "LONGHORN_BACKUP_S3_SECRET_KEY": "dummy-longhorn-secret-12ab",
+    "LONGHORN_BACKUP_S3_ENDPOINT": "http://minio.example.invalid:9000",
+}
+# APIs supposées présentes (CRD installées par d'autres addons du même plan).
+API_VERSIONS = [
+    "monitoring.coreos.com/v1", "gateway.networking.k8s.io/v1", "gateway.networking.k8s.io/v1beta1",
+    "cert-manager.io/v1", "snapshot.storage.k8s.io/v1", "policy/v1", "autoscaling/v2",
+]
+
+
+class Loader(yaml.SafeLoader):
+    """Tolère les étiquettes YAML exotiques de certains charts (ex. « = »)."""
+
+
+Loader.add_constructor("tag:yaml.org,2002:value", lambda loader, node: loader.construct_scalar(node))
+
+
+def run(argv: list[str], env: dict[str, str] | None = None, cwd: Path = ROOT) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, capture_output=True, text=True, env=env, cwd=cwd, stdin=subprocess.DEVNULL)
+
+
+def chart_dir(component: dict, chart_key: str) -> tuple[Path | None, str]:
+    ref = component[chart_key] if component["type"] == "helm-oci" else component["chart"]
+    name = ref.rstrip("/").split("/")[-1]
+    target = CACHE / f"{name}-{component['version']}"
+    if (target / name / "Chart.yaml").is_file():
+        return target / name, ""
+    target.mkdir(parents=True, exist_ok=True)
+    argv = ["helm", "pull", ref, "--version", component["version"], "--untar", "--untardir", str(target)]
+    if component["type"] == "helm":
+        argv[2:3] = [ref, "--repo", component["repo"]]
+    result = run(argv)
+    if result.returncode != 0:
+        return None, f"helm pull {ref} {component['version']} : {result.stderr.strip()[:300]}"
+    return target / name, ""
+
+
+def check_docs(text: str, origin: str, problems: list[str]) -> int:
+    count = 0
+    try:
+        docs = [d for d in yaml.load_all(text, Loader=Loader) if d]
+    except yaml.YAMLError as exc:
+        problems.append(f"{origin} : YAML invalide : {exc}")
+        return 0
+    for doc in docs:
+        if not isinstance(doc, dict) or not doc.get("apiVersion") or not doc.get("kind") \
+                or not (doc.get("metadata") or {}).get("name"):
+            problems.append(f"{origin} : document sans apiVersion/kind/metadata.name : {str(doc)[:120]}")
+        count += 1
+    return count
+
+
+def scenario(path: Path, workdir: Path) -> list[str]:
+    problems: list[str] = []
+    env = {**os.environ, **DUMMY_SECRETS, "LAB_ENV_FILE": str(path), "NO_COLOR": "1"}
+    vars_file = workdir / "vars.json"
+    result = run([sys.executable, str(ROOT / "scripts" / "labctl"), "ansible-vars", "--output", str(vars_file)], env=env)
+    if result.returncode != 0:
+        return [f"labctl : configuration refusée :\n{result.stdout}{result.stderr}"]
+    data = json.loads(vars_file.read_text())
+    render_dir = workdir / "render"
+    result = run(["ansible-playbook", str(ROOT / "tests" / "addons" / "render.yml"), "-e", f"@{vars_file}",
+                  "-e", f"render_dir={render_dir}"], env={**env, "ANSIBLE_STDOUT_CALLBACK": "default"})
+    if result.returncode != 0:
+        tail = "\n".join((result.stdout + result.stderr).splitlines()[-25:])
+        return [f"rendu Ansible en échec :\n{tail}"]
+    kube_version = data["kubernetes_version"]
+    releases = objects = 0
+    for addon in data["lab_addons"]:
+        install = addon["spec"].get("install", {})
+        for release in install.get("releases", []):
+            if not release.get("enabled", True):
+                continue
+            component = addon["components"][release["component"]]
+            chart, error = chart_dir(component, release.get("chart_key", "chart"))
+            if error:
+                problems.append(f"{addon['id']}/{release['name']} : {error}")
+                continue
+            argv = ["helm", "template", release["name"], str(chart), "-n", release["namespace"],
+                    "--kube-version", kube_version]
+            for api in API_VERSIONS:
+                argv += ["--api-versions", api]
+            if release.get("skip_crds"):
+                argv.append("--skip-crds")
+            values = render_dir / addon["id"] / f"{release['name']}.values.yaml"
+            if release.get("values"):
+                rendered = values.read_text()
+                try:
+                    yaml.safe_load(rendered)
+                except yaml.YAMLError as exc:
+                    problems.append(f"{addon['id']}/{release['name']} : valeurs YAML invalides : {exc}")
+                    continue
+                argv += ["-f", str(values)]
+            result = run(argv)
+            if result.returncode != 0:
+                problems.append(f"{addon['id']}/{release['name']} : helm template : {result.stderr.strip()[:600]}")
+                continue
+            releases += 1
+            (render_dir / addon["id"] / f"{release['name']}.rendered.yaml").write_text(result.stdout)
+            objects += check_docs(result.stdout, f"{addon['id']}/{release['name']}", problems)
+        for manifest in (render_dir / addon["id"] / "manifests").glob("*"):
+            objects += check_docs(manifest.read_text(), f"{addon['id']}/manifests/{manifest.name}", problems)
+    # Aucun secret ne doit se retrouver dans les variables ou les fichiers rendus.
+    for file in [vars_file, *render_dir.rglob("*")]:
+        if file.is_file():
+            text = file.read_text(errors="replace")
+            for key, value in DUMMY_SECRETS.items():
+                if value in text and not key.endswith("_ENDPOINT"):
+                    problems.append(f"FUITE : la valeur de {key} apparaît dans {file.relative_to(workdir)}")
+    print(f"  {len(data['lab_addons'])} addons, {releases} releases Helm rendues, {objects} objets vérifiés")
+    return problems
+
+
+def main() -> int:
+    wanted = sys.argv[1:]
+    keep = None
+    if wanted[:1] == ["--keep"] and len(wanted) > 1:
+        keep, wanted = Path(wanted[1]).resolve(), wanted[2:]
+    files = sorted(SCENARIOS.glob("*.env"))
+    if wanted:
+        files = [f for f in files if f.stem in wanted]
+        if len(files) != len(wanted):
+            sys.stderr.write(f"Scénarios disponibles : {', '.join(f.stem for f in sorted(SCENARIOS.glob('*.env')))}\n")
+            return 2
+    failed = 0
+    for path in files:
+        print(f"== {path.stem}")
+        with tempfile.TemporaryDirectory(prefix="k8s-lab-render-") as tmp:
+            problems = scenario(path, Path(tmp))
+            if keep:
+                shutil.copytree(Path(tmp), keep / path.stem, dirs_exist_ok=True)
+        for problem in problems:
+            print(f"  [erreur] {problem}")
+        failed += bool(problems)
+        print("  OK" if not problems else f"  {len(problems)} problème(s)")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

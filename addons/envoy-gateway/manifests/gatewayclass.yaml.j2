@@ -1,0 +1,26 @@
+# Paramètres des proxys Envoy créés pour chaque Gateway (type du Service).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: k8s-lab
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: {{ lab.gateway_service_type }}
+      envoyDeployment:
+        replicas: {{ 2 if (lab.worker_count | default(1) or 1) > 1 else 1 }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy-gateway
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: k8s-lab
+    namespace: envoy-gateway-system

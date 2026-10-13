@@ -768,10 +768,11 @@ class Resolver:
     def _addons_from_list(self) -> tuple[list[str], list[str]]:
         adds, removes = [], []
         for item in self.cfg.list("ADDONS"):
+            # « nom » ou « +nom » : ajouté au profil ; « -nom » : retiré du profil.
             if item.startswith("-"):
                 removes.append(item[1:])
             else:
-                adds.append(item)
+                adds.append(item[1:] if item.startswith("+") else item)
         return adds, removes
 
     def _selector_from_addons(self, selector: str, adds: list[str]) -> Optional[str]:
@@ -877,9 +878,18 @@ class Resolver:
                 self._check_pool(lb, netutil.parse_ranges(pool_text))
         elif pool_text and cfg.explicit("LOADBALANCER_IP_POOL"):
             self.info("LOADBALANCER_IP_POOL est défini mais aucun LoadBalancer n'est installé (LOADBALANCER_PROVIDER=none).")
+        pool_ips: list[str] = []
+        if lb != "none" and pool_text:
+            try:
+                ranges = netutil.parse_ranges(pool_text)
+                if sum(r.size for r in ranges) <= 4096:
+                    pool_ips = [str(ipaddress.ip_address(n)) for r in ranges for n in range(int(r.first), int(r.last) + 1)]
+            except netutil.NetError:
+                pass
         self.r["loadbalancer"] = {"provider": lb, "mode": cfg.get("LOADBALANCER_MODE") if lb == "metallb" else
                                   ("bgp" if lb == "cilium-bgp" else ("l2" if lb == "cilium-l2" else "")),
                                   "pool": netutil.split_list(pool_text) if lb != "none" else [],
+                                  "pool_ips": pool_ips,
                                   "interfaces": cfg.get("LOADBALANCER_INTERFACES")}
 
         # Gateway : type de Service et TLS
@@ -1245,8 +1255,14 @@ class Resolver:
         velero_wanted = enabled and provider in ("velero", "both")
         if velero_wanted and "velero" not in self.selected:
             self.error("BACKUP_PROVIDER inclut velero : ajoutez velero à ADDONS (stockage S3 requis).")
+        try:
+            on_calendar = cron_to_oncalendar(cfg.get("BACKUP_SCHEDULE"))
+        except (ValueError, IndexError):
+            self.error(f"BACKUP_SCHEDULE={cfg.get('BACKUP_SCHEDULE')} : expression cron non reconnue (ex : 0 3 * * *).")
+            on_calendar = ""
         self.r["backup"] = {"enabled": enabled, "etcd_snapshots": etcd and self.kubeadm, "velero": "velero" in self.selected,
-                            "schedule": cfg.get("BACKUP_SCHEDULE"), "retention_days": cfg.int("BACKUP_RETENTION_DAYS", 7)}
+                            "schedule": cfg.get("BACKUP_SCHEDULE"), "on_calendar": on_calendar,
+                            "retention_days": cfg.int("BACKUP_RETENTION_DAYS", 7)}
 
     # --- compatibilité des versions ----------------------------------------------------------
     def _compatibility(self) -> None:
@@ -1294,6 +1310,49 @@ class Resolver:
         if needed and available and needed > 0.8 * available:
             self.warn(f"Les addons demandent ~{needed} Mo de mémoire pour ~{available} Mo disponibles sur les nœuds "
                       "applicatifs : risque de Pods en attente.", "Augmentez NODE_MEMORY_MB ou WORKER_COUNT.")
+
+
+DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def cron_to_oncalendar(cron: str) -> str:
+    """Convertit une expression cron (5 champs) en OnCalendar systemd.
+
+    0 3 * * *     -> *-*-* 3:0:00
+    */15 * * * 1-5 -> Mon..Fri *-*-* *:0/15:00
+    """
+    fields = cron.split()
+    if len(fields) != 5:
+        raise ValueError(f"expression cron invalide : {cron}")
+    minute, hour, dom, month, dow = fields
+
+    def part(value: str, first: int) -> str:
+        if value == "*":
+            return "*"
+        out = []
+        for item in value.split(","):
+            if item.startswith("*/"):
+                out.append(f"{first}/{item[2:]}")
+            elif "/" in item:
+                base, step = item.split("/", 1)
+                out.append(f"{base.replace('-', '..')}/{step}")
+            else:
+                out.append(item.replace("-", ".."))
+        return ",".join(out)
+
+    def weekday(value: str) -> str:
+        if value == "*":
+            return ""
+        out = []
+        for item in value.split(","):
+            if "-" in item:
+                start, end = item.split("-", 1)
+                out.append(f"{DOW_NAMES[int(start)]}..{DOW_NAMES[int(end)]}")
+            else:
+                out.append(DOW_NAMES[int(item)])
+        return ",".join(out) + " "
+
+    return f"{weekday(dow)}*-{part(month, 1)}-{part(dom, 1)} {part(hour, 0)}:{part(minute, 0)}:00"
 
 
 def _looks_like_ip(value: str) -> bool:

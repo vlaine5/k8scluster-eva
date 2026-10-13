@@ -1,0 +1,25 @@
+---
+- name: Create the output directory of {{ addon_item.id }}
+  ansible.builtin.file:
+    path: "{{ render_dir }}/{{ addon_item.id }}/manifests"
+    state: directory
+    mode: "0700"
+
+- name: Render the Helm values of {{ addon_item.id }}
+  ansible.builtin.copy:
+    dest: "{{ render_dir }}/{{ addon_item.id }}/{{ release.name }}.values.yaml"
+    content: "# {{ release['values'] }}\n{{ lookup('ansible.builtin.template', addon_item.path ~ '/' ~ release['values']) }}"
+    mode: "0600"
+  loop: "{{ addon_item.spec.install.releases | default([]) | selectattr('values', 'defined') | selectattr('enabled') | list }}"
+  loop_control:
+    loop_var: release
+    label: "{{ release.name }}"
+
+- name: Render the manifests of {{ addon_item.id }}
+  ansible.builtin.copy:
+    dest: "{{ render_dir }}/{{ addon_item.id }}/manifests/{{ manifest | regex_replace('\\.j2$', '') }}"
+    content: "# {{ manifest }}\n{{ lookup('ansible.builtin.template', addon_item.path ~ '/manifests/' ~ manifest) }}"
+    mode: "0600"
+  loop: "{{ (addon_item.spec.install.manifests_pre | default([])) + (addon_item.spec.install.manifests | default([])) }}"
+  loop_control:
+    loop_var: manifest
