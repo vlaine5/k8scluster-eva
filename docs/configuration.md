@@ -1,133 +1,340 @@
 # Configuration
 
+Toute la configuration du lab tient dans des fichiers `CLE=valeur`. Un résolveur unique
+(`scripts/labctl`, Python) la **valide entièrement avant toute action** : types, valeurs
+autorisées, contradictions, chevauchements de réseaux, compatibilité des versions, plan des
+addons. Si la configuration est invalide, **rien n'est créé ni modifié**.
+
 ## Où régler quoi ?
 
 | Fichier | Versionné ? | Contenu |
 | --- | --- | --- |
-| `config/lab.env` | oui | valeurs par défaut de **tous** les modes |
-| `.env` (copie de `.env.example`) | **non** | vos surcharges + vos identifiants (Proxmox, vCenter, ESXi) |
-| `terraform/providers/<p>/terraform.tfvars` (copie du `.example`) | **non** | description de votre infrastructure : nœud Proxmox, datastore, réseau, région AWS… (aucun secret) |
-| `~/.aws/` (`aws configure`) | hors du dépôt | identifiants AWS, utilisés par Terraform, AWS CLI et `kubectl` pour EKS |
+| `config/lab.env` | oui | valeurs par défaut de **toutes** les variables |
+| `config/schema.yaml` | oui | description de chaque variable (type, valeurs, secret) |
+| `config/versions.yaml` | oui | versions verrouillées (Kubernetes, CNI, charts, images d'OS) : [versions.md](versions.md) |
+| `config/profiles.yaml` | oui | profils d'addons : [addons.md](addons.md#profils) |
+| `.env` (copie de `.env.example`) | **non** | vos réglages **et vos secrets** |
+| `terraform/providers/<p>/terraform.tfvars` | **non** | description de votre infrastructure (nœud Proxmox, datastore, réseau) — aucun secret |
+| inventaire du mode existing | à vous de voir | vos machines existantes : [existing-mode.md](existing-mode.md) |
 
 Priorité (la première valeur trouvée gagne) :
 
-1. la ligne de commande : `make deploy MODE=kind WORKERS=3`, `make deploy MODE=kind
-   NODE_MEMORY_MB=4096`, ou une variable d'environnement (`WORKER_COUNT=3 make deploy MODE=kind`) ;
-2. `.env` ;
+1. la ligne de commande ou l'environnement : `make deploy MODE=kind WORKERS=3`,
+   `WORKER_COUNT=3 make deploy MODE=kind` ;
+2. `.env` (ou le fichier désigné par `LAB_ENV_FILE`, par exemple un des
+   [profils d'exemple](../examples/profiles/README.md)) ;
 3. `config/lab.env`.
 
-`make config` (ou `./k8s-lab config`) affiche la configuration effective (secrets masqués).
+```bash
+make config MODE=kind          # configuration effective (secrets masqués), choix résolus, plan
+make validate MODE=existing    # validation seule
+LAB_ENV_FILE=examples/profiles/homelab.env make config   # un autre fichier que .env
+```
+
+## Règles du résolveur
+
+- **Variable inconnue** dans `.env` : erreur, avec la variable la plus proche suggérée
+  (`WORKERS_COUNT` → `WORKER_COUNT`).
+- **Contradictions refusées** : `GATEWAY_CONTROLLER=cilium` avec `CNI=flannel`,
+  `CONTROL_PLANE_COUNT=3` avec `HA_MODE=off`, `-metallb` dans `ADDONS` avec
+  `LOADBALANCER_PROVIDER=metallb`, deux StorageClasses par défaut…
+- **Réseaux** : `POD_CIDR`, `SERVICE_CIDR`, `RESERVED_CIDRS`, le réseau des nœuds, le pool
+  `LOADBALANCER_IP_POOL` et la VIP de l'API ne doivent pas se chevaucher. Le pool doit
+  appartenir au réseau des nœuds et ne contenir aucune IP de nœud ni de `RESERVED_IPS`.
+- **Valeurs automatiques** (`auto`) : toujours résolues explicitement et affichées par
+  `make config` (ex. `CNI=auto` → `flannel` sur kubeadm, `kindnet` sur kind).
+- **Compatibilité** : chaque composant déclare les mineures de Kubernetes testées par son
+  projet ; `COMPATIBILITY_POLICY=warn` avertit, `strict` refuse ([compatibility.md](compatibility.md)).
+- **Secrets** : uniquement dans `.env` ou l'environnement ; jamais affichés (`****`), jamais
+  écrits dans un fichier généré (variables Ansible, manifeste de déploiement, inventaire).
+  Ansible les lit dans l'environnement au moment de créer les Secrets Kubernetes.
+
+## Compatibilité avec les anciennes variables
+
+| Ancienne variable | Remplacée par | Comportement |
+| --- | --- | --- |
+| `VM_IMAGE_URL`, `VM_IMAGE_SHA256` | `NODE_IMAGE_SOURCE=url` + `NODE_IMAGE_URL` / `NODE_IMAGE_SHA256` | toujours acceptées, avertissement |
+| `template_vm_id` (terraform.tfvars Proxmox) | `NODE_TEMPLATE_ID` | les deux fonctionnent ; `.env` est prioritaire |
+| `NFS_CSI_ENABLED`, `LONGHORN_ENABLED` | `STORAGE_BACKENDS` | alias acceptés, contradiction refusée |
+| `NFS_DEFAULT_STORAGE_CLASS` | `DEFAULT_STORAGE_CLASS` | alias accepté |
+| `FLANNEL_VERSION` | `CNI_VERSION` | alias accepté pour Flannel |
+
+Migration complète : [migration.md](migration.md).
 
 ## Référence des variables
 
-### Forme du cluster
+Cette section est **générée** depuis `config/schema.yaml` et `config/lab.env`
+(`make docs-generate`) ; la CI vérifie qu'elle est à jour (`make docs-check`).
 
-| Variable | Défaut | Utilisée par |
-| --- | --- | --- |
-| `CLUSTER_NAME` | `k8s-lab` | tous : nom des contextes kubectl (`kind-k8s-lab`, `k8s-lab-vagrant`, `k8s-lab-proxmox`, `k8s-lab-eks`…) ; 25 caractères au plus pour EKS |
-| `WORKER_COUNT` | `2` | kind, vagrant, terraform (0 = cluster mono-nœud, sauf EKS : 1 au minimum) |
+<!-- BEGIN GENERATED: variables -->
+### Plateforme de déploiement
 
-### VMs (Vagrant et Terraform)
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `DEPLOYMENT_MODE` | *(vide)* | `kind` · `minikube` · `vagrant` · `terraform` · `existing` · `attach` | Mode utilisé quand la commande n'en précise pas. |
+| `DEPLOYMENT_PROVIDER` | *(vide)* | `proxmox` · `vsphere` · `libvirt` · `eks` | Provider Terraform par défaut. |
 
-| Variable | Défaut | Remarque |
-| --- | --- | --- |
-| `NODE_HOSTNAME_PREFIX` | `k8s` | `k8s-cp-1`, `k8s-worker-1`… |
-| `NODE_CPUS` | `2` | minimum 2 (exigence kubeadm) |
-| `NODE_MEMORY_MB` | `2048` | minimum 2048 |
-| `NODE_DISK_GB` | `20` | Terraform uniquement (avec Vagrant, la taille dépend de la box) |
-| `SSH_PRIVATE_KEY_FILE` | vide | vide = clé dédiée générée dans `.lab/ssh/` (Terraform) |
-| `VM_IMAGE_URL`, `VM_IMAGE_SHA256` | Ubuntu 24.04, release datée | Terraform Proxmox et libvirt ; le SHA-256 est vérifié |
+### Forme du cluster et haute disponibilité
 
-### Kubernetes (kubeadm, via Ansible)
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `CLUSTER_NAME` | `k8s-lab` | string | Nom du cluster (minuscules, chiffres, tirets). |
+| `CONTROL_PLANE_COUNT` | `1` | int (1…5) | Nombre de control-planes (1, 3 ou 5). |
+| `WORKER_COUNT` | `2` | int (0…20) | Nombre de workers. |
+| `HA_MODE` | `auto` | `auto` · `off` · `stacked-etcd` · `external-etcd` | Topologie etcd / haute disponibilité. |
+| `CONTROL_PLANE_ENDPOINT` | `auto` | endpoint | Adresse stable de l'API (host:port) ou auto. |
+| `CONTROL_PLANE_VIP` | *(vide)* | ip | IP virtuelle de l'API (kube-vip). |
+| `API_LB_PROVIDER` | `auto` | `auto` · `kube-vip` · `external` · `none` | Répartiteur de charge de l'API Kubernetes. |
 
-| Variable | Défaut | Remarque |
-| --- | --- | --- |
-| `KUBERNETES_VERSION` | `1.37.1` | version exacte ; le dépôt APT `pkgs.k8s.io/…/v1.37` en est déduit |
-| `POD_CIDR` | `10.244.0.0/16` | réseau des Pods (aussi utilisé par kind) |
-| `SERVICE_CIDR` | `10.96.0.0/12` | réseau des Services (aussi utilisé par kind) |
-| `CNI` | `flannel` | `flannel` ou `none` |
-| `FLANNEL_VERSION` | `v0.28.9` | doit avoir un checksum connu dans `ansible/roles/cni/defaults/main.yml` |
-| `CONTAINER_RUNTIME` | `containerd` | seul runtime implémenté |
-| `CONTAINERD_VERSION` | `2.3.*` | motif de version APT du paquet `containerd.io` |
+### Machines
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `NODE_HOSTNAME_PREFIX` | `k8s` | string | Préfixe des hostnames. |
+| `NODE_CPUS` | `2` | int (2…128) | vCPU par VM. |
+| `NODE_MEMORY_MB` | `2048` | int (2048…1048576) | Mémoire par VM (Mo). |
+| `NODE_DISK_GB` | `20` | int (10…4096) | Disque système par VM (Go). |
+| `NODE_CPU_TYPE` | `x86-64-v2-AES` | string | Type de CPU virtuel (Proxmox). |
+| `SSH_PRIVATE_KEY_FILE` | *(vide)* | path | Clé SSH privée d'Ansible (vide = clé dédiée générée). |
+| `NODE_SSH_USER` | *(vide)* | string | Utilisateur SSH créé par cloud-init. |
+
+### Système d'exploitation
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `NODE_OS` | `ubuntu` | `ubuntu` · `debian` · `rocky` · `auto` | Distribution des nœuds. |
+| `NODE_OS_VERSION` | `24.04` | string | Version de la distribution. |
+| `NODE_IMAGE_SOURCE` | `catalog` | `catalog` · `url` · `template` | Origine de l'image des VMs. |
+| `NODE_IMAGE_URL` | *(vide)* | url | URL d'une image personnalisée. |
+| `NODE_IMAGE_SHA256` | *(vide)* | string | SHA-256 de NODE_IMAGE_URL. |
+| `NODE_TEMPLATE_ID` | *(vide)* | string | Template Proxmox (ID) ou vSphere (nom). |
+| `VM_IMAGE_URL` | *(vide)* | url | Ancien nom de NODE_IMAGE_URL. **Obsolète** : NODE_IMAGE_URL |
+| `VM_IMAGE_SHA256` | *(vide)* | string | Ancien nom de NODE_IMAGE_SHA256. **Obsolète** : NODE_IMAGE_SHA256 |
+| `NODE_SWAP` | `disable` | `disable` · `keep` | Gestion du swap des nœuds. |
+| `NODE_FIREWALL` | `auto` | `auto` · `managed` · `unmanaged` | Gestion du pare-feu des nœuds. |
+
+### Kubernetes (kubeadm)
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `KUBERNETES_VERSION` | `1.36.5` | version | Version complète de Kubernetes (ex : 1.36.5). |
+| `POD_CIDR` | `10.244.0.0/16` | cidr | Réseau des Pods. |
+| `SERVICE_CIDR` | `10.96.0.0/12` | cidr | Réseau des Services. |
+| `RESERVED_CIDRS` | *(vide)* | cidr_list | Réseaux du LAN à ne pas chevaucher. |
+| `NODE_NETWORK_CIDR` | *(vide)* | cidr | Réseau des nœuds (vide = déduit). |
+| `RESERVED_IPS` | *(vide)* | ip_ranges | Adresses à ne jamais attribuer (nœuds, LoadBalancer, VIP). |
+| `CONTAINER_RUNTIME` | `containerd` | `containerd` | Runtime de conteneurs. |
+| `CONTAINERD_VERSION` | *(vide)* | string | Motif de version de containerd.io (2.x). |
+| `CONTAINERD_SELINUX` | `false` | bool | Étiquetage SELinux des conteneurs (Rocky). |
+| `KUBELET_SERVING_CERTS` | `signed` | `signed` · `self-signed` | Certificats de service des kubelets. |
+
+### Réseau des Pods (CNI)
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `CNI` | `auto` | `auto` · `flannel` · `calico` · `cilium` · `none` | Plugin réseau des Pods. |
+| `CNI_VERSION` | *(vide)* | string | Version du CNI (vide = verrouillée). |
+| `CNI_MODE` | `auto` | `auto` · `vxlan` · `host-gw` · `vxlan-crosssubnet` · `ipip` · `ipip-crosssubnet` · `direct` · `geneve` · `native` | Mode réseau du CNI. |
+| `KUBE_PROXY_MODE` | `auto` | `auto` · `iptables` · `nftables` · `ipvs` · `cilium` | Mode de kube-proxy (cilium = remplacement eBPF). |
+| `NETWORK_POLICY_MODE` | `auto` | `auto` · `none` · `kubernetes` · `calico` · `cilium` | Moteur de NetworkPolicy attendu. |
+| `ENABLE_HUBBLE` | `false` | bool | Hubble (Cilium). |
+| `HUBBLE_UI` | `false` | bool | Interface web de Hubble. |
+| `FLANNEL_VERSION` | *(vide)* | string | Ancien réglage de version de Flannel. **Obsolète** : CNI_VERSION |
+
+### Gateway API
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `GATEWAY_CONTROLLER` | `auto` | `auto` · `none` · `traefik` · `envoy-gateway` · `cilium` | Contrôleur Gateway API. |
+| `GATEWAY_API_VERSION` | *(vide)* | string | Version des CRD Gateway API. |
+| `GATEWAY_API_CHANNEL` | `standard` | `standard` · `experimental` | Canal des CRD Gateway API. |
+| `GATEWAY_DOMAIN` | `k8s-lab.internal` | string | Domaine DNS des applications publiées. |
+| `GATEWAY_TLS` | `auto` | `auto` · `true` · `false` | Écouteur HTTPS de la Gateway partagée. |
+| `GATEWAY_SERVICE_TYPE` | `auto` | `auto` · `LoadBalancer` · `NodePort` · `ClusterIP` | Type du Service de la Gateway. |
+
+### LoadBalancer
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `LOADBALANCER_PROVIDER` | `auto` | `auto` · `none` · `metallb` · `cilium-l2` · `cilium-bgp` | Fournisseur de Services LoadBalancer. |
+| `LOADBALANCER_MODE` | `l2` | `l2` · `bgp` | Mode d'annonce de MetalLB. |
+| `LOADBALANCER_IP_POOL` | *(vide)* | ip_ranges | Plage(s) d'IP des Services LoadBalancer. |
+| `LOADBALANCER_INTERFACES` | *(vide)* | string | Interfaces d'annonce L2 (regex). |
+| `BGP_LOCAL_ASN` | *(vide)* | int (1…4294967295) | ASN local (BGP). |
+| `BGP_PEER_ADDRESS` | *(vide)* | ip | Adresse du routeur BGP pair. |
+| `BGP_PEER_ASN` | *(vide)* | int (1…4294967295) | ASN du routeur pair. |
+
+### Stockage
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `STORAGE_BACKENDS` | *(vide)* | `nfs-csi` · `longhorn` | Backends de stockage. |
+| `DEFAULT_STORAGE_CLASS` | `auto` | string | StorageClass par défaut. |
+| `NFS_SERVER` | *(vide)* | string | Serveur NFS. |
+| `NFS_SHARE` | *(vide)* | string | Export NFS. |
+| `NFS_VERSION` | `4.1` | `3` · `4` · `4.0` · `4.1` · `4.2` | Version du protocole NFS. |
+| `NFS_STORAGE_CLASS` | `nfs-csi` | string | Nom de la StorageClass NFS. |
+| `NFS_RECLAIM_POLICY` | `Retain` | `Retain` · `Delete` | Politique de récupération des volumes NFS. |
+| `NFS_MOUNT_OPTIONS` | `hard` | list | Options de montage NFS supplémentaires. |
+| `NFS_SUBDIR` | `${pvc.metadata.namespace}-${pvc.metadata.name}-${pv.metadata.name}` | string | Modèle de sous-dossier par volume. |
+| `NFS_DEFAULT_STORAGE_CLASS` | *(vide)* | bool | Ancienne forme : true = DEFAULT_STORAGE_CLASS=nfs-csi. **Obsolète** : DEFAULT_STORAGE_CLASS |
+| `NFS_CSI_ENABLED` | *(alias, non défini)* | bool | Alias : true = nfs-csi dans STORAGE_BACKENDS. **Obsolète** : STORAGE_BACKENDS |
+| `LONGHORN_ENABLED` | *(alias, non défini)* | bool | Alias : true = longhorn dans STORAGE_BACKENDS. **Obsolète** : STORAGE_BACKENDS |
+| `LONGHORN_VERSION` | `auto-compatible` | string | Version de Longhorn. |
+| `LONGHORN_REPLICA_COUNT` | `3` | int (1…10) | Nombre de réplicas par volume. |
+| `LONGHORN_DATA_PATH` | `/var/lib/longhorn` | path | Répertoire des données Longhorn sur les nœuds. |
+| `LONGHORN_STORAGE_CLASS` | `longhorn` | string | Nom de la StorageClass Longhorn. |
+| `LONGHORN_RECLAIM_POLICY` | `Retain` | `Retain` · `Delete` | Politique de récupération des volumes Longhorn. |
+| `LONGHORN_UI_ENABLED` | `true` | bool | Interface web de Longhorn. |
+| `LONGHORN_UI_EXPOSE` | `false` | bool | Publier l'interface par la Gateway. |
+| `LONGHORN_BACKUP_ENABLED` | `false` | bool | Sauvegardes Longhorn. |
+| `LONGHORN_BACKUP_TARGET` | *(vide)* | string | Cible de sauvegarde Longhorn. |
+| `LONGHORN_DEDICATED_DISK` | `false` | bool | Disque dédié sur chaque worker. |
+| `LONGHORN_DISK_SIZE_GB` | `100` | int (10…65536) | Taille du disque dédié. |
+| `LONGHORN_DISK_DATASTORE` | *(vide)* | string | Stockage du disque dédié. |
+| `LONGHORN_DISK_DEVICE` | *(vide)* | path | Périphérique dédié (mode existing). |
+| `LONGHORN_DISK_ALLOW_FORMAT` | `false` | bool | Autoriser le formatage d'un disque vide. |
+
+### Addons
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `ADDON_PROFILE` | `minimal` | `minimal` · `homelab` · `observability` · `enterprise-lab` · `ci` · `custom` | Profil d'addons. |
+| `ADDONS` | *(vide)* | list | Addons ajoutés (nom ou +nom) ou retirés (-nom) par rapport au profil. |
+| `COMPATIBILITY_POLICY` | `warn` | `warn` · `strict` | Traitement des combinaisons non testées en amont. |
+| `EXISTING_ADDON_POLICY` | `fail` | `fail` · `skip` | Mode attach : composant déjà installé par un autre outil. |
+
+### Réglages des addons
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `CERT_MANAGER_ISSUER` | `selfsigned-ca` | `selfsigned-ca` · `acme-http01` · `acme-dns01` · `none` | ClusterIssuer créé par défaut. |
+| `ACME_EMAIL` | *(vide)* | string | E-mail du compte ACME. |
+| `ACME_ENVIRONMENT` | `staging` | `staging` · `production` | Serveur ACME (Let's Encrypt). |
+| `ACME_DNS01_PROVIDER` | *(vide)* | `cloudflare` · `rfc2136` · `route53` | Fournisseur DNS-01. |
+| `RFC2136_NAMESERVER` | *(vide)* | string | Serveur DNS RFC2136 (host:port). |
+| `RFC2136_TSIG_KEY_NAME` | *(vide)* | string | Nom de la clé TSIG. |
+| `RFC2136_TSIG_ALGORITHM` | `HMACSHA256` | `HMACMD5` · `HMACSHA1` · `HMACSHA256` · `HMACSHA512` | Algorithme TSIG. |
+| `ARGOCD_REPO_URL` | *(vide)* | url | Dépôt Git de l'application d'exemple. |
+| `ARGOCD_REPO_PATH` | `examples/gitops/apps` | string | Chemin dans le dépôt. |
+| `ARGOCD_REPO_REVISION` | `HEAD` | string | Branche, tag ou commit. |
+| `ARGOCD_AUTO_SYNC` | `false` | bool | Synchronisation automatique. |
+| `ARGOCD_EXPOSE` | `false` | bool | Publier Argo CD par la Gateway. |
+| `MONITORING_RETENTION` | `7d` | string | Rétention de Prometheus. |
+| `MONITORING_PERSISTENCE` | `false` | bool | Volumes persistants pour la supervision. |
+| `MONITORING_STORAGE_SIZE_GB` | `10` | int (1…10000) | Taille du volume Prometheus. |
+| `GRAFANA_EXPOSE` | `false` | bool | Publier Grafana par la Gateway. |
+| `LOGGING_RETENTION` | `168h` | string | Rétention de Loki. |
+| `LOGGING_PERSISTENCE` | `false` | bool | Volume persistant pour Loki. |
+| `LOGGING_NODE_LOGS` | `false` | bool | Collecter le journal systemd des nœuds. |
+| `KYVERNO_POLICY_MODE` | `audit` | `audit` · `enforce` · `none` | Politiques Kyverno d'exemple. |
+| `EXTERNAL_DNS_PROVIDER` | *(vide)* | `rfc2136` · `cloudflare` · `pihole` | Fournisseur DNS d'ExternalDNS. |
+| `EXTERNAL_DNS_DOMAIN_FILTER` | *(vide)* | string | Domaine géré par ExternalDNS. |
+| `PIHOLE_SERVER` | *(vide)* | url | URL de Pi-hole. |
+
+### Exploitation, sauvegarde, mises à jour
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `BACKUP_ENABLED` | `false` | bool | Sauvegardes automatiques. |
+| `BACKUP_PROVIDER` | `etcd-snapshot` | `etcd-snapshot` · `velero` · `both` | Mécanisme de sauvegarde. |
+| `BACKUP_SCHEDULE` | `0 3 * * *` | cron | Planification (cron). |
+| `BACKUP_RETENTION_DAYS` | `7` | int (1…3650) | Rétention des sauvegardes (jours). |
+| `VELERO_S3_URL` | *(vide)* | url | URL S3-compatible de Velero. |
+| `VELERO_BUCKET` | *(vide)* | string | Bucket Velero. |
+| `VELERO_REGION` | `minio` | string | Région S3. |
+| `VELERO_FS_BACKUP` | `true` | bool | Sauvegarde des volumes par copie de fichiers. |
+| `UPGRADE_POLICY` | `patch` | `patch` · `minor` | Mises à jour proposées. |
+| `ENABLE_HEALTHCHECKS` | `true` | bool | Contrôles de santé après déploiement. |
+| `ENABLE_POST_DEPLOY_TESTS` | `true` | bool | Tests fonctionnels après déploiement. |
+
+### Modes existing et attach
+
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `EXISTING_INVENTORY` | *(vide)* | path | Inventaire Ansible des machines existantes. |
+| `EXISTING_KUBECONFIG` | *(vide)* | path | kubeconfig du cluster existant (attach). |
+| `EXISTING_CONTEXT` | *(vide)* | string | Contexte kubectl du cluster existant (attach). |
 
 ### Kind
 
-| Variable | Défaut | Remarque |
-| --- | --- | --- |
-| `KIND_NODE_IMAGE` | `kindest/node:v1.37.0@sha256:…` | image publiée avec kind v0.33.0 |
-| `KIND_CONFIG` | vide | chemin d'une config kind personnalisée (sinon générée) |
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `KIND_NODE_IMAGE` | *(vide)* | string | Image des nœuds kind (vide = verrouillée). |
+| `KIND_CONFIG` | *(vide)* | path | Config kind personnalisée. |
 
 ### Minikube
 
-| Variable | Défaut | Remarque |
-| --- | --- | --- |
-| `MINIKUBE_KUBERNETES_VERSION` | `v1.37.0` | |
-| `MINIKUBE_DRIVER` | vide | vide = choix automatique de minikube |
-| `MINIKUBE_NODES`, `MINIKUBE_CPUS`, `MINIKUBE_MEMORY_MB` | `1`, `2`, `2048` | par nœud |
-| `MINIKUBE_EXTRA_ARGS` | vide | options ajoutées à `minikube start` |
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `MINIKUBE_KUBERNETES_VERSION` | *(vide)* | string | Version de Kubernetes de minikube. |
+| `MINIKUBE_DRIVER` | *(vide)* | string | Driver minikube. |
+| `MINIKUBE_NODES` | `1` | int (1…10) | Nombre de nœuds minikube. |
+| `MINIKUBE_CPUS` | `2` | int (2…64) | CPU par nœud minikube. |
+| `MINIKUBE_MEMORY_MB` | `2048` | int (1800…262144) | Mémoire par nœud minikube. |
+| `MINIKUBE_EXTRA_ARGS` | *(vide)* | string | Options supplémentaires de minikube start. |
 
 ### Vagrant
 
-| Variable | Défaut | Remarque |
-| --- | --- | --- |
-| `VAGRANT_PROVIDER` | `virtualbox` | `virtualbox`, `libvirt`, `vmware_desktop`, `vmware_esxi` |
-| `VAGRANT_BOX` | `bento/ubuntu-24.04` | box multi-providers |
-| `VAGRANT_BOX_VERSION` | vide | vide = dernière version disponible pour le provider |
-| `VAGRANT_NETWORK_PREFIX` | `192.168.56` | réseau privé des VMs |
-| `VAGRANT_IP_START` | `10` | `.10` = control-plane, `.11`, `.12`… = workers |
-| `ESXI_HOSTNAME`, `ESXI_USERNAME`, `ESXI_PASSWORD`, `ESXI_DATASTORE`, `ESXI_NETWORKS` | — | mode `vmware_esxi` uniquement, dans `.env` |
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `VAGRANT_PROVIDER` | `virtualbox` | `virtualbox` · `libvirt` · `vmware_desktop` · `vmware_esxi` | Provider Vagrant. |
+| `VAGRANT_BOX` | *(vide)* | string | Box Vagrant (vide = selon NODE_OS). |
+| `VAGRANT_BOX_VERSION` | *(vide)* | string | Version de la box. |
+| `VAGRANT_NETWORK_PREFIX` | `192.168.56` | string | Préfixe /24 du réseau privé. |
+| `VAGRANT_IP_START` | `10` | int (2…250) | Première adresse des VMs. |
 
 ### AWS EKS
 
-| Variable | Défaut | Remarque |
-| --- | --- | --- |
-| `EKS_KUBERNETES_VERSION` | `1.36` | version proposée par EKS ; indépendante de `KUBERNETES_VERSION` (kubeadm) |
-| `AWS_TARGET` | `aws` | `aws` (vrai AWS, payant) ou `localstack` (émulateur local) |
-| `LOCALSTACK_ENDPOINT` | `http://localhost:4566` | utilisé seulement avec `AWS_TARGET=localstack` |
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `EKS_KUBERNETES_VERSION` | `1.36` | string | Version mineure EKS. |
+| `AWS_TARGET` | `aws` | `aws` · `localstack` | Cible AWS. |
+| `LOCALSTACK_ENDPOINT` | `http://localhost:4566` | url | Adresse de LocalStack. |
 
-Réglages de `terraform/providers/eks/terraform.tfvars` (tous facultatifs) : `aws_region`
-(`eu-west-3` ; sinon `AWS_REGION`), `node_instance_types` (`["t3.medium"]`),
-`node_capacity_type` (`ON_DEMAND` ou `SPOT`), `api_allowed_cidrs` (par défaut, le CLI détecte
-votre adresse IP publique), `vpc_cidr` (`10.20.0.0/16`).
+### Versions d'outils
 
-### Identifiants (dans `.env` uniquement)
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `KIND_VERSION` | `v0.33.0` | string | Version conseillée de kind. |
+| `KUBECTL_VERSION` | `v1.37.1` | string | Version conseillée de kubectl. |
+| `MINIKUBE_VERSION` | `v1.39.0` | string | Version conseillée de minikube. |
+| `HELM_VERSION` | `v4.3.0` | string | Version conseillée de Helm. |
+| `TERRAFORM_VERSION` | `1.16.5` | string | Version conseillée de Terraform. |
+| `TFLINT_VERSION` | `v0.64.0` | string | Version de TFLint (CI). |
+| `VAGRANT_VERSION` | `2.4.9` | string | Version de Vagrant (CI). |
+| `ACTIONLINT_VERSION` | `1.7.12` | string | Version d'actionlint (CI). |
 
-| Variable | Lue par |
-| --- | --- |
-| `PROXMOX_VE_ENDPOINT`, `PROXMOX_VE_API_TOKEN`, `PROXMOX_VE_INSECURE` | provider Terraform `bpg/proxmox` |
-| `VSPHERE_SERVER`, `VSPHERE_USER`, `VSPHERE_PASSWORD`, `VSPHERE_ALLOW_UNVERIFIED_SSL` | provider Terraform `vmware/vsphere` |
-| `ESXI_PASSWORD` | plugin `vagrant-vmware-esxi` (syntaxe `env:ESXI_PASSWORD`) |
-| `AWS_PROFILE` (identifiants dans `~/.aws/`, via `aws configure`) | provider Terraform `hashicorp/aws`, AWS CLI, `kubectl` (EKS) |
+### Identifiants (.env uniquement)
 
-### Options avancées (environnement)
-
-| Variable | Effet |
-| --- | --- |
-| `TERRAFORM_BIN=tofu` | utiliser OpenTofu au lieu de Terraform |
-| `K8S_LAB_SKIP_DOCTOR=1` | ne pas bloquer le déploiement sur les prérequis (à vos risques) |
-| `NO_COLOR=1` | sortie sans couleurs |
-| `DEBUG=1` | trace Bash complète du CLI |
-
-## Correspondance entre outils
-
-Le CLI traduit `config/lab.env` pour chaque outil. Quand un outil est utilisé **seul**, il
-retombe sur ses propres valeurs par défaut, identiques (vérifié par
-`scripts/check-config-sync.sh`).
-
-| `config/lab.env` | Terraform (`TF_VAR_…`) | Ansible (`-e`, `group_vars/all.yml`) | Vagrantfile | kind / minikube |
-| --- | --- | --- | --- | --- |
-| `CLUSTER_NAME` | `cluster_name` | `cluster_name` (dans l'inventaire généré) | lu directement | nom du cluster / profil |
-| `WORKER_COUNT` | `worker_count` (EKS : taille voulue du node group) | — (déduit de l'inventaire) | lu directement | nœuds `worker` |
-| `EKS_KUBERNETES_VERSION` / `AWS_TARGET` / `LOCALSTACK_ENDPOINT` | `kubernetes_version` / `aws_target` / `localstack_endpoint` (eks) | — | — | — |
-| `NODE_HOSTNAME_PREFIX` | `hostname_prefix` | — | lu directement | — |
-| `NODE_CPUS` / `NODE_MEMORY_MB` / `NODE_DISK_GB` | `node_cpus` / `node_memory_mb` / `node_disk_gb` | — | lu directement (sauf disque) | — |
-| `VM_IMAGE_URL` / `VM_IMAGE_SHA256` | `image_url` / `image_sha256` (proxmox), `image_source` (libvirt) | — | — | — |
-| clé SSH du lab | `ssh_public_key`, `ssh_private_key_file` | `ansible_ssh_private_key_file` (inventaire) | clé gérée par Vagrant | — |
-| `KUBERNETES_VERSION` | — | `kubernetes_version` | — | — (voir `KIND_NODE_IMAGE`, `MINIKUBE_KUBERNETES_VERSION`) |
-| `POD_CIDR` / `SERVICE_CIDR` | — | `pod_cidr` / `service_cidr` | — | `networking.podSubnet` / `serviceSubnet` (kind) |
-| `CNI` / `FLANNEL_VERSION` | — | `cni` / `flannel_version` | — | — |
-| `CONTAINER_RUNTIME` / `CONTAINERD_VERSION` | — | `container_runtime` / `containerd_version` | — | — |
-
-Les réglages **propres à une plateforme** (nœud Proxmox, datastore, bridge, VLAN, template
-vSphere, réseau libvirt…) ne sont pas dans `config/lab.env` : ils sont dans
-`terraform/providers/<p>/terraform.tfvars`, documentés dans chaque `terraform.tfvars.example`.
+| Variable | Défaut | Type / valeurs | Description |
+| --- | --- | --- | --- |
+| `PROXMOX_VE_ENDPOINT` | *(.env uniquement)* | url | URL de l'API Proxmox. |
+| `PROXMOX_VE_API_TOKEN` | *(.env uniquement)* | string | Token API Proxmox. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `PROXMOX_VE_USERNAME` | *(.env uniquement)* | string | Utilisateur Proxmox (déconseillé). |
+| `PROXMOX_VE_PASSWORD` | *(.env uniquement)* | string | Mot de passe Proxmox (déconseillé). *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `PROXMOX_VE_INSECURE` | *(.env uniquement)* | bool | Certificat auto-signé. |
+| `VSPHERE_SERVER` | *(.env uniquement)* | string | vCenter. |
+| `VSPHERE_USER` | *(.env uniquement)* | string | Utilisateur vCenter. |
+| `VSPHERE_PASSWORD` | *(.env uniquement)* | string | Mot de passe vCenter. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `VSPHERE_ALLOW_UNVERIFIED_SSL` | *(.env uniquement)* | bool | Certificat auto-signé. |
+| `ESXI_HOSTNAME` | *(.env uniquement)* | string | ESXi autonome (Vagrant). |
+| `ESXI_USERNAME` | *(.env uniquement)* | string | Utilisateur ESXi. |
+| `ESXI_PASSWORD` | *(.env uniquement)* | string | Mot de passe ESXi. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `ESXI_DATASTORE` | *(.env uniquement)* | string | Datastore ESXi. |
+| `ESXI_NETWORKS` | *(.env uniquement)* | string | Réseaux ESXi. |
+| `LIBVIRT_DEFAULT_URI` | *(.env uniquement)* | string | URI libvirt. |
+| `AWS_PROFILE` | *(.env uniquement)* | string | Profil AWS CLI. |
+| `AWS_REGION` | *(.env uniquement)* | string | Région AWS. |
+| `GRAFANA_ADMIN_PASSWORD` | *(.env uniquement)* | string | Mot de passe admin Grafana (vide = généré dans le cluster). *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `ARGOCD_REPO_USERNAME` | *(.env uniquement)* | string | Utilisateur du dépôt Git privé. |
+| `ARGOCD_REPO_PASSWORD` | *(.env uniquement)* | string | Jeton du dépôt Git privé. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `CLOUDFLARE_API_TOKEN` | *(.env uniquement)* | string | Jeton API Cloudflare (DNS-01, ExternalDNS). *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `RFC2136_TSIG_SECRET` | *(.env uniquement)* | string | Secret TSIG (base64). *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `PIHOLE_PASSWORD` | *(.env uniquement)* | string | Mot de passe Pi-hole. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `VELERO_S3_ACCESS_KEY` | *(.env uniquement)* | string | Clé d'accès S3 de Velero. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `VELERO_S3_SECRET_KEY` | *(.env uniquement)* | string | Clé secrète S3 de Velero. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `LONGHORN_BACKUP_S3_ENDPOINT` | *(.env uniquement)* | url | Point d'accès S3 de la cible Longhorn. |
+| `LONGHORN_BACKUP_S3_ACCESS_KEY` | *(.env uniquement)* | string | Clé d'accès S3 Longhorn. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+| `LONGHORN_BACKUP_S3_SECRET_KEY` | *(.env uniquement)* | string | Clé secrète S3 Longhorn. *Secret : jamais affiché ni écrit dans un fichier généré.* |
+<!-- END GENERATED: variables -->

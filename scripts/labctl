@@ -212,6 +212,36 @@ def cmd_matrix(args) -> int:
     return 0
 
 
+def cmd_docs(args) -> int:
+    """Sections générées de la documentation (<!-- BEGIN GENERATED: x --> ... <!-- END GENERATED: x -->)."""
+    cfg, catalog, _, _ = load(args)
+    stale = 0
+    for relative, sections in render.generated_sections(cfg, catalog).items():
+        path = ROOT / relative
+        if not path.is_file():
+            print(f"{relative} : fichier absent.", file=sys.stderr)
+            stale += 1
+            continue
+        doc = original = path.read_text(encoding="utf-8")
+        for marker, content in sections.items():
+            begin, end = f"<!-- BEGIN GENERATED: {marker} -->", f"<!-- END GENERATED: {marker} -->"
+            if begin not in doc or end not in doc:
+                print(f"{relative} : marqueurs {begin} / {end} absents.", file=sys.stderr)
+                stale += 1
+                continue
+            doc = doc[:doc.index(begin) + len(begin)] + "\n" + content.rstrip("\n") + "\n" + doc[doc.index(end):]
+        if doc != original:
+            if args.write:
+                path.write_text(doc, encoding="utf-8")
+                print(f"{relative} : sections générées mises à jour.")
+            else:
+                print(f"{relative} : sections générées obsolètes. Régénérez-les : make docs-generate", file=sys.stderr)
+                stale += 1
+    if not args.write and not stale:
+        print("Documentation générée à jour (variables, catalogue, versions, compatibilité).")
+    return 1 if stale else 0
+
+
 def cmd_versions(args) -> int:
     from labcore import versions
     _, catalog, _, _ = load(args)
@@ -359,6 +389,9 @@ def main(argv=None) -> int:
     p.add_argument("--check", help="vérifier qu'un document contient les matrices à jour")
     p.add_argument("--write", help="réécrire les sections générées d'un document")
     p.set_defaults(func=cmd_matrix)
+    p = sub.add_parser("docs", help="sections générées de la documentation")
+    p.add_argument("--write", action="store_true", help="réécrire les sections (sinon : vérifier)")
+    p.set_defaults(func=cmd_docs)
     sub.add_parser("versions", help="versions verrouillées").set_defaults(func=cmd_versions)
     p = sub.add_parser("versions-check", help="versions plus récentes disponibles (sans rien installer)")
     p.add_argument("--only", default="", help="composants à vérifier (virgules)")

@@ -42,12 +42,12 @@ TF_TESTS := terraform/modules/k8s-nodes terraform/modules/ansible-inventory terr
             terraform/providers/proxmox terraform/providers/vsphere terraform/providers/libvirt
 SHELL_SCRIPTS := k8s-lab $(wildcard scripts/*.sh scripts/lib/*.sh tests/*/*.sh)
 PLAYBOOKS := site.yml preflight.yml addons.yml cni-local.yml reset.yml kubeconfig.yml backup.yml etcd-restore.yml \
-             upgrade.yml os-update.yml node-remove.yml health.yml
+             upgrade.yml os-update.yml node-remove.yml health.yml storage-node-failure.yml
 
 .PHONY: help help-dev menu doctor config validate deploy destroy uninstall status kubeconfig test manifest \
         addons-plan addons-apply addons-status addons-test addons-upgrade addons-remove addons-catalog \
-        upgrade-plan upgrade os-update backup restore health node-remove versions versions-check \
-        venv test-unit catalog-check schema-check docs-generate matrix-check addons-render-check \
+        upgrade-plan upgrade os-update backup restore health node-remove storage-failure-test versions versions-check \
+        venv test-unit catalog-check schema-check docs-generate docs-check addons-render-check \
         lint shellcheck ruby-check vagrant-validate actionlint yamllint ansible-lint ansible-syntax \
         terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs \
         check-config test-kubeadm
@@ -159,6 +159,9 @@ health: ## Santé du cluster kubeadm (etcd, certificats, services, disques)
 node-remove: ## Retire un nœud (NODE=... ; après confirmation)
 	@$(LAB_ENV) $(LAB) node-remove $(TARGET) $(OPTIONS)
 
+storage-failure-test: ## Test DESTRUCTIF : perte d'un worker Longhorn (NODE=... ; après confirmation)
+	@$(LAB_ENV) $(LAB) storage-failure-test $(TARGET) $(OPTIONS)
+
 versions: ## Versions verrouillées (config/versions.yaml)
 	@$(LAB) versions
 
@@ -183,18 +186,18 @@ catalog-check: ## Cohérence du catalogue d'addons (fichiers, dépendances, ordr
 schema-check: ## Cohérence entre config/lab.env et config/schema.yaml
 	$(PYTHON) scripts/labctl schema-check
 
-docs-generate: ## Régénère les matrices de compatibilité de docs/compatibility.md
-	$(PYTHON) scripts/labctl matrix --write docs/compatibility.md
+docs-generate: ## Régénère les sections générées de la doc (variables, catalogue, versions, compatibilité)
+	$(PYTHON) scripts/labctl docs --write
 
-matrix-check: ## Vérifie que docs/compatibility.md est à jour
-	$(PYTHON) scripts/labctl matrix --check docs/compatibility.md
+docs-check: ## Vérifie que les sections générées de la documentation sont à jour
+	$(PYTHON) scripts/labctl docs
 
 addons-render-check: ## Rendu de tous les addons + helm template (réseau requis, aucun cluster)
 	$(PYTHON) tests/addons/render-check
 
 ## --- Qualité (utilisé par la CI) ------------------------------------------------
 
-lint: shellcheck ruby-check yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs check-config schema-check catalog-check matrix-check test-unit ## Tous les contrôles statiques (+ vagrant-validate, actionlint et addons-render-check en CI)
+lint: shellcheck ruby-check yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs check-config schema-check catalog-check docs-check test-unit ## Tous les contrôles statiques (+ vagrant-validate, actionlint et addons-render-check en CI)
 
 shellcheck: ## ShellCheck sur les scripts
 	shellcheck --external-sources --source-path=SCRIPTDIR $(SHELL_SCRIPTS)

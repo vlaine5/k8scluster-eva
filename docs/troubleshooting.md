@@ -70,18 +70,64 @@ le relancer après avoir corrigé un problème reprend là où il s'est arrêté
 | `REMOTE HOST IDENTIFICATION HAS CHANGED` | VM recréée hors du CLI avec la même IP | `ssh-keygen -R <ip> -f .lab/known_hosts` |
 | `does not use cgroup v2` | image trop ancienne | utilisez Ubuntu 22.04+ / Debian 12+ |
 | `kubeadm init failed` | kubelet ne démarre pas, image inaccessible | sur la VM : `sudo journalctl -u kubelet --no-pager \| tail -50`, `sudo crictl ps -a` ; puis `reset.yml` et relancer |
-| `Refuse to silently change the Kubernetes version` | `KUBERNETES_VERSION` changé sur un cluster existant | remettez la version, ou recréez le lab, ou faites un `kubeadm upgrade` |
-| Nœuds `NotReady` | CNI absent ou en erreur | `kubectl -n kube-flannel logs ds/kube-flannel-ds` ; avec `CNI=none`, installez un CNI |
+| `Refuse to silently change the Kubernetes version` | `KUBERNETES_VERSION` changé sur un cluster existant | remettez la version, ou planifiez la mise à niveau : `make upgrade-plan` puis `make upgrade` |
+| Nœuds `NotReady` | CNI absent ou en erreur | `kubectl -n kube-flannel logs ds/kube-flannel-ds`, `kubectl -n kube-system logs ds/cilium`, `kubectl -n calico-system get pods` ; avec `CNI=none`, installez un CNI |
+| `already runs <CNI> but cni=<autre>` | changement de CNI demandé sur un cluster existant | jamais automatique : [cni.md](cni.md#changer-de-cni) |
+| `kubectl logs` / `exec` : `tls: internal error` | certificat de service du kubelet pas encore émis | `kubectl get csr` ; kubeadm : `kubectl -n kube-system logs deploy/kubelet-csr-approver` |
+| `cannot resolve pkgs.k8s.io` (preflight) | DNS ou proxy | `/etc/resolv.conf`, accès Internet des nœuds |
 | Pods d'un nœud à l'autre ne se joignent pas (Vagrant) | mauvaise interface réseau | vérifiez `FLANNELD_IFACE` (IP du nœud) et `node_ip` dans l'inventaire |
 | Collections introuvables (`community.general.modprobe`) | collections non installées | `ansible-galaxy collection install -r ansible/requirements.yml` |
 
-Recommencer le cluster sans recréer les VMs :
+Recommencer le cluster sans recréer les VMs (instantané etcd pris avant) :
 
 ```bash
 cd ansible
-ansible-playbook -i inventories/<inventaire>.ini reset.yml -e reset_confirm=true
+ansible-playbook -i inventories/<inventaire>.ini reset.yml -e reset_confirm=<nom-du-cluster>
 cd .. && make deploy MODE=<mode>            # Terraform : MODE=terraform PROVIDER=<provider>
 ```
+
+Mode existing : `make uninstall MODE=existing` (même effet, confirmation par le nom du cluster).
+
+## Configuration
+
+| Symptôme | Solution |
+| --- | --- |
+| `variable inconnue` | une faute de frappe : la variable la plus proche est proposée ; liste complète : [configuration.md](configuration.md) |
+| `chevauchent` (réseaux) | `POD_CIDR`, `SERVICE_CIDR`, réseau des nœuds, `RESERVED_CIDRS`, pool LoadBalancer doivent être disjoints ; homelab avec des réseaux `10.101-105.0.0/16` : `SERVICE_CIDR=10.250.0.0/16` |
+| `PyYAML est absent` / `No module named yaml` | `make venv` puis `source .venv/bin/activate` |
+| `terraform.tfvars définit … pilotés par .env` | retirez ces lignes du tfvars (une seule source) |
+
+## HA (plusieurs control-planes)
+
+| Symptôme | Cause probable | Solution |
+| --- | --- | --- |
+| `CONTROL_PLANE_VIP` exigée | HA sans VIP | choisissez une IP libre du réseau des nœuds (hors DHCP, hors pool) |
+| la VIP ne répond pas | kube-vip ne trouve pas l'interface, ARP filtré | `sudo crictl logs $(sudo crictl ps -q --name kube-vip)` sur un control-plane ; la VIP doit être dans le même réseau L2 |
+| `etcd members` ≠ nombre de control-planes | jonction interrompue | `make health` ; voir les membres : `kubectl -n kube-system exec etcd-k8s-cp-1 -- etcdctl … member list` |
+
+## Addons
+
+<a id="addons"></a>
+
+| Symptôme | Cause probable | Solution |
+| --- | --- | --- |
+| `Le cluster du contexte … ne répond pas` | cluster arrêté, mauvais kubeconfig | `make status`, `make kubeconfig MODE=…` |
+| `bibliothèque Python « kubernetes »` | Ansible sans la bibliothèque | `make venv`, puis `source .venv/bin/activate` |
+| Helm : `timed out waiting for the condition` | image lente à télécharger, ressources insuffisantes | `kubectl get pods -A`, `kubectl describe pod` ; relancer `make addons-apply` (idempotent) |
+| `is not ready` (contrôle de santé) | Pods en erreur | diagnostic affiché ; `kubectl -n <ns> get events --sort-by=.lastTimestamp` |
+| Conflit de *server-side apply* | ressource possédée par un autre outil | ne pas forcer : identifier l'outil (`kubectl get <obj> -o yaml --show-managed-fields`) |
+| Test en échec | voir le rapport `.lab/reports/<contexte>-addons-test.json` | `KEEP=1 make addons-test ADDON=<id>` conserve le namespace `k8s-lab-test-<id>` |
+| LoadBalancer en `<pending>` | pool vide, fournisseur absent | `kubectl -n metallb-system get ipaddresspools` ; `make addons-test ADDON=metallb` |
+| PVC NFS en `Pending` | export inaccessible, pare-feu | test de montage depuis un nœud : [storage-nfs.md](storage-nfs.md#réseau) |
+
+## Modes existing et attach
+
+| Symptôme | Solution |
+| --- | --- |
+| `belongs to another cluster` | la machine porte déjà un cluster : [existing-mode.md](existing-mode.md#reutiliser-une-machine) |
+| `Kubernetes ports already in use` / paquets en conflit | le preflight liste le programme ou le paquet ; rien n'est désinstallé pour vous |
+| attach : `déjà installé par un autre outil` | retirer l'addon d'`ADDONS`, ou `EXISTING_ADDON_POLICY=skip` |
+| attach : `géré par Argo CD` | jamais repris : gérez ce composant dans Git |
 
 ## Option avancée
 

@@ -23,18 +23,23 @@ Un lab pédagogique doit montrer les bonnes pratiques, pas les contourner.
 | kubeconfig (certificat administrateur du cluster) | `.kube/config`, `.kube/clusters/*.yaml` | 0600 ; `~/.kube/config` n'est jamais modifié |
 | State Terraform | `terraform/providers/<p>/terraform.tfstate` | ignoré par Git ; **peut contenir des données sensibles**, ne pas le partager |
 | Plan Terraform | `.lab/terraform/<p>.tfplan` | créé en 0600, supprimé après `apply` |
-| Jetons `kubeadm join` | mémoire d'Ansible | durée de vie 15 min, `no_log`, fichier de join supprimé ; aucun `join-command` sur disque |
+| Jetons `kubeadm join`, clé de certificats (HA) | mémoire d'Ansible | durée de vie courte (15 min / 2 h), `no_log`, fichiers de join supprimés |
+| Secrets des addons (DNS, S3, Git, Grafana) | `.env` uniquement | lus dans l'environnement par Ansible, Secrets Kubernetes créés en `no_log` ; jamais dans les variables générées (`.lab/ansible/*.json`), le manifeste ni les rapports (vérifié en CI) |
+| Instantanés etcd | `/var/backups/k8s-lab/etcd/` (nœuds), `.lab/backups/` (poste) | 0600 ; ils contiennent **tous les Secrets du cluster** : à protéger comme tels |
 | Clés d'hôte SSH des VMs | `.lab/known_hosts` | `StrictHostKeyChecking=accept-new` : une clé qui change est refusée ; les entrées sont retirées au `destroy` |
 
 ## Téléchargements et intégrité
 
 | Artefact | Épinglage | Vérification |
 | --- | --- | --- |
-| Paquets Kubernetes | version exacte (`kubeadm=1.37.1-*`) + `apt-mark hold` | signature APT (`Signed-By` dédié, pas d'`apt-key`) |
-| containerd | dépôt Docker officiel, motif `2.3.*` | signature APT (`Signed-By` dédié) |
-| Manifeste Flannel | release `v0.28.9` (jamais `master`) | SHA-256 |
-| Image cloud Ubuntu | release datée (`release-20260911`), jamais `current` | SHA-256 (par Proxmox, ou par le CLI pour libvirt) |
-| Image de nœud kind | tag + **digest** | digest |
+| Toutes les versions | un seul fichier : `config/versions.yaml` ([versions.md](versions.md)) | `make versions-check` signale les nouveautés, rien n'est installé automatiquement |
+| Paquets Kubernetes | version exacte (`kubeadm=1.36.5-*`), gelés (`dpkg` hold / exclusion DNF) | signature APT / RPM (clé dédiée au dépôt, pas d'`apt-key`) |
+| containerd | dépôt Docker officiel, motif `2.3.*`, gelé | signature APT / RPM |
+| Manifestes téléchargés (Flannel, CRD Gateway API, snapshot-controller) | release épinglée (jamais une branche) | SHA-256 |
+| Charts Helm (CNI, addons) | version exacte | dépôt officiel de chaque projet ; rendu vérifié en CI (`make addons-render-check`) |
+| Helm sur les nœuds | `v4.3.0` | SHA-256 verrouillé |
+| Images cloud (Ubuntu, Debian, Rocky) | release datée, jamais `current` | SHA-256 (par Proxmox, ou par le CLI pour libvirt) |
+| Images de nœud kind | tag + **digest** | digest |
 | Collections Ansible | versions exactes (`requirements.yml`) | Galaxy |
 | Providers Terraform | contraintes `~>` + `.terraform.lock.hcl` versionné | hashes du lock file |
 | Outils de la CI et de `scripts/install-tools.sh` (kind, kubectl, minikube, Vagrant, actionlint) | versions exactes (`config/lab.env`) | SHA-256 publié par chaque projet |
@@ -57,12 +62,61 @@ Un lab pédagogique doit montrer les bonnes pratiques, pas les contourner.
 - **Coûts** : aucune CI automatique ne crée de ressource AWS ; le test EKS réel est un
   workflow déclenché à la main, qui détruit le cluster même en cas d'échec (`if: always()`).
 
-## Sur les VMs
+## Sur les nœuds
 
 - Connexion SSH **par clé uniquement** (`ssh_pwauth: false`, pas de mot de passe
-  utilisateur, root désactivé) ; `sudo` sans mot de passe pour l'utilisateur de déploiement.
-- Fichiers de configuration kubeadm en 0600 ; aucun fichier en `0777`.
-- Scripts : aucun `curl | bash`, aucun script exécuté en root depuis Internet.
+  utilisateur, root désactivé) ; un mot de passe dans un inventaire du mode existing est refusé.
+- **SELinux** (Rocky) reste en mode `enforcing` : la politique `container-selinux` est
+  installée, `CONTAINERD_SELINUX=true` active l'étiquetage des conteneurs. **AppArmor**
+  (Ubuntu/Debian) reste actif. Le framework ne désactive jamais l'un ou l'autre.
+- **Pare-feu** : firewalld ou ufw actif → seuls les ports nécessaires sont ouverts
+  (API, kubelet, etcd entre control-planes, CNI, NodePort) et les réseaux des Pods et
+  Services sont déclarés de confiance ; jamais désactivé (`NODE_FIREWALL=unmanaged` : aucune
+  modification, à votre charge).
+- Certificats de service des **kubelets signés par la CA du cluster** (approbation limitée
+  aux noms et IP exacts des nœuds) : metrics-server et Prometheus les vérifient.
+- Fichiers de configuration kubeadm en 0600 ; aucun fichier en `0777` ; aucun `curl | bash`.
+
+## Dans le cluster
+
+- **Pod Security Admission** : chaque namespace créé par le framework porte les labels
+  `enforce` (`baseline` par défaut, `restricted` quand l'addon le permet, `privileged`
+  uniquement pour les composants qui l'exigent : node-exporter, Longhorn, Falco…) et
+  `warn`/`audit` à `restricted`.
+- **NetworkPolicy** : appliquées avec Calico ou Cilium ; Flannel les ignore (refus explicite
+  de `NETWORK_POLICY_MODE=kubernetes` avec Flannel).
+- **Kyverno** : politiques Pod Security « baseline » (CEL) en audit
+  (`KYVERNO_POLICY_MODE=audit`, rapports) ou blocage (`enforce`), namespaces des composants
+  privilégiés du lab exclus ; politique pédagogique contre les images `latest` (audit).
+- **Trivy Operator** : rapports de vulnérabilités, d'audit de configuration, de RBAC et de
+  secrets exposés (`kubectl get vulnerabilityreports,configauditreports -A`).
+- **Falco** ou **Tetragon** (l'un ou l'autre) : détection à l'exécution par eBPF (lecture
+  de `/etc/shadow`, shell dans un conteneur…).
+- **Interfaces** jamais exposées par défaut ; l'interface Longhorn n'a pas
+  d'authentification : à ne publier qu'en connaissance de cause.
+
+## External Secrets
+
+<a id="external-secrets"></a>L'addon `external-secrets` synchronise des secrets depuis un
+coffre (Vault, Bitwarden, AWS Secrets Manager, Infisical…) vers des Secrets Kubernetes. Le
+framework installe l'opérateur, **pas** la connexion au coffre (`SecretStore`), qui dépend de
+votre environnement. Exemple avec Vault :
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata: {name: vault, namespace: demo}
+spec:
+  provider:
+    vault:
+      server: https://vault.lab.example.org
+      path: secret
+      version: v2
+      auth:
+        kubernetes: {mountPath: kubernetes, role: demo}
+```
+
+Le test de l'addon utilise le fournisseur « fake » intégré : aucun coffre réel requis.
 
 ## Audit de l'ancienne version (corrigé)
 
@@ -81,6 +135,6 @@ Un lab pédagogique doit montrer les bonnes pratiques, pas les contourner.
 ## Pour aller plus loin (hors périmètre du lab)
 
 - State Terraform dans un backend distant chiffré, avec verrouillage.
-- Coffre de secrets (Vault, SOPS) plutôt qu'un fichier `.env`.
-- Durcissement Kubernetes : RBAC par utilisateur, NetworkPolicies (nécessitent un CNI qui les
-  applique, comme Calico ou Cilium), Pod Security Admission.
+- Coffre de secrets (Vault, SOPS) plutôt qu'un fichier `.env`, branché par External Secrets.
+- RBAC par utilisateur (OIDC), chiffrement des Secrets au repos dans etcd (`EncryptionConfiguration`),
+  journal d'audit de l'API.

@@ -18,6 +18,7 @@ admin.conf
 join-command
 ansible/inventories/*.ini
 !ansible/inventories/example.ini
+!ansible/inventories/existing.example.ini
 
 # -----------------------------------------------------------------------------
 #  Terraform / OpenTofu (le state peut contenir des données sensibles)

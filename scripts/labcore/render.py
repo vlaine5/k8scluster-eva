@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import datetime as _dt
 import json
+import re
 import shlex
 import subprocess
 from typing import Any
@@ -278,7 +279,7 @@ def deployment_manifest(plan: Plan, cfg: Config, catalog: Catalog) -> dict[str, 
 # --- matrice de compatibilité (docs/compatibility.md) --------------------------------------
 def matrix_markdown(catalog: Catalog) -> str:
     head = "| Addon | " + " | ".join(PLATFORM_LABELS[p] for p in PLATFORMS) + " | Testé en CI |"
-    sep = "|" + "---|" * (len(PLATFORMS) + 2)
+    sep = _md_sep(len(PLATFORMS) + 2)
     rows = [head, sep]
     notes = []
     for addon in sorted(catalog.addons.values(), key=lambda a: (a.phase, a.id)):
@@ -302,7 +303,7 @@ def matrix_markdown(catalog: Catalog) -> str:
 
 def os_matrix_markdown(catalog: Catalog) -> str:
     rows = ["| Distribution | Version | Statut | Noyau | CPU x86-64 minimal | Testé en CI | Image épinglée |",
-            "|---|---|---|---|---|---|---|"]
+            _md_sep(7)]
     for name, versions in catalog.versions["os"].items():
         for version, entry in versions.items():
             image = entry["image_url"].rsplit("/", 1)[-1]
@@ -359,3 +360,125 @@ def to_yaml(data: Any) -> str:
 
 def to_json(data: Any) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False, default=str)
+
+
+# --- sections générées de la documentation (make docs-generate / docs-check) -------------
+def _md_escape(text: str) -> str:
+    """Cellule de tableau Markdown : barres échappées, URL nues entre chevrons (MD034)."""
+    text = str(text).replace("|", "\\|").replace("\n", " ")
+    return re.sub(r"(?<![<(`])(https?://[^\s)>`]+)", r"<\1>", text)
+
+
+def _md_sep(columns: int) -> str:
+    """Ligne de séparation d'un tableau Markdown (style « compact » de markdownlint)."""
+    return "|" + " --- |" * columns
+
+
+def variables_markdown(cfg: Config) -> str:
+    """Référence de toutes les variables, par groupe (config/schema.yaml + défauts de lab.env)."""
+    from .envfile import parse_env_file
+    defaults, _ = parse_env_file(cfg.root / "config" / "lab.env")
+    schema = cfg.schema
+    out = []
+    for group, title in schema.groups.items():
+        specs = [s for s in schema.variables.values() if s.group == group]
+        if not specs:
+            continue
+        out += [f"### {title}", "", "| Variable | Défaut | Type / valeurs | Description |", _md_sep(4)]
+        for spec in specs:
+            if spec.secret or not spec.lab_env:
+                default = "*(.env uniquement)*" if spec.secret or spec.group == "credentials" else "*(alias, non défini)*"
+            else:
+                value = defaults.get(spec.name, "")
+                default = f"`{value}`" if value else "*(vide)*"
+            kind = spec.type
+            if spec.values:
+                kind = " · ".join(f"`{v}`" for v in spec.values)
+            elif spec.minimum is not None or spec.maximum is not None:
+                kind += f" ({spec.minimum if spec.minimum is not None else ''}…{spec.maximum if spec.maximum is not None else ''})"
+            description = spec.description + (f" **Obsolète** : {spec.deprecated}" if spec.deprecated else "")
+            if spec.secret:
+                description += " *Secret : jamais affiché ni écrit dans un fichier généré.*"
+            out.append(f"| `{spec.name}` | {default} | {_md_escape(kind)} | {_md_escape(description)} |")
+        out.append("")
+    return "\n".join(out)
+
+
+def catalog_markdown(catalog: Catalog) -> str:
+    rows = ["| Addon | Catégorie | Phase | Composants (versions verrouillées) | Rôle |", _md_sep(5)]
+    comps = catalog.versions["components"]
+    for addon in sorted(catalog.addons.values(), key=lambda a: (a.phase, a.id)):
+        versions = ", ".join(f"{c} {comps[c].get('version', '')}".strip() for c in addon.components) or "—"
+        flag = " *(interne)*" if addon.internal else ""
+        rows.append(f"| [{addon.id}](#{addon.id}){flag} | {addon.category} | {addon.phase} | {versions} | "
+                    f"{_md_escape(addon.data.get('name', addon.id))} |")
+    return "\n".join(rows) + "\n"
+
+
+def catalog_details_markdown(catalog: Catalog) -> str:
+    """Fiche de chaque addon (ancre #<id>), générée depuis addons/<id>/addon.yaml."""
+    comps = catalog.versions["components"]
+    out = []
+    for addon in sorted(catalog.addons.values(), key=lambda a: (a.phase, a.id)):
+        data = addon.data
+        install = data.get("install", {})
+        out += [f"### {addon.id}", "", f"**{_md_escape(data.get('name', addon.id))}** — "
+                f"{' '.join(str(data.get('description', '')).split())}", ""]
+        rows = [("Catégorie, phase", f"{addon.category}, phase {addon.phase}" + (" (interne)" if addon.internal else ""))]
+        if addon.components:
+            rows.append(("Composants", ", ".join(f"{c} {comps[c].get('version', '')}".strip() for c in addon.components)))
+        if install.get("namespace"):
+            rows.append(("Namespace", f"`{install['namespace']}` (Pod Security : {install.get('pod_security', 'baseline')})"))
+        if addon.depends_on:
+            rows.append(("Dépend de", ", ".join(addon.depends_on)))
+        if addon.optional_deps:
+            rows.append(("S'intègre avec", ", ".join(addon.optional_deps)))
+        if addon.conflicts_with:
+            rows.append(("Incompatible avec", ", ".join(addon.conflicts_with)))
+        requires = data.get("requires", {})
+        if requires:
+            rows.append(("Exige", "; ".join(f"{k} : {', '.join(map(str, v)) if isinstance(v, list) else v}"
+                                            for k, v in requires.items())))
+        selected = data.get("selected_by", {})
+        if selected:
+            rows.append(("Activé par", "; ".join(f"`{k}={'|'.join(map(str, v))}`" for k, v in selected.items())))
+        if addon.settings:
+            rows.append(("Réglages (.env)", ", ".join(f"`{x}`" for x in addon.settings)))
+        if addon.secrets:
+            rows.append(("Secrets (.env uniquement)", ", ".join(f"`{x}`" for x in addon.secrets)))
+        rows.append(("Données", "oui : jamais supprimées automatiquement" if addon.stateful else "non"))
+        rows.append(("Test fonctionnel", f"`addons/{addon.id}/{data['tests']}`" if data.get("tests") else
+                     "via les addons qui l'utilisent"))
+        notes = data.get("remove", {}).get("notes")
+        if notes:
+            rows.append(("Désinstallation", " ".join(str(notes).split())))
+        out += ["| | |", _md_sep(2)] + [f"| {k} | {_md_escape(v)} |" for k, v in rows] + [""]
+    return "\n".join(out)
+
+
+def versions_markdown(catalog: Catalog) -> str:
+    v = catalog.versions
+    k8s = v["kubernetes"]
+    rows = [f"Vérifiées le **{v.get('checked_on')}** (`make versions-check` compare avec les dépôts officiels).", "",
+            "| Élément | Version | Source |", _md_sep(3),
+            f"| Kubernetes (défaut) | {k8s['version']} | mineures supportées : {', '.join(k8s['supported_minors'])} |",
+            f"| containerd | {v['containerd']['version']} | download.docker.com (containerd.io) |",
+            f"| Helm (sur les nœuds) | {v['helm']['version']} | get.helm.sh (SHA-256 verrouillé) |",
+            f"| kube-vip | {v['kube_vip']['version']} | {v['kube_vip']['image']} |"]
+    for minor, image in sorted(k8s.get("kind_node_images", {}).items()):
+        rows.append(f"| image kind {minor} | `{image.split('@')[0].rsplit(':', 1)[-1]}` | {image.split(':')[0]} (condensé épinglé) |")
+    for name, comp in sorted(v["components"].items()):
+        source = {"helm": comp.get("repo", ""), "helm-oci": comp.get("chart", ""),
+                  "manifest": "manifeste + SHA-256"}.get(comp["type"], comp["type"])
+        rows.append(f"| {name} | {comp.get('version', '-')} | {_md_escape(source)} |")
+    return "\n".join(rows) + "\n"
+
+
+def generated_sections(cfg: Config, catalog: Catalog) -> dict[str, dict[str, str]]:
+    """Fichier -> {marqueur: contenu} des sections générées de la documentation."""
+    return {
+        "docs/compatibility.md": {"addons": matrix_markdown(catalog), "os": os_matrix_markdown(catalog)},
+        "docs/configuration.md": {"variables": variables_markdown(cfg)},
+        "docs/addons.md": {"catalog": catalog_markdown(catalog), "details": catalog_details_markdown(catalog)},
+        "docs/versions.md": {"versions": versions_markdown(catalog)},
+    }
