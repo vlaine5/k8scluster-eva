@@ -48,25 +48,54 @@
            crd/installations.operator.tigera.io, crd/ippools.crd.projectcalico.org]
   changed_when: false
 
-- name: Install Calico (tigera-operator {{ k8s_cni_version }})
-  kubernetes.core.helm:
-    name: calico
-    chart_ref: "{{ lab_lock.components.calico.chart }}"
-    chart_repo_url: "{{ lab_lock.components.calico.repo }}"
-    chart_version: "{{ k8s_cni_version }}"
-    release_namespace: tigera-operator
-    create_namespace: true
-    values: "{{ lookup('ansible.builtin.template', 'calico-values.yaml.j2') | from_yaml }}"
-    binary_path: "{{ cni_helm_binary }}"
-    kubeconfig: "{{ cni_kubeconfig }}"
-    wait: true
-    timeout: 10m0s
+- name: Install Calico and wait for its components
+  block:
+    - name: Install Calico (tigera-operator {{ k8s_cni_version }})
+      kubernetes.core.helm:
+        name: calico
+        chart_ref: "{{ lab_lock.components.calico.chart }}"
+        chart_repo_url: "{{ lab_lock.components.calico.repo }}"
+        chart_version: "{{ k8s_cni_version }}"
+        release_namespace: tigera-operator
+        create_namespace: true
+        values: "{{ lookup('ansible.builtin.template', 'calico-values.yaml.j2') | from_yaml }}"
+        binary_path: "{{ cni_helm_binary }}"
+        kubeconfig: "{{ cni_kubeconfig }}"
+        wait: true
+        timeout: 10m0s
 
-- name: Wait for the Calico components to be available (tigerastatus)
-  ansible.builtin.command:
-    argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", wait, --for=condition=Available, --timeout=30s, tigerastatus/calico]
-  register: cni_calico_status
-  until: cni_calico_status.rc == 0
-  retries: 40
-  delay: 15
-  changed_when: false
+    # 15 minutes au plus : au-delà, attendre ne corrige rien, le diagnostic ci-dessous oui.
+    - name: Wait for the Calico components to be available (tigerastatus)
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", wait, --for=condition=Available, --timeout=30s, tigerastatus/calico]
+      register: cni_calico_status
+      until: cni_calico_status.rc == 0
+      retries: 20
+      delay: 15
+      changed_when: false
+  rescue:
+    - name: Collect the state of Calico (diagnosis)
+      ansible.builtin.command:
+        argv: "{{ [kubectl, '--kubeconfig=' ~ cni_kubeconfig] + item }}"
+      loop:
+        - [get, tigerastatus, -o, wide]
+        - [get, tigerastatus, calico, -o, "jsonpath={range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{'\\n'}{end}"]
+        - [get, pods, -o, wide, -n, tigera-operator]
+        - [get, pods, -o, wide, -n, calico-system]
+        - [describe, pods, -n, calico-system, -l, k8s-app=calico-node]
+        - [logs, -n, tigera-operator, deploy/tigera-operator, --tail=40]
+        - [logs, -n, calico-system, -l, k8s-app=calico-node, --all-containers, --tail=40, --prefix]
+      register: cni_calico_diag
+      changed_when: false
+      failed_when: false
+
+    - name: Show the diagnosis
+      ansible.builtin.debug:
+        msg: "{{ cni_calico_diag.results | map(attribute='stdout_lines') | flatten | select | list | to_nice_yaml }}"
+
+    - name: Fail after the diagnosis
+      ansible.builtin.fail:
+        msg: >-
+          Calico did not become ready (see the diagnosis above: tigerastatus, Pod events and calico-node logs).
+          Common causes: the node IP autodetection picking the wrong interface, the IP pool {{ pod_cidr }}
+          overlapping the node network, or BGP/VXLAN traffic blocked between the nodes. docs/cni.md#depannage

@@ -83,4 +83,5 @@ l'état des Pods, leurs événements et les journaux des agents.
 | Cilium : agent qui redémarre, `unable to reach the API server` | sans kube-proxy, Cilium joint l'API par `CONTROL_PLANE_VIP`/`CONTROL_PLANE_ENDPOINT` : cette adresse doit répondre depuis chaque nœud |
 | Cilium : erreurs eBPF au démarrage | noyau trop ancien ou sans les options eBPF nécessaires ([os.md](os.md)) |
 | Calico : `ensure CRDs are installed first` | CRD Calico absentes : elles sont installées par le framework depuis leur chart dédié ; relancez `make deploy` |
+| Calico : `did not become ready` | le diagnostic affiché donne `tigerastatus`, les événements et journaux de `calico-node` ; vérifiez l'interface choisie pour l'IP du nœud et que `POD_CIDR` ne chevauche pas le réseau des nœuds |
 | Pods de deux nœuds qui ne se joignent pas | flux VXLAN (UDP 8472 Flannel/Cilium, 4789 Calico) bloqués par un pare-feu entre les nœuds |
