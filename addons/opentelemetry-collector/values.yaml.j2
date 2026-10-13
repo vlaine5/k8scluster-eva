@@ -8,6 +8,16 @@ mode: deployment
 image:
   repository: otel/opentelemetry-collector-k8s
 replicaCount: 1
+# Namespace en Pod Security « restricted » : le chart ne fixe aucun contexte de sécurité.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile: {type: RuntimeDefault}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
 resources:
   requests: {cpu: 50m, memory: 128Mi}
   limits: {memory: 512Mi}

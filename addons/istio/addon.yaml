@@ -2,17 +2,22 @@ id: istio
 name: Istio (service mesh)
 description: >-
   Service mesh Istio en mode sidecar : identités SPIFFE, mTLS entre workloads, routage applicatif,
-  télémétrie. Activé namespace par namespace (label istio-injection=enabled). Avec Cilium, le
-  framework adapte la configuration de Cilium (socketLB.hostNamespaceOnly).
+  télémétrie. Activé namespace par namespace (label istio-injection=enabled). Agent CNI d'Istio :
+  les Pods maillés n'ont besoin d'aucune capacité réseau (compatible Pod Security baseline et
+  Kyverno). Avec Cilium, le framework adapte Cilium (cni.exclusive=false, socketLB.hostNamespaceOnly).
 category: mesh
 phase: 8
-components: [istio-base, istiod]
+components: [istio-base, istio-cni, istiod]
 integrates_with: [prometheus-operator-crds, gateway-api-crds]
 support:
   default: supported
   kind: experimental
   minikube: experimental
-  attach: {status: configured, note: "Avec Cilium existant, socketLB.hostNamespaceOnly doit déjà être activé."}
+  attach:
+    status: configured
+    note: >-
+      Avec Cilium existant : cni.exclusive=false et socketLB.hostNamespaceOnly=true doivent déjà être réglés.
+      k3s/RKE2 : chemins CNI non standard, non pris en charge.
 validated: []
 resources: {cpu_m: 500, memory_mb: 1024}
 install:
@@ -20,12 +25,15 @@ install:
   pod_security: privileged
   releases:
     - {name: istio-base, component: istio-base, namespace: istio-system, values: values-base.yaml.j2, timeout: 5m}
+    # Agent CNI (DaemonSet privilégié dans istio-system) : configure la redirection du trafic
+    # à la place du conteneur istio-init (NET_ADMIN/NET_RAW) dans chaque Pod maillé.
+    - {name: istio-cni, component: istio-cni, namespace: istio-system, values: values-cni.yaml.j2, timeout: 10m}
     - {name: istiod, component: istiod, namespace: istio-system, values: values.yaml.j2, timeout: 10m}
 health:
   - {kind: Deployment, namespace: istio-system, name: istiod}
+  - {kind: DaemonSet, namespace: istio-system, name: istio-cni-node}
 tests: tests/test.yml
-# Injection des sidecars (istio-init exige NET_ADMIN/NET_RAW : namespace de test privilégié).
-test_pod_security: privileged
+# Namespace de test en Pod Security baseline (défaut) : l'agent CNI évite istio-init.
 test_namespace_labels: {istio-injection: enabled}
 remove:
   notes: "Retirez d'abord le label istio-injection de vos namespaces puis redémarrez les Pods concernés."

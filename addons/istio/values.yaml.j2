@@ -1,5 +1,10 @@
 # istiod (mode sidecar). L'injection est activée par namespace :
 #   kubectl label namespace <ns> istio-injection=enabled
+# pilot.cni.enabled : la redirection du trafic est faite par l'agent CNI d'Istio
+# (values-cni.yaml.j2), pas par un conteneur istio-init privilégié.
+pilot:
+  cni:
+    enabled: true
 # Avec Cilium sans kube-proxy, Cilium est configuré en socketLB.hostNamespaceOnly
 # (rôle cni) pour rester compatible avec les sidecars.
 autoscaleEnabled: false

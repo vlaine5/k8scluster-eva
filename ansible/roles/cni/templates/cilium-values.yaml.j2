@@ -69,4 +69,7 @@ bgpControlPlane:
 # Istio (sidecars) : le load balancing par socket ne s'applique qu'au réseau de l'hôte.
 socketLB:
   hostNamespaceOnly: true
+# L'agent CNI d'Istio s'enchaîne après Cilium : Cilium ne doit pas retirer les autres configurations CNI.
+cni:
+  exclusive: false
 {% endif %}

@@ -89,6 +89,78 @@ def check_docs(text: str, origin: str, problems: list[str]) -> int:
     return count
 
 
+# Pod Security Standards (vérification simplifiée des règles qui font échouer un
+# déploiement) : chaque workload du namespace d'un addon doit respecter le niveau
+# déclaré par install.pod_security (étiquette pod-security.kubernetes.io/enforce).
+WORKLOADS = {"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "Pod"}
+BASELINE_CAPS = {"AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "MKNOD",
+                 "NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"}
+
+
+def pod_spec(doc: dict) -> dict | None:
+    kind = doc.get("kind")
+    if kind == "Pod":
+        return doc.get("spec") or {}
+    if kind == "CronJob":
+        return (((doc.get("spec") or {}).get("jobTemplate") or {}).get("spec") or {}).get("template", {}).get("spec")
+    if kind in WORKLOADS:
+        return ((doc.get("spec") or {}).get("template") or {}).get("spec")
+    return None
+
+
+def pod_security_violations(spec: dict, level: str) -> list[str]:
+    found = []
+    pod_ctx = spec.get("securityContext") or {}
+    containers = [c for key in ("initContainers", "containers") for c in spec.get(key) or []]
+    for flag in ("hostNetwork", "hostPID", "hostIPC"):
+        if spec.get(flag):
+            found.append(flag)
+    if any("hostPath" in v for v in spec.get("volumes") or []):
+        found.append("volume hostPath")
+    for c in containers:
+        ctx = c.get("securityContext") or {}
+        name = c.get("name", "?")
+        caps = ctx.get("capabilities") or {}
+        if ctx.get("privileged"):
+            found.append(f"{name}: privileged")
+        if any(p.get("hostPort") for p in c.get("ports") or []):
+            found.append(f"{name}: hostPort")
+        if set(caps.get("add") or []) - BASELINE_CAPS:
+            found.append(f"{name}: capacités {sorted(set(caps.get('add')) - BASELINE_CAPS)}")
+        if level != "restricted":
+            continue
+        if ctx.get("allowPrivilegeEscalation") is not False:
+            found.append(f"{name}: allowPrivilegeEscalation != false")
+        if "ALL" not in (caps.get("drop") or []):
+            found.append(f"{name}: capabilities.drop sans ALL")
+        if set(caps.get("add") or []) - {"NET_BIND_SERVICE"}:
+            found.append(f"{name}: capacités ajoutées")
+        if not (ctx.get("runAsNonRoot", pod_ctx.get("runAsNonRoot")) is True):
+            found.append(f"{name}: runAsNonRoot != true")
+        if ctx.get("runAsUser", pod_ctx.get("runAsUser")) == 0:
+            found.append(f"{name}: runAsUser=0")
+        seccomp = (ctx.get("seccompProfile") or pod_ctx.get("seccompProfile") or {}).get("type")
+        if seccomp not in ("RuntimeDefault", "Localhost"):
+            found.append(f"{name}: seccompProfile absent")
+    return found
+
+
+def check_pod_security(text: str, origin: str, namespace: str, level: str, problems: list[str]) -> None:
+    # kube-system et default ne reçoivent jamais d'étiquette Pod Security du framework.
+    if level == "privileged" or namespace in ("kube-system", "default"):
+        return
+    for doc in yaml.load_all(text, Loader=Loader):
+        if not isinstance(doc, dict) or (doc.get("metadata") or {}).get("namespace", namespace) != namespace:
+            continue
+        spec = pod_spec(doc)
+        if spec is None:
+            continue
+        violations = pod_security_violations(spec, level)
+        if violations:
+            problems.append(f"{origin} : {doc['kind']}/{doc['metadata']['name']} refusé en Pod Security "
+                            f"« {level} » (namespace {namespace}) : {', '.join(violations)}")
+
+
 def scenario(path: Path, workdir: Path) -> list[str]:
     problems: list[str] = []
     env = {**os.environ, **DUMMY_SECRETS, "LAB_ENV_FILE": str(path), "NO_COLOR": "1"}
@@ -137,8 +209,14 @@ def scenario(path: Path, workdir: Path) -> list[str]:
             releases += 1
             (render_dir / addon["id"] / f"{release['name']}.rendered.yaml").write_text(result.stdout)
             objects += check_docs(result.stdout, f"{addon['id']}/{release['name']}", problems)
+            if install.get("namespace"):
+                check_pod_security(result.stdout, f"{addon['id']}/{release['name']}", install["namespace"],
+                                   install.get("pod_security", "baseline"), problems)
         for manifest in (render_dir / addon["id"] / "manifests").glob("*"):
             objects += check_docs(manifest.read_text(), f"{addon['id']}/manifests/{manifest.name}", problems)
+            if install.get("namespace"):
+                check_pod_security(manifest.read_text(), f"{addon['id']}/manifests/{manifest.name}",
+                                   install["namespace"], install.get("pod_security", "baseline"), problems)
     # Aucun secret ne doit se retrouver dans les variables ou les fichiers rendus.
     for file in [vars_file, *render_dir.rglob("*")]:
         if file.is_file():

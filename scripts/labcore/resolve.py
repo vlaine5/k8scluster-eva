@@ -1194,6 +1194,10 @@ class Resolver:
                 for key in needs.get(provider, []):
                     if not cfg.get(key):
                         self.error(f"DNS-01 ({provider}) exige {key}.")
+        if "istio" in self.selected and self.r.get("cni") == "cilium":
+            self.info("Istio avec Cilium : Cilium est configuré pour l'agent CNI d'Istio (cni.exclusive=false"
+                      + (", socketLB.hostNamespaceOnly" if self.r.get("kube_proxy_replacement") else "") + "). "
+                      "Si Cilium est déjà installé, relancez make deploy (make addons-apply ne modifie pas le CNI).")
         if "argo-cd" in self.selected and cfg.get("ARGOCD_REPO_URL") and cfg.bool("ARGOCD_AUTO_SYNC"):
             self.info("Argo CD : synchronisation automatique de l'application d'exemple activée.")
         for flag, addon_id in (("ARGOCD_EXPOSE", "argo-cd"), ("GRAFANA_EXPOSE", "monitoring"),
