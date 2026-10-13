@@ -23,9 +23,11 @@
     preflight_busy_ports: >-
       {{ preflight_required_ports | select('in', preflight_listening) | list }}
   vars:
+    # Colonne « adresse locale:port » de ss -Htln (regex_findall : aucune erreur sur une ligne
+    # qui ne correspond pas, contrairement à regex_search avec un groupe).
     preflight_listening: >-
-      {{ preflight_ss.stdout_lines | map('regex_search', '^\\S+\\s+\\S+\\s+\\S+\\s+\\S*:(\\d+)\\s', '\\1')
-         | select | map('first') | map('int') | list }}
+      {{ preflight_ss.stdout | regex_findall('^\\S+\\s+\\d+\\s+\\d+\\s+\\S*:(\\d+)\\s', multiline=True)
+         | map('int') | list }}
     preflight_required_ports: >-
       {{ preflight_ports_control_plane if inventory_hostname in groups['control_plane'] else preflight_ports_worker }}
 

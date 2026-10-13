@@ -138,6 +138,35 @@ start_nodes() {
       docker exec "${name}" sh -c 'update-ca-certificates >/dev/null 2>&1 || update-ca-trust'
     fi
   done < <(node_names)
+  wait_nodes
+}
+
+# Attend la fin du démarrage de systemd puis l'ouverture de SSH sur chaque nœud :
+# make doctor vérifie SSH dès le début du déploiement.
+wait_nodes() {
+  local name state="" attempt
+  while read -r name; do
+    for ((attempt = 1; attempt <= 90; attempt++)); do
+      # « degraded » (une unité sans objet dans un conteneur a échoué) suffit ;
+      # is-system-running renvoie un code non nul tant que l'état n'est pas « running ».
+      state="$(docker exec "${name}" systemctl is-system-running 2>/dev/null || :)"
+      [[ "${state}" == running || "${state}" == degraded ]] && break
+      sleep 2
+    done
+    [[ "${state}" == running || "${state}" == degraded ]] ||
+      die "${name} : systemd n'a pas fini de démarrer (état : ${state:-inconnu})."
+    for ((attempt = 1; attempt <= 30; attempt++)); do
+      if ssh -n -i "${SSH_PRIVATE_KEY_FILE}" -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "${NODE_USER}@$(node_ip "${name}")" true; then
+        continue 2
+      fi
+      sleep 2
+    done
+    docker exec "${name}" systemctl --no-pager status sshd ssh 2>&1 | tail -n 20
+    docker exec "${name}" journalctl --no-pager -n 30 -u sshd -u ssh 2>&1
+    die "${name} : connexion SSH impossible (${NODE_USER}@$(node_ip "${name}"), clé ${SSH_PRIVATE_KEY_FILE})."
+  done < <(node_names)
+  ok "Nœuds démarrés, SSH disponible."
 }
 
 # Inventaire et configuration du mode existing, comme les écrirait un utilisateur.
