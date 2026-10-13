@@ -44,6 +44,8 @@
          if addon_release['values'] is defined else {} }}
     include_crds: true
   register: addon_release_rendered
+  # Rendu seul (aucune modification) : seule l'application ci-dessous compte comme changement.
+  changed_when: false
   when:
     - addon_release.enabled | default(true)
     - addon_release.method | default('release') == 'template'

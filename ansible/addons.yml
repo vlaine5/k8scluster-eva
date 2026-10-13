@@ -81,6 +81,8 @@
         content: "{{ {'action': addon_action, 'context': lab.kube_context, 'tests': addon_test_report | default([]),
                      'status': addon_status_report | default([]), 'health': addon_health_report | default([])} | to_nice_json }}"
         mode: "0600"
+      # Rapport local pour le CLI : ne modifie pas le cluster (idempotence vérifiée en CI).
+      changed_when: false
       when: addon_report_file is defined
 
     - name: Fail when a functional test failed
