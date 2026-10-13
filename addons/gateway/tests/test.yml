@@ -155,17 +155,27 @@
          (['--resolve', gateway_test_host ~ ':80:' ~ gateway_test_ip, 'http://' ~ gateway_test_host ~ '/backend/hostname']) }}
     addon_curl_expect: echo-
 
+# curl --resolve : le nom est envoyé en SNI. Un appel HTTPS sur l'IP seule (sans SNI) est
+# refusé par Envoy (Cilium, Envoy Gateway), qui choisit l'écouteur TLS d'après le SNI.
+# -k : la chaîne de certificats est déjà vérifiée plus haut, depuis le cluster.
 - name: Call the Gateway from this workstation through its LoadBalancer IP (local network)
-  ansible.builtin.uri:
-    url: "{{ gateway_test_listener }}://{{ gateway_test_lb_ip }}/hostname"
-    headers:
-      Host: "{{ gateway_test_host }}"
-    validate_certs: false
-    return_content: true
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --silent
+      - --show-error
+      - --fail
+      - --insecure
+      - --max-time
+      - "10"
+      - --resolve
+      - "{{ gateway_test_host }}:{{ 443 if gateway_test_listener == 'https' else 80 }}:{{ gateway_test_lb_ip }}"
+      - "{{ gateway_test_listener }}://{{ gateway_test_host }}/hostname"
   register: gateway_test_lan
-  until: gateway_test_lan.status == 200
+  until: gateway_test_lan.rc == 0 and gateway_test_lan.stdout is search('echo-')
   retries: 12
   delay: 5
+  changed_when: false
   when: gateway_test_lb_ip | length > 0
 
 - name: Report the LAN access
