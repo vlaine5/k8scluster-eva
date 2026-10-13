@@ -168,6 +168,13 @@ wait_nodes() {
     done
     [[ "${state}" == running || "${state}" == degraded ]] ||
       die "${name} : systemd n'a pas fini de démarrer (état : ${state:-inconnu})."
+    # Une machine démarrée n'a pas de /run/nologin ; dans un conteneur Rocky, il peut
+    # subsister (pam_nologin refuse alors toute connexion SSH) : signalé puis retiré.
+    if docker exec "${name}" test -e /run/nologin; then
+      info "${name} : /run/nologin présent après le démarrage (systemd ${state}) : retiré."
+      docker exec "${name}" systemctl --failed --no-pager --plain || :
+      docker exec "${name}" rm -f /run/nologin
+    fi
     for ((attempt = 1; attempt <= 30; attempt++)); do
       if ssh -n -i "${SSH_PRIVATE_KEY_FILE}" -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "${NODE_USER}@$(node_ip "${name}")" true; then
