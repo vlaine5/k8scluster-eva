@@ -38,7 +38,8 @@ LAB_ENV  := $(if $(WORKERS),WORKER_COUNT=$(WORKERS)) $(if $(NODE),NODE=$(NODE)) 
 TARGET   := $(MODE) $(PROVIDER)
 
 TF_DIRS  := terraform/providers/proxmox terraform/providers/vsphere terraform/providers/libvirt terraform/providers/eks
-TF_TESTS := terraform/modules/k8s-nodes terraform/modules/ansible-inventory terraform/providers/eks
+TF_TESTS := terraform/modules/k8s-nodes terraform/modules/ansible-inventory terraform/providers/eks \
+            terraform/providers/proxmox terraform/providers/vsphere terraform/providers/libvirt
 SHELL_SCRIPTS := k8s-lab $(wildcard scripts/*.sh scripts/lib/*.sh tests/*/*.sh)
 PLAYBOOKS := site.yml preflight.yml addons.yml cni-local.yml reset.yml kubeconfig.yml backup.yml etcd-restore.yml \
              upgrade.yml os-update.yml node-remove.yml health.yml
@@ -222,7 +223,7 @@ terraform-fmt: ## terraform fmt -check
 terraform-validate: ## terraform init (sans backend) + validate pour chaque provider
 	for d in $(TF_DIRS); do (cd "$$d" && terraform init -backend=false -input=false >/dev/null && terraform validate) || exit 1; done
 
-terraform-test: ## terraform test (modules communs, provider eks avec AWS simulé)
+terraform-test: ## terraform test (modules communs, providers avec API simulées : aucune ressource créée)
 	for d in $(TF_TESTS); do (cd "$$d" && terraform init -backend=false -input=false >/dev/null && terraform test) || exit 1; done
 
 tflint: ## TFLint sur tout le code Terraform

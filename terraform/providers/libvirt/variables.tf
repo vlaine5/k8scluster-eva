@@ -9,6 +9,47 @@ variable "cluster_name" {
   default     = "k8s-lab"
 }
 
+variable "control_plane_count" {
+  description = "Number of control-plane VMs: 1, 3 or 5."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([1, 3, 5], var.control_plane_count)
+    error_message = "control_plane_count must be 1, 3 or 5 (etcd quorum)."
+  }
+}
+
+variable "node_os" {
+  description = "Operating system of the VMs (ubuntu, debian, rocky): names the base image volume."
+  type        = string
+  default     = "ubuntu"
+}
+
+variable "node_os_version" {
+  description = "Version of node_os (e.g. 24.04, 12, 9)."
+  type        = string
+  default     = "24.04"
+}
+
+variable "os_family" {
+  description = "OS family: debian (Ubuntu, Debian) or redhat (Rocky)."
+  type        = string
+  default     = "debian"
+}
+
+variable "worker_ip_offset" {
+  description = "Offset of the first worker address from ip_start. Null = right after the control-planes."
+  type        = number
+  default     = null
+}
+
+variable "longhorn_disk_gb" {
+  description = "Size of the dedicated Longhorn disk (vdb) of each storage node. 0 = none."
+  type        = number
+  default     = 0
+}
+
 variable "worker_count" {
   description = "Number of worker VMs."
   type        = number
@@ -88,9 +129,9 @@ variable "domain_type" {
 }
 
 variable "image_source" {
-  description = "Ubuntu cloud image: URL or local path (./k8s-lab downloads it and verifies its SHA-256 first)."
+  description = "Cloud image of the OS: URL or local path (./k8s-lab downloads it and verifies its SHA-256 first)."
   type        = string
-  default     = "https://cloud-images.ubuntu.com/releases/noble/release-20260911/ubuntu-24.04-server-cloudimg-amd64.img"
+  default     = "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-amd64.img"
 }
 
 variable "storage_pool_path" {

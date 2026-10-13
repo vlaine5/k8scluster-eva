@@ -9,6 +9,47 @@ variable "cluster_name" {
   default     = "k8s-lab"
 }
 
+variable "control_plane_count" {
+  description = "Number of control-plane VMs: 1, 3 or 5."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([1, 3, 5], var.control_plane_count)
+    error_message = "control_plane_count must be 1, 3 or 5 (etcd quorum)."
+  }
+}
+
+variable "os_family" {
+  description = "OS family of the template: debian (Ubuntu, Debian) or redhat (Rocky)."
+  type        = string
+  default     = "debian"
+}
+
+variable "worker_ip_offset" {
+  description = "Offset of the first worker address from ip_start. Null = right after the control-planes."
+  type        = number
+  default     = null
+}
+
+variable "longhorn_disk_gb" {
+  description = "Size of the dedicated Longhorn disk (SCSI unit 1) of each storage node. 0 = none."
+  type        = number
+  default     = 0
+}
+
+variable "longhorn_datastore" {
+  description = "Datastore of the Longhorn disks. Null = same datastore as the VM."
+  type        = string
+  default     = null
+}
+
+variable "anti_affinity" {
+  description = "Create a DRS anti-affinity rule so that control-planes run on different ESXi hosts."
+  type        = bool
+  default     = true
+}
+
 variable "worker_count" {
   description = "Number of worker VMs."
   type        = number

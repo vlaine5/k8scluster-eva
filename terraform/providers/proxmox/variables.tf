@@ -9,10 +9,51 @@ variable "cluster_name" {
   default     = "k8s-lab"
 }
 
+variable "control_plane_count" {
+  description = "Number of control-plane VMs: 1, 3 or 5 (HA with kube-vip, see docs/high-availability.md)."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([1, 3, 5], var.control_plane_count)
+    error_message = "control_plane_count must be 1, 3 or 5 (etcd quorum)."
+  }
+}
+
 variable "worker_count" {
   description = "Number of worker VMs."
   type        = number
   default     = 2
+}
+
+variable "node_os" {
+  description = "Operating system of the VMs (ubuntu, debian, rocky): only used for names and tags; the image comes from image_url."
+  type        = string
+  default     = "ubuntu"
+}
+
+variable "node_os_version" {
+  description = "Version of node_os (e.g. 24.04, 12, 9)."
+  type        = string
+  default     = "24.04"
+}
+
+variable "os_family" {
+  description = "OS family: debian (Ubuntu, Debian) or redhat (Rocky). Selects the admin group of the cloud-init user."
+  type        = string
+  default     = "debian"
+}
+
+variable "longhorn_disk_gb" {
+  description = "Size of the dedicated Longhorn disk of each storage node. 0 = no dedicated disk."
+  type        = number
+  default     = 0
+}
+
+variable "longhorn_datastore" {
+  description = "Datastore of the dedicated Longhorn disks. Null = vm_datastore."
+  type        = string
+  default     = null
 }
 
 variable "hostname_prefix" {
@@ -119,15 +160,15 @@ variable "image_datastore" {
 }
 
 variable "image_url" {
-  description = "URL of the Ubuntu cloud image (pinned release, not 'current')."
+  description = "URL of the cloud image (pinned release, never 'current'). ./k8s-lab sets it from config/versions.yaml (NODE_OS)."
   type        = string
-  default     = "https://cloud-images.ubuntu.com/releases/noble/release-20260911/ubuntu-24.04-server-cloudimg-amd64.img"
+  default     = "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-amd64.img"
 }
 
 variable "image_sha256" {
   description = "SHA-256 of image_url (from the SHA256SUMS file of the release). Proxmox verifies it."
   type        = string
-  default     = "612b2c0cc1bc413a6cb8c38fd611794caf0f2b436c50013d8b3794db12ad7354"
+  default     = "6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2"
 
   validation {
     condition     = can(regex("^[0-9a-f]{64}$", var.image_sha256))
@@ -139,6 +180,12 @@ variable "template_vm_id" {
   description = "Optional: ID of an existing cloud-init ready VM template to clone instead of importing image_url."
   type        = number
   default     = null
+}
+
+variable "proxmox_nodes" {
+  description = "Optional: Proxmox nodes the VMs are spread over, in turn (control-planes first). Empty = proxmox_node only."
+  type        = list(string)
+  default     = []
 }
 
 variable "template_node" {
@@ -166,7 +213,7 @@ variable "network_bridge" {
 }
 
 variable "vlan_id" {
-  description = "Optional VLAN tag of the VM network interface."
+  description = "Optional VLAN tag of the VM network interface. Leave null when the bridge is already on the right VLAN."
   type        = number
   default     = null
 }
@@ -177,9 +224,15 @@ variable "network_cidr" {
 }
 
 variable "ip_start" {
-  description = "Host number of the control-plane in network_cidr (100 -> x.x.x.100); workers follow."
+  description = "Host number of the first control-plane in network_cidr (100 -> x.x.x.100)."
   type        = number
   default     = 100
+}
+
+variable "worker_ip_offset" {
+  description = "Offset of the first worker address from ip_start. Null = right after the control-planes."
+  type        = number
+  default     = null
 }
 
 variable "gateway" {

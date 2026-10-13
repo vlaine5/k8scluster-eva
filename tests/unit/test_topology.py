@@ -195,3 +195,10 @@ node_network_cidr=10.20.0.0/16
 def test_cron_to_oncalendar(cron, expected):
     from labcore.resolve import cron_to_oncalendar
     assert cron_to_oncalendar(cron) == expected
+
+
+def test_vagrant_longhorn_disk_needs_libvirt(lab):
+    lab.env("STORAGE_BACKENDS=longhorn\nLONGHORN_DEDICATED_DISK=true\nLONGHORN_REPLICA_COUNT=2\nVAGRANT_PROVIDER=virtualbox")
+    assert "VAGRANT_PROVIDER=libvirt" in messages(lab.plan("vagrant"))
+    lab.env("STORAGE_BACKENDS=longhorn\nLONGHORN_DEDICATED_DISK=true\nLONGHORN_REPLICA_COUNT=2\nVAGRANT_PROVIDER=libvirt")
+    assert "VAGRANT_PROVIDER=libvirt" not in messages(lab.plan("vagrant"))

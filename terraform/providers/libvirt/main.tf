@@ -1,10 +1,11 @@
 # =============================================================================
 #  Cluster Kubernetes sur KVM/libvirt (votre propre machine Linux).
 #
-#  Terraform crée : un pool de stockage, un réseau NAT, l'image Ubuntu de
-#  base, puis pour chaque nœud un disque (copy-on-write sur l'image de base),
-#  un disque cloud-init et la VM. Kubernetes est ensuite installé par Ansible
-#  grâce à l'inventaire généré à la fin de ce fichier.
+#  Terraform crée : un pool de stockage, un réseau NAT, l'image de base de
+#  l'OS choisi (Ubuntu, Debian, Rocky ; téléchargée et vérifiée par ./k8s-lab),
+#  puis pour chaque nœud un disque (copy-on-write sur l'image de base), un
+#  disque cloud-init, un disque Longhorn dédié optionnel et la VM.
+#  Kubernetes est ensuite installé par Ansible grâce à l'inventaire généré.
 # =============================================================================
 
 locals {
@@ -19,14 +20,18 @@ locals {
 module "nodes" {
   source = "../../modules/k8s-nodes"
 
-  hostname_prefix = var.hostname_prefix
-  worker_count    = var.worker_count
-  network_cidr    = var.network_cidr
-  ip_start        = var.ip_start
-  gateway         = local.gateway
-  dns_servers     = [local.gateway]
-  ssh_user        = var.ssh_user
-  ssh_public_key  = var.ssh_public_key
+  hostname_prefix     = var.hostname_prefix
+  control_plane_count = var.control_plane_count
+  worker_count        = var.worker_count
+  network_cidr        = var.network_cidr
+  ip_start            = var.ip_start
+  worker_ip_offset    = var.worker_ip_offset
+  gateway             = local.gateway
+  dns_servers         = [local.gateway]
+  ssh_user            = var.ssh_user
+  os_family           = var.os_family
+  ssh_public_key      = var.ssh_public_key
+  longhorn_disk_gb    = var.longhorn_disk_gb
 }
 
 # 2. Pool de stockage dédié au lab.
@@ -70,9 +75,9 @@ resource "libvirt_network" "lab" {
   }]
 }
 
-# 4. Image Ubuntu de base (lecture seule, partagée par tous les nœuds).
+# 4. Image de base de l'OS (lecture seule, partagée par tous les nœuds).
 resource "libvirt_volume" "base" {
-  name = "${var.cluster_name}-ubuntu-base.qcow2"
+  name = "${var.cluster_name}-${var.node_os}-${replace(var.node_os_version, ".", "")}-base.qcow2"
   pool = libvirt_pool.lab.name
   target = {
     format = {
@@ -101,6 +106,22 @@ resource "libvirt_volume" "root" {
   }
   backing_store = {
     path = libvirt_volume.base.path
+    format = {
+      type = "qcow2"
+    }
+  }
+}
+
+# 5 bis. Disque Longhorn dédié (vierge) des nœuds de stockage, avec un numéro de série
+#        que le rôle Ansible storage_disk reconnaît (il ne formate qu'un disque vide).
+resource "libvirt_volume" "longhorn" {
+  for_each = { for name, node in module.nodes.nodes : name => node if node.longhorn_disk }
+
+  name          = "${each.key}-longhorn.qcow2"
+  pool          = libvirt_pool.lab.name
+  capacity      = var.longhorn_disk_gb
+  capacity_unit = "GiB"
+  target = {
     format = {
       type = "qcow2"
     }
@@ -158,7 +179,7 @@ resource "libvirt_domain" "node" {
   cpu = var.domain_type == "kvm" ? { mode = "host-passthrough" } : null
 
   devices = {
-    disks = [
+    disks = concat([
       {
         source = {
           volume = {
@@ -189,7 +210,23 @@ resource "libvirt_domain" "node" {
           bus = "sata"
         }
       },
-    ]
+      ], each.value.longhorn_disk ? [{
+        source = {
+          volume = {
+            pool   = libvirt_pool.lab.name
+            volume = libvirt_volume.longhorn[each.key].name
+          }
+        }
+        driver = {
+          name = "qemu"
+          type = "qcow2"
+        }
+        serial = module.nodes.longhorn_disk_serial
+        target = {
+          dev = "vdb"
+          bus = "virtio"
+        }
+    }] : [])
 
     interfaces = [{
       model = {

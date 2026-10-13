@@ -44,3 +44,21 @@ run "two_control_planes_are_rejected" {
 
   expect_failures = [var.nodes]
 }
+
+run "three_control_planes_in_order" {
+  command = plan
+
+  variables {
+    nodes = {
+      "k8s-cp-1"     = { name = "k8s-cp-1", role = "control_plane", ip = "10.0.0.10" }
+      "k8s-cp-3"     = { name = "k8s-cp-3", role = "control_plane", ip = "10.0.0.12" }
+      "k8s-cp-2"     = { name = "k8s-cp-2", role = "control_plane", ip = "10.0.0.11" }
+      "k8s-worker-1" = { name = "k8s-worker-1", role = "worker", ip = "10.0.0.13" }
+    }
+  }
+
+  assert {
+    condition     = strcontains(output.content, "[control_plane]\nk8s-cp-1 ansible_host=10.0.0.10 node_ip=10.0.0.10\nk8s-cp-2 ansible_host=10.0.0.11 node_ip=10.0.0.11\nk8s-cp-3 ansible_host=10.0.0.12 node_ip=10.0.0.12\n")
+    error_message = "Control-planes must be listed in order (k8s-cp-1 runs kubeadm init):\n${output.content}"
+  }
+}

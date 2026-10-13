@@ -9,7 +9,11 @@
 #  Ansible : ./k8s-lab deploy vagrant enchaîne les deux étapes.
 #
 #  Aucun réglage n'est écrit en dur ici : tout vient de config/lab.env,
-#  surchargé par .env puis par les variables d'environnement.
+#  surchargé par .env puis par les variables d'environnement ; ./k8s-lab
+#  transmet en plus les valeurs résolues (LAB_R_*, ex. la box de NODE_OS).
+#
+#  1, 3 ou 5 control-planes (CONTROL_PLANE_COUNT), Ubuntu / Debian / Rocky
+#  (NODE_OS, NODE_OS_VERSION), disque Longhorn dédié avec le provider libvirt.
 #
 #  Providers supportés (VAGRANT_PROVIDER) :
 #    virtualbox      défaut, Linux / Windows / macOS Intel
@@ -51,6 +55,14 @@ def setting(key, default = nil)
   value.nil? || value.empty? ? default : value
 end
 
+# Boîtes Vagrant par OS (copie de config/versions.yaml pour un usage sans ./k8s-lab ;
+# scripts/check-config-sync.sh vérifie qu'elles restent identiques).
+OS_BOXES = {
+  "ubuntu-24.04" => "bento/ubuntu-24.04", "ubuntu-26.04" => "bento/ubuntu-26.04",
+  "debian-12" => "bento/debian-12", "debian-13" => "bento/debian-13",
+  "rocky-9" => "bento/rockylinux-9", "rocky-10" => "bento/rockylinux-10"
+}.freeze
+
 def integer_setting(key, default)
   Integer(setting(key, default.to_s), 10)
 rescue ArgumentError
@@ -60,10 +72,14 @@ end
 CLUSTER_NAME  = setting("CLUSTER_NAME", "k8s-lab")
 CONTEXT_NAME  = "#{CLUSTER_NAME}-vagrant"
 PROVIDER      = setting("VAGRANT_PROVIDER", "virtualbox")
-BOX           = setting("VAGRANT_BOX", "bento/ubuntu-24.04")
+NODE_OS_KEY   = "#{setting('NODE_OS', 'ubuntu')}-#{setting('NODE_OS_VERSION', '24.04')}"
+BOX           = setting("LAB_R_VAGRANT_BOX") || setting("VAGRANT_BOX") || OS_BOXES[NODE_OS_KEY]
 BOX_VERSION   = setting("VAGRANT_BOX_VERSION")
 PREFIX        = setting("NODE_HOSTNAME_PREFIX", "k8s")
+CP_COUNT      = integer_setting("CONTROL_PLANE_COUNT", 1)
 WORKER_COUNT  = integer_setting("WORKER_COUNT", 2)
+LONGHORN_DISK = setting("LAB_R_LONGHORN_DISK", "false") == "true"
+LONGHORN_GB   = integer_setting("LONGHORN_DISK_SIZE_GB", 100)
 CPUS          = integer_setting("NODE_CPUS", 2)
 MEMORY_MB     = integer_setting("NODE_MEMORY_MB", 2048)
 NET_PREFIX    = setting("VAGRANT_NETWORK_PREFIX", "192.168.56")
@@ -75,10 +91,17 @@ SUPPORTED_PROVIDERS = %w[virtualbox libvirt vmware_desktop vmware_esxi].freeze
 unless SUPPORTED_PROVIDERS.include?(PROVIDER)
   abort "k8s-lab: VAGRANT_PROVIDER=#{PROVIDER} is not supported (use one of: #{SUPPORTED_PROVIDERS.join(', ')})."
 end
+abort "k8s-lab: no Vagrant box known for NODE_OS=#{NODE_OS_KEY} (set VAGRANT_BOX)." if BOX.nil?
+abort "k8s-lab: CONTROL_PLANE_COUNT must be 1, 3 or 5 (etcd quorum)." unless [1, 3, 5].include?(CP_COUNT)
 abort "k8s-lab: WORKER_COUNT must be between 0 and 20." unless (0..20).cover?(WORKER_COUNT)
+if LONGHORN_DISK && PROVIDER != "libvirt"
+  abort "k8s-lab: the dedicated Longhorn disk is only created with VAGRANT_PROVIDER=libvirt (LONGHORN_DEDICATED_DISK)."
+end
 abort "k8s-lab: NODE_CPUS must be >= 2 (kubeadm requirement)." if CPUS < 2
 abort "k8s-lab: NODE_MEMORY_MB must be >= 2048." if MEMORY_MB < 2048
-abort "k8s-lab: VAGRANT_IP_START + WORKER_COUNT must stay below 255." if IP_START < 2 || IP_START + WORKER_COUNT > 254
+if IP_START < 3 || IP_START + CP_COUNT + WORKER_COUNT > 254
+  abort "k8s-lab: VAGRANT_IP_START must be >= 3 and leave room for every node below .255."
+end
 
 if PROVIDER == "vmware_esxi"
   abort "k8s-lab: ESXI_HOSTNAME is required for the vmware_esxi provider (see .env.example)." unless setting("ESXI_HOSTNAME")
@@ -91,10 +114,15 @@ end
 ENV["VAGRANT_DEFAULT_PROVIDER"] ||= PROVIDER
 
 # --- Description des nœuds ----------------------------------------------------
-NODES = [{ name: "#{PREFIX}-cp-1", role: "control_plane", ip: "#{NET_PREFIX}.#{IP_START}" }] +
-        (1..WORKER_COUNT).map do |i|
-          { name: "#{PREFIX}-worker-#{i}", role: "worker", ip: "#{NET_PREFIX}.#{IP_START + i}" }
-        end
+# Control-planes à IP_START, IP_START+1... ; workers juste après (même règle que le
+# résolveur). En HA, la VIP de l'API (kube-vip) est IP_START-1, choisie par ./k8s-lab.
+# Nœuds de stockage Longhorn : les workers, ou les control-planes sans worker.
+STORAGE_ROLE = WORKER_COUNT.positive? ? "worker" : "control_plane"
+NODES = (1..CP_COUNT).map do |i|
+  { name: "#{PREFIX}-cp-#{i}", role: "control_plane", ip: "#{NET_PREFIX}.#{IP_START + i - 1}" }
+end + (1..WORKER_COUNT).map do |i|
+  { name: "#{PREFIX}-worker-#{i}", role: "worker", ip: "#{NET_PREFIX}.#{IP_START + CP_COUNT + i - 1}" }
+end
 
 # --- Inventaire Ansible --------------------------------------------------------
 # Écrit à partir des informations SSH réelles de chaque VM démarrée
@@ -167,6 +195,10 @@ Vagrant.configure("2") do |config|
         lv.cpus = CPUS
         lv.memory = MEMORY_MB
         lv.default_prefix = "#{CLUSTER_NAME}-"
+        # Disque Longhorn dédié, vierge, reconnu par son numéro de série (rôle storage_disk).
+        if LONGHORN_DISK && node[:role] == STORAGE_ROLE
+          lv.storage :file, size: "#{LONGHORN_GB}G", type: "qcow2", serial: "k8slab-longhorn"
+        end
       end
 
       machine.vm.provider "vmware_desktop" do |vmw|

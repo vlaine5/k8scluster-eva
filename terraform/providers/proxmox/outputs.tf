@@ -1,6 +1,11 @@
 output "control_plane_ip" {
-  description = "IP address of the control-plane."
+  description = "IP address of the first control-plane."
   value       = module.nodes.control_plane.ip
+}
+
+output "control_plane_ips" {
+  description = "IP addresses of all the control-planes."
+  value       = [for c in module.nodes.control_planes : c.ip]
 }
 
 output "worker_ips" {
@@ -9,12 +14,14 @@ output "worker_ips" {
 }
 
 output "nodes" {
-  description = "Cluster nodes: name => { role, ip, vm_id }."
+  description = "Cluster nodes: name => { role, ip, vm_id, proxmox_node, longhorn_disk }."
   value = {
     for name, node in module.nodes.nodes : name => {
-      role  = node.role
-      ip    = node.ip
-      vm_id = proxmox_virtual_environment_vm.node[name].vm_id
+      role          = node.role
+      ip            = node.ip
+      vm_id         = proxmox_virtual_environment_vm.node[name].vm_id
+      proxmox_node  = local.placement[name]
+      longhorn_disk = node.longhorn_disk
     }
   }
 }

@@ -1,6 +1,8 @@
 # =============================================================================
 #  Cluster Kubernetes sur VMware vSphere (vCenter) : création des VMs
-#  uniquement, par clonage d'un template "image cloud Ubuntu".
+#  uniquement, par clonage d'un template "image cloud" (Ubuntu, Debian, Rocky :
+#  NODE_TEMPLATE_ID / vsphere_template). 1, 3 ou 5 control-planes avec règle
+#  d'anti-affinité, disque Longhorn dédié optionnel.
 #  cloud-init reçoit sa configuration via les propriétés "guestinfo" de la VM
 #  (datasource VMware de cloud-init). Kubernetes est ensuite installé par
 #  Ansible grâce à l'inventaire généré à la fin de ce fichier.
@@ -24,14 +26,18 @@ locals {
 module "nodes" {
   source = "../../modules/k8s-nodes"
 
-  hostname_prefix = var.hostname_prefix
-  worker_count    = var.worker_count
-  network_cidr    = var.network_cidr
-  ip_start        = var.ip_start
-  gateway         = var.gateway
-  dns_servers     = var.dns_servers
-  ssh_user        = var.ssh_user
-  ssh_public_key  = var.ssh_public_key
+  hostname_prefix     = var.hostname_prefix
+  control_plane_count = var.control_plane_count
+  worker_count        = var.worker_count
+  network_cidr        = var.network_cidr
+  ip_start            = var.ip_start
+  worker_ip_offset    = var.worker_ip_offset
+  gateway             = var.gateway
+  dns_servers         = var.dns_servers
+  ssh_user            = var.ssh_user
+  os_family           = var.os_family
+  ssh_public_key      = var.ssh_public_key
+  longhorn_disk_gb    = var.longhorn_disk_gb
 }
 
 # 2. Objets vCenter existants (lecture seule).
@@ -46,6 +52,12 @@ data "vsphere_compute_cluster" "this" {
 
 data "vsphere_datastore" "this" {
   name          = var.vsphere_datastore
+  datacenter_id = data.vsphere_datacenter.this.id
+}
+
+data "vsphere_datastore" "longhorn" {
+  count         = var.longhorn_datastore == null ? 0 : 1
+  name          = var.longhorn_datastore
   datacenter_id = data.vsphere_datacenter.this.id
 }
 
@@ -87,6 +99,19 @@ resource "vsphere_virtual_machine" "node" {
     thin_provisioned = data.vsphere_virtual_machine.template.disks[0].thin_provisioned
   }
 
+  # Disque Longhorn dédié : 2e disque SCSI (unité 1), vierge. Le rôle storage_disk le
+  # repère par son adresse SCSI (hctl x:0:1:0) et ne le formate que s'il est vide.
+  dynamic "disk" {
+    for_each = each.value.longhorn_disk ? [1] : []
+    content {
+      label            = "longhorn"
+      unit_number      = 1
+      size             = var.longhorn_disk_gb
+      thin_provisioned = true
+      datastore_id     = var.longhorn_datastore == null ? null : data.vsphere_datastore.longhorn[0].id
+    }
+  }
+
   clone {
     template_uuid = data.vsphere_virtual_machine.template.id
   }
@@ -107,6 +132,18 @@ resource "vsphere_virtual_machine" "node" {
   }
 }
 
+# 3 bis. Control-planes sur des hôtes ESXi distincts (DRS requis) : une panne d'hôte
+#        ne coûte qu'un membre etcd. Désactivable : anti_affinity = false.
+resource "vsphere_compute_cluster_vm_anti_affinity_rule" "control_planes" {
+  count = var.anti_affinity && var.control_plane_count > 1 ? 1 : 0
+
+  name               = "${local.context_name}-control-planes"
+  compute_cluster_id = data.vsphere_compute_cluster.this.id
+  virtual_machine_ids = [
+    for c in module.nodes.control_planes : vsphere_virtual_machine.node[c.name].id
+  ]
+}
+
 # 4. Inventaire Ansible généré automatiquement (pont Terraform -> Ansible).
 module "inventory" {
   source = "../../modules/ansible-inventory"
@@ -117,6 +154,10 @@ module "inventory" {
   ssh_user             = var.ssh_user
   ssh_private_key_file = var.ssh_private_key_file
   generated_by         = "terraform/providers/vsphere"
+  extra_vars = var.longhorn_disk_gb > 0 ? {
+    longhorn_disk_match_key   = "hctl"
+    longhorn_disk_match_regex = "^[0-9]+:0:1:0$"
+  } : {}
 
   depends_on = [vsphere_virtual_machine.node]
 }

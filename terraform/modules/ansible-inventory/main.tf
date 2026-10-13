@@ -5,12 +5,15 @@
 # =============================================================================
 
 locals {
-  control_plane = [for name in sort(keys(var.nodes)) : var.nodes[name] if var.nodes[name].role == "control_plane"]
-  # Tri naturel : worker-2 avant worker-10.
-  workers = [
-    for n in sort([for name, node in var.nodes : format("%05d|%s", try(tonumber(regex("-([0-9]+)$", name)[0]), 0), name) if node.role == "worker"]) :
-    var.nodes[split("|", n)[1]]
-  ]
+  # Tri naturel : worker-2 avant worker-10 ; le premier control-plane lance kubeadm init.
+  sorted = {
+    for role in ["control_plane", "worker"] : role => [
+      for n in sort([for name, node in var.nodes : format("%05d|%s", try(tonumber(regex("-([0-9]+)$", name)[0]), 0), name) if node.role == role]) :
+      var.nodes[split("|", n)[1]]
+    ]
+  }
+  control_plane = local.sorted["control_plane"]
+  workers       = local.sorted["worker"]
 }
 
 resource "local_file" "inventory" {
@@ -23,5 +26,6 @@ resource "local_file" "inventory" {
     workers              = local.workers
     ssh_user             = var.ssh_user
     ssh_private_key_file = var.ssh_private_key_file
+    extra_vars           = var.extra_vars
   })
 }

@@ -106,7 +106,7 @@ load_config() {
   # LAB_ENV_FILE : autre fichier que .env (profils d'exemple, plusieurs labs). Chemin rendu
   # absolu : le CLI change ensuite de dossier, et scripts/labctl le relit.
   if [[ -n "${LAB_ENV_FILE:-}" ]]; then
-    [[ -f "${LAB_ENV_FILE}" ]] || die "LAB_ENV_FILE=${LAB_ENV_FILE} : fichier introuvable."
+    [[ -e "${LAB_ENV_FILE}" ]] || die "LAB_ENV_FILE=${LAB_ENV_FILE} : fichier introuvable."
     LAB_ENV_FILE="$(cd "$(dirname "${LAB_ENV_FILE}")" && pwd -P)/$(basename "${LAB_ENV_FILE}")"
     export LAB_ENV_FILE
   fi

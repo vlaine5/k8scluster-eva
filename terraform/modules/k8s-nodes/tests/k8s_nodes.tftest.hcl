@@ -114,3 +114,110 @@ run "invalid_ssh_key_is_rejected" {
 
   expect_failures = [var.ssh_public_key]
 }
+
+run "three_control_planes" {
+  command = plan
+
+  variables {
+    control_plane_count = 3
+    worker_count        = 3
+  }
+
+  assert {
+    condition     = [for c in output.control_planes : c.ip] == ["192.168.10.100", "192.168.10.101", "192.168.10.102"]
+    error_message = "Control-planes must get consecutive addresses from ip_start."
+  }
+
+  assert {
+    condition     = [for w in output.workers : w.ip] == ["192.168.10.103", "192.168.10.104", "192.168.10.105"]
+    error_message = "Workers must follow the last control-plane by default."
+  }
+
+  assert {
+    condition     = output.nodes["k8s-worker-1"].index == 3 && output.nodes["k8s-cp-3"].index == 2
+    error_message = "Indexes (VM IDs) must be sequential: control-planes then workers."
+  }
+}
+
+run "worker_ip_offset_keeps_room_for_more_control_planes" {
+  command = plan
+
+  variables {
+    control_plane_count = 1
+    worker_count        = 3
+    worker_ip_offset    = 10
+  }
+
+  assert {
+    condition     = output.control_plane.ip == "192.168.10.100" && output.workers[0].ip == "192.168.10.110"
+    error_message = "worker_ip_offset must place the workers at ip_start + offset."
+  }
+}
+
+run "even_control_plane_count_is_rejected" {
+  command = plan
+
+  variables {
+    control_plane_count = 2
+  }
+
+  expect_failures = [var.control_plane_count]
+}
+
+run "overlapping_worker_offset_is_rejected" {
+  command = plan
+
+  variables {
+    control_plane_count = 3
+    worker_ip_offset    = 1
+  }
+
+  expect_failures = [var.worker_ip_offset]
+}
+
+run "rocky_uses_the_wheel_group" {
+  command = plan
+
+  variables {
+    os_family = "redhat"
+    ssh_user  = "rocky"
+  }
+
+  assert {
+    condition     = strcontains(output.cloud_init["k8s-cp-1"].user_data, "groups: [wheel]") && strcontains(output.cloud_init["k8s-cp-1"].user_data, "name: rocky")
+    error_message = "Rocky Linux nodes must put the admin user in the wheel group."
+  }
+
+  assert {
+    condition     = yamldecode(output.cloud_init["k8s-cp-1"].network_config).ethernets.primary.match.name == "e*"
+    error_message = "The default interface pattern must match en* and eth* (Rocky cloud images use eth0)."
+  }
+}
+
+run "longhorn_disks_on_storage_nodes" {
+  command = plan
+
+  variables {
+    worker_count     = 2
+    longhorn_disk_gb = 100
+  }
+
+  assert {
+    condition     = !output.control_plane.longhorn_disk && alltrue([for w in output.workers : w.longhorn_disk])
+    error_message = "Dedicated Longhorn disks go to the workers only."
+  }
+}
+
+run "longhorn_disks_without_workers" {
+  command = plan
+
+  variables {
+    worker_count     = 0
+    longhorn_disk_gb = 50
+  }
+
+  assert {
+    condition     = output.control_plane.longhorn_disk
+    error_message = "Without workers, the control-plane is the storage node."
+  }
+}

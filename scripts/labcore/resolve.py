@@ -1033,6 +1033,10 @@ class Resolver:
                            "(ex : /dev/disk/by-id/...) : le disque n'est jamais deviné.")
             if self.platform == "vsphere":
                 self.info("vSphere : le disque dédié est le 2e disque SCSI (unité 1) de chaque worker.")
+            if self.platform == "vagrant" and cfg.get("VAGRANT_PROVIDER") != "libvirt":
+                self.error("LONGHORN_DEDICATED_DISK=true en mode vagrant exige VAGRANT_PROVIDER=libvirt "
+                           "(seul ce provider pose le numéro de série qui identifie le disque).",
+                           "Utilisez libvirt, ou LONGHORN_DEDICATED_DISK=false (données dans LONGHORN_DATA_PATH).")
         elif self.platform in VM_PLATFORMS:
             self.info("Longhorn utilisera le disque système (LONGHORN_DEDICATED_DISK=false) : un disque dédié est "
                       "recommandé (isolation, taille, performances).")
