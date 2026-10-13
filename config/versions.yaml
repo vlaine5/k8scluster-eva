@@ -164,6 +164,8 @@ components:
     type: helm
     repo: https://docs.tigera.io/calico/charts
     chart: tigera-operator
+    # CRD dans un chart séparé depuis v3.32 (même dépôt, même version).
+    crds_chart: crd.projectcalico.org.v1
     version: "v3.33.0"
     kube_min: "1.31"
     docs: https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements
