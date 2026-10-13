@@ -9,9 +9,12 @@
     gpgkey: https://download.docker.com/linux/centos/gpg
     gpgcheck: true
     enabled: true
+    # Exclu des mises à jour (make os-update) : seule une installation explicite le change.
+    exclude: [containerd.io]
 
 - name: Install containerd (DNF)
   ansible.builtin.dnf:
     name: "containerd.io-{{ containerd_version }}"
     state: present
+    disable_excludes: docker-ce-stable
   notify: Restart containerd

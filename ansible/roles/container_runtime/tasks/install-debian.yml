@@ -19,4 +19,12 @@
     name: "containerd.io={{ containerd_version }}"
     state: present
     update_cache: "{{ container_runtime_repo.changed }}"
+    # Paquet gelé (ci-dessous) : seul un changement explicite de CONTAINERD_VERSION le modifie.
+    allow_change_held_packages: true
   notify: Restart containerd
+
+# Gelé comme les paquets Kubernetes : make os-update (apt upgrade) ne le change jamais.
+- name: Hold containerd at its current version
+  ansible.builtin.dpkg_selections:
+    name: containerd.io
+    selection: hold

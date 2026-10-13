@@ -167,8 +167,8 @@ jobs:
       - name: Liens, pages docs/*.md et commandes make cités
         run: make check-docs
 
-      - name: Matrices de compatibilité à jour (docs/compatibility.md)
-        run: make matrix-check
+      - name: Sections générées à jour (variables, catalogue, versions, compatibilité)
+        run: make docs-check
 
   e2e-kind:
     name: E2E Kind (commandes des guides, nginx)
@@ -300,7 +300,8 @@ jobs:
           kubectl get pods -A -o wide || true
           helm list -A --kube-context "kind-$(sed -n 's/^CLUSTER_NAME=//p' "$LAB_ENV_FILE")" || true
           kubectl get events -A --sort-by=.lastTimestamp | tail -80 || true
-          mkdir -p diag && cp -r .lab/reports diag/ 2>/dev/null || true
+          mkdir -p diag
+          if [ -d .lab/reports ]; then cp -r .lab/reports diag/; fi
 
       - name: Conserver les rapports
         if: failure()

@@ -24,6 +24,10 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 HERE="${ROOT}/tests/kubeadm-in-docker"
+# Une variable vide (matrice de CI sans valeur) = non définie.
+for variable in KUBERNETES_VERSION UPGRADE_TO RESTORE_TEST CNI NODE_OS_VERSION; do
+  [[ -n "${!variable:-}" ]] || unset "${variable}"
+done
 NODE_OS="${NODE_OS:-ubuntu}"
 case "${NODE_OS}" in
   ubuntu) NODE_OS_VERSION="${NODE_OS_VERSION:-24.04}" NODE_USER=ubuntu FAMILY=debian ;;
