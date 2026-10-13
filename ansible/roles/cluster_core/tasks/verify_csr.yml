@@ -11,10 +11,12 @@
   retries: 30
   delay: 10
 
+# Pas de référence arrière « \1 » ici : dans une condition (that/when), Jinja lit '\1'
+# comme un caractère d'échappement octal, et la comparaison échouait toujours.
 - name: Check that every node has an approved serving certificate
   ansible.builtin.assert:
     that: >-
-      groups['k8s_cluster'] | map('regex_replace', '^(.*)$', 'system:node:\1=Approved')
+      groups['k8s_cluster'] | map('regex_replace', '^', 'system:node:') | map('regex_replace', '$', '=Approved')
       | difference(cluster_core_csr_list.stdout_lines) | length == 0
     fail_msg: >-
       Some kubelet serving certificates are not approved: {{ cluster_core_csr_list.stdout_lines }}.
