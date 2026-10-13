@@ -69,17 +69,21 @@ class Kubectl:
         except json.JSONDecodeError:
             return None
 
-    def helm_releases(self) -> list[dict[str, Any]]:
+    def helm_releases(self) -> Optional[list[dict[str, Any]]]:
+        """Releases Helm de tous les namespaces (Helm 4 : tous les états par défaut).
+        None si helm échoue : la détection serait incomplète, l'appelant doit refuser."""
         try:
             out = subprocess.run(["helm", "--kubeconfig", self.kubeconfig, "--kube-context", self.context,
-                                  "list", "--all-namespaces", "--all", "-o", "json"],
+                                  "list", "--all-namespaces", "-o", "json"],
                                  capture_output=True, text=True, timeout=60, check=False)
         except (OSError, subprocess.SubprocessError):
-            return []
+            return None
+        if out.returncode != 0:
+            return None
         try:
-            return json.loads(out.stdout) if out.returncode == 0 else []
+            return json.loads(out.stdout or "[]")
         except json.JSONDecodeError:
-            return []
+            return None
 
 
 def detect(kubeconfig: str, context: str, kubectl: Optional[Kubectl] = None) -> dict[str, Any]:
@@ -161,6 +165,8 @@ def analyse(raw: dict[str, Any], context: str = "") -> dict[str, Any]:
     apiservices = {a["metadata"]["name"]: a for a in raw["apiservices"].get("items", [])}
     csidrivers = {c["metadata"]["name"] for c in raw["csidrivers"].get("items", [])}
     releases = raw.get("helm", [])
+    helm_error = releases is None
+    releases = releases or []
     managed_by_lab = set()
     state = raw.get("state")
     if state:
@@ -200,6 +206,7 @@ def analyse(raw: dict[str, Any], context: str = "") -> dict[str, Any]:
         "gateway_api_bundle": gateway_bundle,
         "gateway_classes": [g["metadata"]["name"] for g in raw["gatewayclasses"].get("items", [])],
         "helm_releases": [f"{r['namespace']}/{r['name']} {r.get('chart', '')} ({r.get('status', '')})" for r in releases],
+        "helm_error": helm_error,
         "crd_count": len(crds),
         "present": present,
         "argocd_tracked": argocd_tracked,
@@ -211,6 +218,11 @@ def conflicts(report: dict[str, Any], catalog: Catalog, wanted: list[str], polic
     found: list[dict[str, str]] = []
     if not report.get("reachable"):
         return [{"level": "error", "addon": "-", "message": report.get("error", "cluster injoignable")}]
+    if report.get("helm_error") and wanted:
+        found.append({"level": "error", "addon": "-",
+                      "message": "Impossible de lister les releases Helm du cluster (helm list) : la détection des "
+                                 "composants déjà installés serait incomplète, rien n'est installé.",
+                      "hint": "Vérifiez helm (make doctor) et les droits du kubeconfig sur les Secrets des namespaces."})
     for addon_id in wanted:
         info = report["present"].get(addon_id)
         if info and not info["managed_by_lab"]:

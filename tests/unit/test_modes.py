@@ -136,3 +136,12 @@ def test_detect_refuses_argocd_managed_components(lab):
     report = detect.analyse(raw, "c")
     found = detect.conflicts(report, Catalog.load(lab.root), ["kyverno"], "skip")
     assert found[0]["level"] == "error" and "Argo CD" in found[0]["message"]
+
+
+def test_detect_refuses_when_helm_releases_cannot_be_listed(lab):
+    raw = raw_cluster("v1.36.2")
+    raw["helm"] = None  # helm list a échoué (binaire absent, droits, option inconnue...)
+    report = detect.analyse(raw, "c")
+    assert report["helm_error"] is True
+    found = detect.conflicts(report, Catalog.load(lab.root), ["cert-manager"], "skip")
+    assert found[0]["level"] == "error" and "helm list" in found[0]["message"]

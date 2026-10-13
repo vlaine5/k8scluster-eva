@@ -6,7 +6,7 @@
   # « = » des CRD de prometheus-operator).
   ansible.builtin.command:
     argv: [helm, list, --kubeconfig, "{{ addon_kubeconfig }}", --kube-context, "{{ addon_context }}",
-           --namespace, "{{ addon_release.namespace }}", --filter, "^{{ addon_release.name }}$", --all, --output, json]
+           --namespace, "{{ addon_release.namespace }}", --filter, "^{{ addon_release.name }}$", --output, json]
   loop: "{{ addon_install.releases | default([]) }}"
   loop_control:
     loop_var: addon_release
