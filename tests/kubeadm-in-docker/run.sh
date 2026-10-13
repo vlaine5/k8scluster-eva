@@ -150,6 +150,7 @@ node_ssh_diagnostics() {
     echo "--- unités en échec"; systemctl --failed --no-pager 2>&1
     echo "--- /etc/pam.d/sshd"; cat /etc/pam.d/sshd 2>&1
     echo "--- compte"; getent shadow '"${NODE_USER}"' | cut -d: -f2- 2>&1; chage -l '"${NODE_USER}"' 2>&1
+    echo "--- sudo"; su -s /bin/sh '"${NODE_USER}"' -c "sudo -n true && echo sudo-ok" 2>&1
     echo "--- journal (sshd, pam)"; journalctl --no-pager -n 200 2>&1 | grep -Ei "sshd|pam" | head -n 60
   ' || :
 }
