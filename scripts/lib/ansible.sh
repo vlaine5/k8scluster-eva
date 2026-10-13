@@ -41,6 +41,9 @@ ansible_playbook() {
   local extra=(-e "@${vars_file}")
   # Le nom des fichiers (kubeconfig, sauvegardes, marqueur) suit le contexte du mode.
   lab_is_kubeadm && extra+=(-e "cluster_name=${LAB_R_CONTEXT}")
+  # Variables Ansible supplémentaires (fichier) : réservé aux tests du framework
+  # (nœuds conteneurs de tests/kubeadm-in-docker) ou à un usage avancé documenté.
+  [[ -z "${LAB_ANSIBLE_EXTRA_VARS:-}" ]] || extra+=(-e "@${LAB_ANSIBLE_EXTRA_VARS}")
   (
     cd "${LAB_ROOT}/ansible" &&
       ANSIBLE_CONFIG="${LAB_ROOT}/ansible/ansible.cfg" run ansible-playbook -i "${inventory}" "${playbook}" "${extra[@]}" "$@"

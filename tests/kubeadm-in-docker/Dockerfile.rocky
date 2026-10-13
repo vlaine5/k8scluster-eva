@@ -1,0 +1,24 @@
+# =============================================================================
+#  Nœud de TEST Rocky Linux : un conteneur systemd qui imite une machine
+#  existante (utilisateur "rocky" du groupe wheel, sudo sans mot de passe,
+#  SSH par clé). Utilisé uniquement par tests/kubeadm-in-docker/run.sh.
+# =============================================================================
+ARG BASE_IMAGE=docker.io/rockylinux/rockylinux:9
+FROM ${BASE_IMAGE}
+
+ARG NODE_USER=rocky
+ENV container=docker
+
+RUN dnf install -y -q systemd openssh-server sudo python3 ca-certificates iproute kmod procps-ng \
+    && dnf clean all
+
+RUN useradd -m -s /bin/bash -G wheel "${NODE_USER}" \
+    && echo "${NODE_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${NODE_USER}" && chmod 0440 "/etc/sudoers.d/${NODE_USER}" \
+    && install -d -m 0700 -o "${NODE_USER}" -g "${NODE_USER}" "/home/${NODE_USER}/.ssh" \
+    && rm -f /etc/ssh/ssh_host_* \
+    && printf '[Unit]\nBefore=sshd.service\n[Service]\nType=oneshot\nExecStart=/usr/bin/ssh-keygen -A\n[Install]\nWantedBy=multi-user.target\n' \
+       > /etc/systemd/system/ssh-host-keys.service \
+    && systemctl enable sshd ssh-host-keys.service
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

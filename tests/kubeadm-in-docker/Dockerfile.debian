@@ -1,0 +1,28 @@
+# =============================================================================
+#  Nœud de TEST Ubuntu / Debian : un conteneur systemd qui imite une machine
+#  existante (utilisateur avec sudo sans mot de passe, SSH par clé).
+#  Utilisé uniquement par tests/kubeadm-in-docker/run.sh.
+# =============================================================================
+ARG BASE_IMAGE=docker.io/library/ubuntu:24.04
+FROM ${BASE_IMAGE}
+
+ARG NODE_USER=ubuntu
+ENV container=docker DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends \
+       systemd systemd-sysv dbus openssh-server sudo python3 ca-certificates iproute2 iptables kmod \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu fournit déjà l'utilisateur "ubuntu" (uid 1000) ; Debian n'en a pas.
+RUN (id "${NODE_USER}" >/dev/null 2>&1 || useradd -m -s /bin/bash "${NODE_USER}") \
+    && usermod -aG sudo "${NODE_USER}" \
+    && echo "${NODE_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${NODE_USER}" && chmod 0440 "/etc/sudoers.d/${NODE_USER}" \
+    && install -d -m 0700 -o "${NODE_USER}" -g "${NODE_USER}" "/home/${NODE_USER}/.ssh" \
+    && rm -f /etc/ssh/ssh_host_* \
+    && printf '[Unit]\nBefore=ssh.service\n[Service]\nType=oneshot\nExecStart=/usr/bin/ssh-keygen -A\n[Install]\nWantedBy=multi-user.target\n' \
+       > /etc/systemd/system/ssh-host-keys.service \
+    && systemctl enable ssh ssh-host-keys.service
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

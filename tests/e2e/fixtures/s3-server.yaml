@@ -1,0 +1,54 @@
+# Stockage S3 de TEST dans le cluster (CI uniquement) pour Velero : passerelle S3
+# VersityGW sur un dossier local. Identifiants factices fournis par le workflow
+# (Secret s3-root créé avant ce manifeste). Le compartiment « velero » est un dossier.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: s3-test
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3
+  namespace: s3-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s3}
+  template:
+    metadata:
+      labels: {app: s3}
+    spec:
+      initContainers:
+        - name: bucket
+          image: busybox:1.38
+          command: [mkdir, -p, /data/velero]
+          volumeMounts: [{name: data, mountPath: /data}]
+      containers:
+        - name: versitygw
+          image: docker.io/versity/versitygw:v1.7.0
+          command: [/usr/local/bin/versitygw]
+          args: [--access, $(ACCESS), --secret, $(SECRET), --port, ":9000", posix, /data]
+          env:
+            - name: ACCESS
+              valueFrom: {secretKeyRef: {name: s3-root, key: access}}
+            - name: SECRET
+              valueFrom: {secretKeyRef: {name: s3-root, key: secret}}
+          ports: [{containerPort: 9000}]
+          readinessProbe:
+            tcpSocket: {port: 9000}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3
+  namespace: s3-test
+spec:
+  selector: {app: s3}
+  ports: [{port: 9000}]

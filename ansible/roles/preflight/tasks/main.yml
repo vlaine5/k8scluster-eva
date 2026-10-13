@@ -106,7 +106,9 @@
   ansible.builtin.set_fact:
     preflight_identity:
       hostname: "{{ inventory_hostname }}"
-      uuid: "{{ (preflight_product_uuid.content | default('') | b64decode | trim) or inventory_hostname }}"
+      uuid: >-
+        {{ ((preflight_product_uuid.content | default('') | b64decode | trim) or inventory_hostname)
+           if preflight_check_product_uuid | bool else inventory_hostname }}
       mac: "{{ ansible_facts['default_ipv4']['macaddress'] | default(inventory_hostname) }}"
 
 - name: Check that MAC addresses and product UUIDs are unique in the cluster

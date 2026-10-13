@@ -15,6 +15,10 @@ preflight_min_memory_cp_mb: 1700
 preflight_min_memory_worker_mb: 1000
 preflight_min_var_free_gb: 10
 
+# product_uuid unique par nœud (exigence de kubeadm). Seuls les nœuds de TEST en
+# conteneurs (tests/kubeadm-in-docker), qui partagent celui de l'hôte, le désactivent.
+preflight_check_product_uuid: true
+
 # Contrôles stricts (ports, logiciels, DNS) même hors du mode existing.
 preflight_strict: false
 
