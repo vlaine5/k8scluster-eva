@@ -1198,6 +1198,9 @@ class Resolver:
             self.info("Istio avec Cilium : Cilium est configuré pour l'agent CNI d'Istio (cni.exclusive=false"
                       + (", socketLB.hostNamespaceOnly" if self.r.get("kube_proxy_replacement") else "") + "). "
                       "Si Cilium est déjà installé, relancez make deploy (make addons-apply ne modifie pas le CNI).")
+        if "metrics-server" in self.selected and cfg.get("KUBELET_SERVING_CERTS") == "self-signed":
+            self.warn("KUBELET_SERVING_CERTS=self-signed : metrics-server ne vérifie pas les certificats des kubelets "
+                      "(--kubelet-insecure-tls). Préférez signed (cluster neuf, ou docs/migration.md).")
         if "argo-cd" in self.selected and cfg.get("ARGOCD_REPO_URL") and cfg.bool("ARGOCD_AUTO_SYNC"):
             self.info("Argo CD : synchronisation automatique de l'application d'exemple activée.")
         for flag, addon_id in (("ARGOCD_EXPOSE", "argo-cd"), ("GRAFANA_EXPOSE", "monitoring"),

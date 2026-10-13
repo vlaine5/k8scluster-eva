@@ -19,6 +19,11 @@ defaultArgs:
   - --kubelet-preferred-address-types=InternalIP,Hostname
   - --kubelet-use-node-status-port
   - --metric-resolution=15s
+{% if cfg.KUBELET_SERVING_CERTS == 'self-signed' %}
+  # KUBELET_SERVING_CERTS=self-signed : certificats des kubelets auto-signés, non
+  # vérifiables (cluster créé sans serverTLSBootstrap, docs/migration.md).
+  - --kubelet-insecure-tls
+{% endif %}
 metrics:
   enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
 serviceMonitor:

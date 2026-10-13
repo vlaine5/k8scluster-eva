@@ -149,3 +149,17 @@ NFS_SHARE=/volume1/kubernetes
     assert order.index("cert-manager") < order.index("gateway") < order.index("argo-cd")
     # Pas de retour en arrière de phase sans dépendance qui l'explique.
     assert phases == sorted(phases) or order.index("gateway") > order.index("cert-manager")
+
+
+def test_self_signed_kubelet_certificates_are_flagged_for_metrics_server(lab):
+    lab.env("ADDON_PROFILE=homelab\nKUBELET_SERVING_CERTS=self-signed")
+    plan = lab.plan("vagrant")
+    assert plan.ok, messages(plan)
+    assert "--kubelet-insecure-tls" in messages(plan, "warning")
+
+
+def test_istio_with_cilium_adapts_the_cni(lab):
+    lab.env("ADDONS=istio\nCNI=cilium")
+    plan = lab.plan("vagrant")
+    assert plan.ok, messages(plan)
+    assert "cni.exclusive=false" in messages(plan, "info")
