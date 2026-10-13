@@ -165,6 +165,9 @@ class Catalog:
             for release in addon.data.get("install", {}).get("releases", []):
                 if release.get("component") not in components:
                     raise CatalogError(f"addon {addon.id}: release {release.get('name')} sans composant connu")
+                if release.get("method", "release") not in ("release", "template"):
+                    raise CatalogError(f"addon {addon.id}: release {release.get('name')} : method "
+                                       f"{release.get('method')} inconnue (release, template)")
             for other in addon.requires.get("any_addon", []):
                 if other not in self.addons:
                     raise CatalogError(f"addon {addon.id}: requires.any_addon inconnu {other}")

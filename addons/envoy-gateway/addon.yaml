@@ -25,7 +25,14 @@ install:
   pod_security: baseline
   releases:
     # 1) CRD propres à Envoy Gateway (les CRD Gateway API viennent de gateway-api-crds : un seul propriétaire).
-    - {name: envoy-gateway-crds, component: envoy-gateway, chart_key: crds_chart, namespace: envoy-gateway-system, values: values-crds.yaml.j2, timeout: 5m}
+    #    method template : chart rendu puis appliqué en server-side apply, sans release Helm
+    #    (le Secret d'une release de ce chart dépasse la limite de 1 Mio de Kubernetes).
+    - name: envoy-gateway-crds
+      component: envoy-gateway
+      chart_key: crds_chart
+      namespace: envoy-gateway-system
+      values: values-crds.yaml.j2
+      method: template
     - {name: envoy-gateway, component: envoy-gateway, namespace: envoy-gateway-system, values: values.yaml.j2, timeout: 10m, skip_crds: true}
   manifests: [gatewayclass.yaml.j2]
 health:

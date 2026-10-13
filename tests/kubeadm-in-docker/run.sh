@@ -70,11 +70,16 @@ node_ip() {
   esac
 }
 
-# Le CLI lit la configuration du test dans ENV_FILE ; les variables du harnais qui
-# portent le même nom qu'une variable du lab (NODE_OS...) ne doivent pas la surcharger.
+# Le CLI lit la configuration du test dans ENV_FILE. Les variables d'environnement
+# l'emportent sur ce fichier : celles du harnais (NODE_OS...) et les valeurs par défaut
+# exportées par load_config (EXISTING_INVENTORY vide...) sont donc retirées pour
+# chaque clé que ENV_FILE définit.
 lab() {
-  env -u NODE_OS -u NODE_OS_VERSION -u KUBERNETES_VERSION -u CNI \
-    LAB_ENV_FILE="${ENV_FILE}" LAB_ANSIBLE_EXTRA_VARS="${HERE}/vars.yml" "${ROOT}/k8s-lab" "$@"
+  local key unset_args=()
+  while IFS= read -r key; do
+    unset_args+=(-u "${key}")
+  done < <(sed -n -E 's/^([A-Z][A-Z0-9_]*)=.*/\1/p' "${ENV_FILE}")
+  env "${unset_args[@]}" LAB_ENV_FILE="${ENV_FILE}" LAB_ANSIBLE_EXTRA_VARS="${HERE}/vars.yml" "${ROOT}/k8s-lab" "$@"
 }
 
 destroy() {

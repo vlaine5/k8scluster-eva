@@ -11,7 +11,10 @@
     loop_var: addon_release
     label: "{{ addon_release.namespace }}/{{ addon_release.name }}"
   register: addon_status_releases
-  when: addon_override.minikube_addon is not defined
+  # Une release « template » n'existe pas dans Helm : sa santé passe par health.
+  when:
+    - addon_override.minikube_addon is not defined
+    - addon_release.method | default('release') == 'release'
 
 - name: Check the health of {{ addon_item.id }}
   ansible.builtin.include_tasks: health.yml

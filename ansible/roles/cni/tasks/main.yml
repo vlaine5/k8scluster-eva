@@ -31,7 +31,7 @@
     fail_msg: >-
       This cluster already runs {{ cni_detected | join(', ') }} but cni={{ cni }}. Changing the Pod network of a
       running cluster is a migration (every Pod is restarted, NetworkPolicies are interpreted differently): it is
-      never done automatically. Keep CNI={{ cni_detected | first }}, or rebuild the cluster (docs/cni.md#changer-de-cni).
+      never done automatically. Keep CNI={{ cni_detected[0] | default(cni) }}, or rebuild the cluster (docs/cni.md#changer-de-cni).
     quiet: true
   vars:
     cni_detected: >-

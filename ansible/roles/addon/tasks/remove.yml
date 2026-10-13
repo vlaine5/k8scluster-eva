@@ -60,7 +60,10 @@
   loop_control:
     loop_var: addon_release
     label: "{{ addon_release.namespace }}/{{ addon_release.name }}"
-  when: addon_override.minikube_addon is not defined
+  # Une release « template » (CRD) n'existe pas dans Helm : ses CRD sont conservées.
+  when:
+    - addon_override.minikube_addon is not defined
+    - addon_release.method | default('release') == 'release'
 
 - name: Forget in the state ConfigMap the addon {{ addon_item.id }}
   ansible.builtin.include_tasks: state.yml

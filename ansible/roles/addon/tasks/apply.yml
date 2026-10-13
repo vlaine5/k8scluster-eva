@@ -21,7 +21,7 @@
       changed_when: "'is already enabled' not in addon_minikube_enable.stdout"
       when: addon_override.minikube_addon is defined
 
-    - name: Create with Pod Security labels the namespace {{ addon_install.namespace }}
+    - name: Create with Pod Security labels the namespace {{ addon_install.namespace | default('-') }}
       kubernetes.core.k8s:
         kubeconfig: "{{ addon_kubeconfig }}"
         context: "{{ addon_context }}"
