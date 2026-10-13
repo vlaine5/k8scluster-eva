@@ -39,14 +39,24 @@
       Kubernetes needs them: stop the program using them or choose another machine. Nothing was changed.
     quiet: true
 
-- name: Gather the installed packages
-  ansible.builtin.package_facts:
-    manager: auto
+# dpkg-query / rpm plutôt que package_facts : sur Debian/Ubuntu, package_facts exige
+# python3-apt, absent des installations minimales, et ces contrôles n'installent rien.
+- name: List the installed packages
+  ansible.builtin.command:
+    argv: "{{ ['dpkg-query', '-W', '-f=${db:Status-Abbrev} ${Package}\\n'] if ansible_facts['os_family'] == 'Debian'
+              else ['rpm', '-qa', '--qf', '%{NAME}\\n'] }}"
+  register: preflight_packages_list
+  changed_when: false
 
 - name: Detect conflicting software
   ansible.builtin.set_fact:
-    preflight_conflicts: "{{ preflight_conflicting_packages | select('in', ansible_facts.packages) | list }}"
-    preflight_docker: "{{ 'docker-ce' in ansible_facts.packages or 'docker.io' in ansible_facts.packages }}"
+    preflight_conflicts: "{{ preflight_conflicting_packages | select('in', preflight_installed) | list }}"
+    preflight_docker: "{{ 'docker-ce' in preflight_installed or 'docker.io' in preflight_installed }}"
+  vars:
+    # Debian : seules les lignes « ii » (paquet installé) comptent.
+    preflight_installed: >-
+      {{ (preflight_packages_list.stdout_lines | select('match', '^ii ') | map('regex_replace', '^ii +', '') | list)
+         if ansible_facts['os_family'] == 'Debian' else preflight_packages_list.stdout_lines }}
 
 - name: Refuse packages that conflict with containerd.io / Kubernetes packages
   ansible.builtin.assert:

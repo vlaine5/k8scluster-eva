@@ -164,6 +164,7 @@ wait_nodes() {
     done
     docker exec "${name}" systemctl --no-pager status sshd ssh 2>&1 | tail -n 20
     docker exec "${name}" journalctl --no-pager -n 30 -u sshd -u ssh 2>&1
+    docker exec "${name}" sh -c 'ls -l /run/nologin 2>&1; systemctl --failed --no-pager' 2>&1
     die "${name} : connexion SSH impossible (${NODE_USER}@$(node_ip "${name}"), clé ${SSH_PRIVATE_KEY_FILE})."
   done < <(node_names)
   ok "Nœuds démarrés, SSH disponible."
