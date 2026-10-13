@@ -355,6 +355,72 @@ jobs:
         if: always()
         run: make destroy MODE=minikube YES=1
 
+  e2e-attach:
+    name: E2E attach (cluster existant, composant d'un autre outil)
+    needs: [shell, python]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      LAB_ENV_FILE: tests/e2e/attach.env
+      EXISTING_KUBECONFIG: ${{ github.workspace }}/.lab/attach-target.kubeconfig
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-lab
+        with:
+          tools: kind kubectl helm
+
+      - name: Cluster créé hors du framework, metrics-server installé par un autre outil
+        run: |
+          mkdir -p .lab
+          kind create cluster --name attach-target --kubeconfig "$EXISTING_KUBECONFIG" --wait 120s
+          helm --kubeconfig "$EXISTING_KUBECONFIG" install other-metrics metrics-server \
+            --repo https://kubernetes-sigs.github.io/metrics-server --version 3.14.0 \
+            --namespace kube-system --set 'args={--kubelet-insecure-tls}' --wait --timeout 5m
+
+      - name: Refus de prendre le contrôle du composant (EXISTING_ADDON_POLICY=fail)
+        run: |
+          if ./k8s-lab deploy attach --yes >attach-fail.log 2>&1; then
+            cat attach-fail.log
+            echo "::error::le mode attach aurait dû refuser metrics-server (installé par un autre outil)"
+            exit 1
+          fi
+          cat attach-fail.log
+          grep -q "déjà installé par un autre outil" attach-fail.log
+          if kubectl --kubeconfig "$EXISTING_KUBECONFIG" get namespace cert-manager; then
+            echo "::error::un addon a été installé malgré le refus"
+            exit 1
+          fi
+
+      - name: Composant existant utilisé tel quel (EXISTING_ADDON_POLICY=skip), addons testés
+        run: ./k8s-lab deploy attach --yes
+        env:
+          EXISTING_ADDON_POLICY: skip
+
+      - name: Second déploiement (idempotence), release de l'autre outil intacte
+        run: |
+          ./k8s-lab deploy attach --yes
+          helm --kubeconfig "$EXISTING_KUBECONFIG" status other-metrics --namespace kube-system
+        env:
+          EXISTING_ADDON_POLICY: skip
+
+      - name: destroy refusé en mode attach, cluster intact
+        run: |
+          if ./k8s-lab destroy attach --yes; then
+            echo "::error::destroy aurait dû être refusé en mode attach"
+            exit 1
+          fi
+          kubectl --kubeconfig "$EXISTING_KUBECONFIG" get nodes
+
+      - name: Diagnostic en cas d'échec
+        if: failure()
+        run: |
+          kubectl --kubeconfig "$EXISTING_KUBECONFIG" get pods -A -o wide
+          kubectl --kubeconfig "$EXISTING_KUBECONFIG" get events -A --sort-by=.lastTimestamp | tail -n 60
+
+      - name: Nettoyage (cluster créé par ce job)
+        if: always()
+        run: kind delete cluster --name attach-target
+
   e2e-kubeadm:
     name: E2E kubeadm (${{ matrix.name }})
     needs: [ansible, python]
