@@ -6,3 +6,6 @@ collections:
     version: 2.2.2
   - name: community.general
     version: 13.4.0
+  # Helm et API Kubernetes depuis votre poste (addons, CNI kind) : prend en charge Helm 4.
+  - name: kubernetes.core
+    version: 6.6.0

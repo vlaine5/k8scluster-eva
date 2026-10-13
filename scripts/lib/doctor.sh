@@ -62,6 +62,119 @@ check_memory() {
   fi
 }
 
+# --- Résolveur de configuration et outils des addons ------------------------------
+
+check_python_lab() {
+  local python version
+  python="$(lab_python)"
+  if ! have "${python}" && [[ ! -x "${python}" ]]; then
+    d_fail "Python 3 est introuvable." \
+      "Le résolveur de configuration (scripts/labctl) valide .env et calcule le plan avant toute action." \
+      "Ubuntu/Debian : sudo apt install python3 python3-venv   puis : make venv"
+    return
+  fi
+  version="$("${python}" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+  if ! version_ge "${version}.0" "3.9.0"; then
+    d_fail "Python ${version} est trop ancien (3.9 minimum pour scripts/labctl)."
+    return
+  fi
+  if "${python}" -c 'import yaml' >/dev/null 2>&1; then
+    d_ok "Python ${version} + PyYAML (${python})"
+  else
+    d_fail "PyYAML est absent de ${python}." \
+      "Le résolveur lit config/schema.yaml, config/versions.yaml et le catalogue d'addons (YAML)." \
+      "Environnement du lab (versions épinglées) : make venv   puis : source .venv/bin/activate"
+  fi
+}
+
+check_helm() {
+  if ! have helm; then
+    d_fail "Helm est introuvable." \
+      "Les addons (et Cilium/Calico sur kind) sont installés avec des charts Helm aux versions verrouillées." \
+      "Sans sudo : scripts/install-tools.sh helm   |   https://helm.sh/docs/intro/install/"
+    return
+  fi
+  local version
+  version="$(helm version --template '{{.Version}}' 2>/dev/null)"
+  if version_ge "${version}" "v3.17.0"; then
+    d_ok "Helm ${version}"
+  else
+    d_fail "Helm ${version} est trop ancien (3.17 minimum ; version du lab : ${HELM_VERSION})." \
+      "Mise à jour : scripts/install-tools.sh helm"
+  fi
+}
+
+check_ansible_kubernetes() {
+  local python
+  have ansible-playbook || return 0
+  python="$(ansible_python_path)"
+  if [[ -n "${python}" ]] && "${python}" -c 'import kubernetes' >/dev/null 2>&1; then
+    d_ok "Bibliothèque Python kubernetes (pour Ansible : ${python})"
+  else
+    d_fail "La bibliothèque Python « kubernetes » manque à l'interpréteur d'Ansible (${python:-inconnu})." \
+      "La collection kubernetes.core l'utilise pour installer les addons par l'API." \
+      "make venv   puis : source .venv/bin/activate (Ansible et ses dépendances épinglés)"
+  fi
+}
+
+# Validation complète de la configuration pour le mode (sans rien modifier).
+check_lab_config() {
+  local mode="$1" provider="${2:-}" args=(--mode "$1")
+  [[ -z "${provider}" ]] || args+=(--provider "${provider}")
+  "$(lab_python)" -c 'import yaml' >/dev/null 2>&1 || return 0
+  if labctl validate --quiet "${args[@]}" >/dev/null 2>&1; then
+    d_ok "Configuration valide pour ${mode}${provider:+ ${provider}} (détail : $(hint_cmd config "${mode}" "${provider}"))"
+  else
+    d_fail "La configuration (.env + config/lab.env) est invalide pour ${mode}${provider:+ ${provider}}." \
+      "Détail des erreurs et corrections : $(hint_cmd validate "${mode}" "${provider}")"
+  fi
+}
+
+check_existing_inventory() {
+  local inventory="${EXISTING_INVENTORY:-}"
+  if [[ -z "${inventory}" ]]; then
+    d_fail "EXISTING_INVENTORY n'est pas défini." \
+      "Le mode existing installe Kubernetes sur VOS machines, décrites dans un inventaire Ansible." \
+      "Modèle : ansible/inventories/existing.example.ini   Guide : docs/existing-mode.md"
+    return
+  fi
+  [[ "${inventory}" == /* ]] || inventory="${LAB_ROOT}/${inventory}"
+  if [[ ! -f "${inventory}" ]]; then
+    d_fail "Inventaire introuvable : ${inventory}"
+    return
+  fi
+  d_ok "Inventaire ${EXISTING_INVENTORY}"
+  if have ansible; then
+    if (cd "${LAB_ROOT}/ansible" && ANSIBLE_CONFIG="${LAB_ROOT}/ansible/ansible.cfg" \
+      ansible -i "${inventory}" k8s_cluster -m ansible.builtin.ping -o >/dev/null 2>&1); then
+      d_ok "Toutes les machines répondent en SSH (ansible ping)"
+    else
+      d_fail "Au moins une machine ne répond pas en SSH." \
+        "Test détaillé : cd ansible && ansible -i ${inventory} k8s_cluster -m ansible.builtin.ping" \
+        "Vérifiez l'adresse, l'utilisateur (ansible_user), la clé SSH et sudo sans mot de passe (docs/existing-mode.md)."
+    fi
+  fi
+}
+
+check_attach_cluster() {
+  local kubeconfig="${EXISTING_KUBECONFIG:-}" context="${EXISTING_CONTEXT:-}"
+  if [[ -z "${kubeconfig}" || -z "${context}" ]]; then
+    d_fail "EXISTING_KUBECONFIG et EXISTING_CONTEXT doivent être définis (mode attach)." \
+      "Le contexte est toujours nommé explicitement : jamais le contexte « courant » d'un kubeconfig." \
+      "Guide : docs/attach-mode.md"
+    return
+  fi
+  kubeconfig="${kubeconfig/#\~/${HOME}}"
+  [[ "${kubeconfig}" == /* ]] || kubeconfig="${LAB_ROOT}/${kubeconfig}"
+  if ! have kubectl; then return 0; fi
+  if kubectl --kubeconfig "${kubeconfig}" --context "${context}" version --request-timeout=10s >/dev/null 2>&1; then
+    d_ok "Cluster existant joignable (contexte ${context})"
+  else
+    d_fail "Le contexte ${context} de ${kubeconfig} ne répond pas." \
+      "Test : kubectl --kubeconfig ${kubeconfig} --context ${context} get nodes"
+  fi
+}
+
 # --- Outils ------------------------------------------------------------------------
 
 check_kubectl() {
@@ -477,17 +590,24 @@ doctor_mode() {
   local mode="$1" provider="${2:-}"
   DOCTOR_ERRORS=0
   DOCTOR_WARNINGS=0
+  check_python_lab
   case "${mode}" in
     kind)
       check_container_engine
       check_kind
       check_kubectl
+      check_helm
+      check_ansible
+      check_ansible_kubernetes
       check_memory $(((WORKER_COUNT + 1) * 700 + 1024)) "kind, $((WORKER_COUNT + 1)) nœud(s)"
       ;;
     minikube)
       check_minikube
       check_minikube_driver
       check_kubectl
+      check_helm
+      check_ansible
+      check_ansible_kubernetes
       check_memory $((MINIKUBE_NODES * MINIKUBE_MEMORY_MB)) "minikube, ${MINIKUBE_NODES} nœud(s)"
       ;;
     vagrant)
@@ -495,7 +615,24 @@ doctor_mode() {
       check_ansible
       check_ssh
       check_kubectl
-      check_memory $(((WORKER_COUNT + 1) * NODE_MEMORY_MB)) "$((WORKER_COUNT + 1)) VM(s) de ${NODE_MEMORY_MB} Mo"
+      check_helm
+      check_ansible_kubernetes
+      check_memory $(((WORKER_COUNT + CONTROL_PLANE_COUNT) * NODE_MEMORY_MB)) "$((WORKER_COUNT + CONTROL_PLANE_COUNT)) VM(s) de ${NODE_MEMORY_MB} Mo"
+      ;;
+    existing)
+      check_ansible
+      check_ssh
+      check_kubectl
+      check_helm
+      check_ansible_kubernetes
+      check_existing_inventory
+      ;;
+    attach)
+      check_kubectl
+      check_helm
+      check_ansible
+      check_ansible_kubernetes
+      check_attach_cluster
       ;;
     terraform)
       check_terraform
@@ -506,11 +643,17 @@ doctor_mode() {
         check_aws_cli
         if [[ "${AWS_TARGET}" == "localstack" ]]; then check_localstack; else check_aws_account; fi
         check_tfvars eks
+        check_helm
+        check_ansible
+        check_ansible_kubernetes
+        check_lab_config terraform eks
         return "${DOCTOR_ERRORS}"
       fi
       check_ansible
       check_ssh
       check_kubectl
+      check_helm
+      check_ansible_kubernetes
       case "${provider}" in
         proxmox)
           check_tfvars proxmox
@@ -528,7 +671,10 @@ doctor_mode() {
         *) d_fail "Provider Terraform inconnu : \"${provider}\"." "Valeurs possibles : ${TERRAFORM_PROVIDERS}." ;;
       esac
       ;;
-    *) d_fail "Mode inconnu : \"${mode}\"." "Modes : kind, minikube, vagrant, terraform <provider>." ;;
+    *) d_fail "Mode inconnu : \"${mode}\"." "Modes : kind, minikube, vagrant, terraform <provider>, existing, attach." ;;
+  esac
+  case "${mode}" in
+    kind | minikube | vagrant | terraform | existing | attach) check_lab_config "${mode}" "${provider}" ;;
   esac
   return "${DOCTOR_ERRORS}"
 }
@@ -550,7 +696,7 @@ cmd_doctor() {
 
   # Sans argument : bilan de tous les modes.
   local summary=() entry m p label
-  for entry in kind minikube vagrant "terraform proxmox" "terraform vsphere" "terraform libvirt" "terraform eks"; do
+  for entry in kind minikube vagrant "terraform proxmox" "terraform vsphere" "terraform libvirt" "terraform eks" existing attach; do
     m="${entry%% *}"
     p=""
     [[ "${entry}" == *" "* ]] && p="${entry#* }"

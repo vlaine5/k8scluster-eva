@@ -27,11 +27,15 @@ minikube_deploy() {
     KUBECONFIG="${LAB_KUBECONFIG}" run minikube update-context --profile "${CLUSTER_NAME}"
   else
     local args=(start --profile "${CLUSTER_NAME}"
-      --kubernetes-version "${MINIKUBE_KUBERNETES_VERSION}"
+      --kubernetes-version "${LAB_R_MINIKUBE_K8S}"
       --nodes "${MINIKUBE_NODES}"
       --cpus "${MINIKUBE_CPUS}"
       --memory "${MINIKUBE_MEMORY_MB}"
       --wait all)
+    # CNI choisi (CNI=calico/cilium/flannel) : installé par minikube lui-même.
+    [[ "${LAB_R_CNI_INSTALL}" != minikube ]] || args+=(--cni "${LAB_R_CNI}")
+    # 3 control-planes : mode HA de minikube (VIP gérée par minikube).
+    [[ "${LAB_R_CP_COUNT:-1}" != 3 ]] || args+=(--ha)
     if [[ -n "${MINIKUBE_DRIVER:-}" ]]; then
       args+=(--driver "${MINIKUBE_DRIVER}")
     fi
@@ -49,8 +53,7 @@ minikube_deploy() {
   fi
   chmod 600 "${LAB_KUBECONFIG}"
 
-  smoke_basic "${CLUSTER_NAME}"
-  kubeconfig_hint "${CLUSTER_NAME}"
+  post_deploy "${CLUSTER_NAME}"
   printf '\nÀ essayer : minikube dashboard --profile %s   |   minikube addons list --profile %s\n' "${CLUSTER_NAME}" "${CLUSTER_NAME}"
 }
 

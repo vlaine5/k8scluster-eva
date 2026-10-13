@@ -5,11 +5,13 @@
 #    make doctor MODE=kind
 #    make deploy MODE=kind
 #    make deploy MODE=terraform PROVIDER=proxmox
+#    make addons-apply MODE=attach
 #    make destroy MODE=kind
 #
-#  Variables : MODE, PROVIDER, WORKERS (nombre de workers), YES=1 (pas de
-#  confirmation), RECREATE=1. Toute clé de config/lab.env peut aussi être
-#  passée : make deploy MODE=vagrant NODE_MEMORY_MB=4096
+#  Variables : MODE, PROVIDER (sinon DEPLOYMENT_MODE/DEPLOYMENT_PROVIDER de .env),
+#  WORKERS, ADDON, NODE, SNAPSHOT, YES=1, RECREATE=1, KEEP=1, DESTRUCTIVE=1.
+#  Toute variable de config/lab.env peut aussi être passée :
+#    make deploy MODE=vagrant NODE_MEMORY_MB=4096
 # =============================================================================
 
 SHELL := /usr/bin/env bash
@@ -21,16 +23,30 @@ PROVIDER ?=
 WORKERS  ?=
 YES      ?=
 RECREATE ?=
+KEEP     ?=
+DESTRUCTIVE ?=
+ADDON    ?=
+NODE     ?=
+SNAPSHOT ?=
+PYTHON   ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
 truthy   = $(filter 1 true yes oui,$(1))
-OPTIONS  := $(if $(call truthy,$(YES)),--yes) $(if $(call truthy,$(RECREATE)),--recreate)
-LAB_ENV  := $(if $(WORKERS),WORKER_COUNT=$(WORKERS))
+OPTIONS  := $(if $(call truthy,$(YES)),--yes) $(if $(call truthy,$(RECREATE)),--recreate) \
+            $(if $(call truthy,$(KEEP)),--keep) $(if $(call truthy,$(DESTRUCTIVE)),--destructive) \
+            $(if $(ADDON),--addon $(ADDON))
+LAB_ENV  := $(if $(WORKERS),WORKER_COUNT=$(WORKERS)) $(if $(NODE),NODE=$(NODE)) $(if $(SNAPSHOT),SNAPSHOT=$(SNAPSHOT))
+TARGET   := $(MODE) $(PROVIDER)
 
 TF_DIRS  := terraform/providers/proxmox terraform/providers/vsphere terraform/providers/libvirt terraform/providers/eks
 TF_TESTS := terraform/modules/k8s-nodes terraform/modules/ansible-inventory terraform/providers/eks
 SHELL_SCRIPTS := k8s-lab $(wildcard scripts/*.sh scripts/lib/*.sh tests/*/*.sh)
+PLAYBOOKS := site.yml preflight.yml addons.yml cni-local.yml reset.yml kubeconfig.yml backup.yml etcd-restore.yml \
+             upgrade.yml os-update.yml node-remove.yml health.yml
 
-.PHONY: help help-dev menu doctor deploy destroy status kubeconfig test config \
+.PHONY: help help-dev menu doctor config validate deploy destroy uninstall status kubeconfig test manifest \
+        addons-plan addons-apply addons-status addons-test addons-upgrade addons-remove addons-catalog \
+        upgrade-plan upgrade os-update backup restore health node-remove versions versions-check \
+        venv test-unit catalog-check schema-check docs-generate matrix-check addons-render-check \
         lint shellcheck ruby-check vagrant-validate actionlint yamllint ansible-lint ansible-syntax \
         terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs \
         check-config test-kubeadm
@@ -42,52 +58,142 @@ help: ## Aide : les commandes principales
 	  '' \
 	  'Kubernetes Lab - commandes principales' \
 	  '' \
-	  '  make doctor MODE=kind      vérifier votre machine (sans MODE : tous les modes)' \
-	  '  make deploy MODE=kind      créer le cluster (ne détruit jamais un cluster existant)' \
-	  '  make status                voir les clusters du lab' \
-	  '  make test                  tester le cluster actif (nginx + Service + DNS)' \
-	  '  make kubeconfig            utiliser kubectl avec le lab' \
-	  '  make destroy MODE=kind     supprimer le cluster (confirmation demandée)' \
+	  '  make doctor MODE=kind          vérifier votre machine et la configuration' \
+	  '  make config MODE=kind          configuration effective et plan résolu (secrets masqués)' \
+	  '  make deploy MODE=kind          créer / compléter le cluster puis installer les addons' \
+	  '  make status                    voir les clusters du lab' \
+	  '  make test                      tester le cluster actif (nginx + Service + DNS)' \
+	  '  make destroy MODE=kind         supprimer le cluster (confirmation demandée)' \
 	  '' \
-	  'Modes     MODE=kind   MODE=minikube   MODE=vagrant' \
-	  '          MODE=terraform PROVIDER=proxmox   (ou PROVIDER=vsphere, PROVIDER=libvirt)' \
-	  '          MODE=terraform PROVIDER=eks       (AWS EKS, Kubernetes managé, payant)' \
-	  'Options   WORKERS=3 (nombre de workers)   RECREATE=1 (recréer)   YES=1 (sans question)' \
+	  '  make addons-plan|addons-apply|addons-status|addons-test|addons-upgrade MODE=...' \
+	  '  make addons-remove MODE=... ADDON=nom      make addons-catalog' \
+	  '  make upgrade-plan|upgrade|os-update|backup|health MODE=...   (clusters kubeadm)' \
+	  '  make restore MODE=... SNAPSHOT=fichier     make node-remove MODE=... NODE=nom' \
+	  '  make versions | versions-check             make uninstall MODE=existing' \
+	  '' \
+	  'Modes     MODE=kind   MODE=minikube   MODE=vagrant   MODE=existing   MODE=attach' \
+	  '          MODE=terraform PROVIDER=proxmox   (ou PROVIDER=vsphere, PROVIDER=libvirt, PROVIDER=eks)' \
+	  '          sans MODE : DEPLOYMENT_MODE de .env' \
+	  'Options   WORKERS=3   RECREATE=1   YES=1   KEEP=1   DESTRUCTIVE=1   ADDON=a,b' \
 	  '' \
 	  'Puis : export KUBECONFIG="$$PWD/.kube/config" && kubectl get nodes' \
-	  'Guides : docs/deployment.md   Menu interactif : ./k8s-lab   Toutes les cibles : make help-dev' \
+	  'Guides : docs/README.md   Menu interactif : ./k8s-lab   Toutes les cibles : make help-dev' \
 	  ''
 
 help-dev: ## Toutes les cibles, y compris la qualité (CI)
-	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-20s %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-22s %s\n", $$1, $$2}'
 
 menu: ## Menu interactif
 	@$(LAB)
 
-doctor: ## Vérifie les prérequis (MODE=... PROVIDER=... facultatifs)
-	@$(LAB_ENV) $(LAB) doctor $(MODE) $(PROVIDER)
+doctor: ## Vérifie les prérequis et la configuration (MODE=... PROVIDER=... facultatifs)
+	@$(LAB_ENV) $(LAB) doctor $(TARGET)
 
-deploy: ## Crée un cluster (MODE=kind par défaut)
-	@$(LAB_ENV) $(LAB) deploy $(MODE) $(PROVIDER) $(OPTIONS)
+config: ## Configuration effective, plan résolu, avertissements (secrets masqués)
+	@$(LAB_ENV) $(LAB) config $(TARGET)
 
-destroy: ## Détruit un cluster (MODE obligatoire, confirmation demandée)
-	@$(LAB_ENV) $(LAB) destroy $(MODE) $(PROVIDER) $(OPTIONS)
+validate: ## Valide la configuration sans rien modifier
+	@$(LAB_ENV) $(LAB) validate $(TARGET)
+
+deploy: ## Crée / complète un cluster puis installe les addons
+	@$(LAB_ENV) $(LAB) deploy $(TARGET) $(OPTIONS)
+
+destroy: ## Détruit un cluster (confirmation ; refusé en modes existing et attach)
+	@$(LAB_ENV) $(LAB) destroy $(TARGET) $(OPTIONS)
+
+uninstall: ## Mode existing : retire Kubernetes des machines (machines conservées)
+	@$(LAB_ENV) $(LAB) uninstall $(TARGET) $(OPTIONS)
 
 status: ## État des clusters du lab
 	@$(LAB) status
 
 kubeconfig: ## Écrit .kube/config (MODE=... pour le rafraîchir)
-	@$(LAB) kubeconfig $(MODE) $(PROVIDER)
+	@$(LAB) kubeconfig $(TARGET)
 
 test: ## Test applicatif (nginx) sur le cluster actif
-	@$(LAB) test
+	@$(LAB) test $(OPTIONS)
 
-config: ## Affiche la configuration effective
-	@$(LAB_ENV) $(LAB) config
+manifest: ## Manifeste du déploiement (.lab/manifests/, sans secret)
+	@$(LAB_ENV) $(LAB) manifest $(TARGET)
+
+addons-plan: ## Plan des addons (profil, dépendances, ordre, versions)
+	@$(LAB_ENV) $(LAB) addons-plan $(TARGET)
+
+addons-apply: ## Installe / synchronise les addons (ADDON=... pour en limiter la liste)
+	@$(LAB_ENV) $(LAB) addons-apply $(TARGET) $(OPTIONS)
+
+addons-status: ## État et santé des addons
+	@$(LAB_ENV) $(LAB) addons-status $(TARGET) $(OPTIONS)
+
+addons-test: ## Tests fonctionnels des addons (KEEP=1, DESTRUCTIVE=1)
+	@$(LAB_ENV) $(LAB) addons-test $(TARGET) $(OPTIONS)
+
+addons-upgrade: ## Met à jour les addons vers les versions verrouillées (après confirmation)
+	@$(LAB_ENV) $(LAB) addons-upgrade $(TARGET) $(OPTIONS)
+
+addons-remove: ## Désinstalle des addons (ADDON=... obligatoire ; données conservées)
+	@$(LAB_ENV) $(LAB) addons-remove $(TARGET) $(OPTIONS)
+
+addons-catalog: ## Liste des addons disponibles
+	@$(LAB) addons-catalog
+
+upgrade-plan: ## Plan de mise à niveau de Kubernetes (lecture seule)
+	@$(LAB_ENV) $(LAB) upgrade-plan $(TARGET)
+
+upgrade: ## Mise à niveau de Kubernetes (kubeadm, nœud par nœud, après confirmation)
+	@$(LAB_ENV) $(LAB) upgrade $(TARGET) $(OPTIONS)
+
+os-update: ## Mises à jour de l'OS des nœuds, un par un (après confirmation)
+	@$(LAB_ENV) $(LAB) os-update $(TARGET) $(OPTIONS)
+
+backup: ## Instantané etcd (clusters kubeadm)
+	@$(LAB_ENV) $(LAB) backup $(TARGET)
+
+restore: ## Restauration etcd (SNAPSHOT=... ; après confirmation)
+	@$(LAB_ENV) $(LAB) restore $(TARGET) $(OPTIONS)
+
+health: ## Santé du cluster kubeadm (etcd, certificats, services, disques)
+	@$(LAB_ENV) $(LAB) health $(TARGET)
+
+node-remove: ## Retire un nœud (NODE=... ; après confirmation)
+	@$(LAB_ENV) $(LAB) node-remove $(TARGET) $(OPTIONS)
+
+versions: ## Versions verrouillées (config/versions.yaml)
+	@$(LAB) versions
+
+versions-check: ## Versions plus récentes disponibles en amont (rien n'est installé)
+	@$(LAB) versions-check
+
+## --- Environnement et tests du framework -----------------------------------------
+
+venv: ## Environnement Python du lab (.venv) : ansible-core, PyYAML, kubernetes, outils de test
+	python3 -m venv .venv
+	.venv/bin/pip install --upgrade pip >/dev/null
+	.venv/bin/pip install -r requirements-dev.txt
+	.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml
+	@echo "Activez-le : source .venv/bin/activate"
+
+test-unit: ## Tests unitaires du résolveur (sans réseau ni cluster)
+	$(PYTHON) -m pytest -q tests/unit
+
+catalog-check: ## Cohérence du catalogue d'addons (fichiers, dépendances, ordre)
+	$(PYTHON) scripts/labctl catalog-check
+
+schema-check: ## Cohérence entre config/lab.env et config/schema.yaml
+	$(PYTHON) scripts/labctl schema-check
+
+docs-generate: ## Régénère les matrices de compatibilité de docs/compatibility.md
+	$(PYTHON) scripts/labctl matrix --write docs/compatibility.md
+
+matrix-check: ## Vérifie que docs/compatibility.md est à jour
+	$(PYTHON) scripts/labctl matrix --check docs/compatibility.md
+
+addons-render-check: ## Rendu de tous les addons + helm template (réseau requis, aucun cluster)
+	$(PYTHON) tests/addons/render-check
 
 ## --- Qualité (utilisé par la CI) ------------------------------------------------
 
-lint: shellcheck ruby-check yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs check-config ## Tous les contrôles statiques (+ vagrant-validate et actionlint en CI)
+lint: shellcheck ruby-check yamllint ansible-lint ansible-syntax terraform-fmt terraform-validate terraform-test tflint markdownlint check-docs check-config schema-check catalog-check matrix-check test-unit ## Tous les contrôles statiques (+ vagrant-validate, actionlint et addons-render-check en CI)
 
 shellcheck: ## ShellCheck sur les scripts
 	shellcheck --external-sources --source-path=SCRIPTDIR $(SHELL_SCRIPTS)
@@ -104,11 +210,11 @@ vagrant-validate: ## vagrant validate, sans hyperviseur (VirtualBox, 2 puis 4 wo
 yamllint: ## yamllint sur tout le dépôt
 	yamllint --strict .
 
-ansible-lint: ## ansible-lint (profil production)
-	cd ansible && ansible-lint
+ansible-lint: ## ansible-lint (profil production, rôles + tâches des addons)
+	ansible-lint
 
-ansible-syntax: ## ansible-playbook --syntax-check
-	cd ansible && for p in site.yml reset.yml kubeconfig.yml; do ansible-playbook -i inventories/example.ini "$$p" --syntax-check || exit 1; done
+ansible-syntax: ## ansible-playbook --syntax-check sur tous les playbooks
+	cd ansible && for p in $(PLAYBOOKS); do ansible-playbook -i inventories/example.ini "$$p" --syntax-check || exit 1; done
 
 terraform-fmt: ## terraform fmt -check
 	terraform fmt -check -recursive -diff terraform

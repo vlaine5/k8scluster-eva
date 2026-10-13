@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Installe kind, kubectl et/ou minikube aux versions de config/lab.env,
+#  Installe kind, kubectl, minikube et/ou helm aux versions de config/lab.env,
 #  SANS sudo, dans ~/.local/bin (modifiable : INSTALL_DIR=...).
 #  Chaque binaire est vérifié par son empreinte SHA-256 officielle.
 #
 #    scripts/install-tools.sh kind kubectl          # Linux ou macOS, amd64 ou arm64
-#    scripts/install-tools.sh minikube
+#    scripts/install-tools.sh minikube helm
 #
 #  Docker, Vagrant, Terraform et Ansible s'installent avec le gestionnaire de
 #  paquets de votre système : voir ./k8s-lab doctor.
@@ -90,14 +90,36 @@ install_minikube() {
     "https://storage.googleapis.com/minikube/releases/${version}/minikube-${OS}-${ARCH}.sha256"
 }
 
+# Helm est distribué en archive : l'archive est vérifiée (SHA-256 officiel) avant extraction.
+install_helm() {
+  local version tmp archive expected actual
+  version="$(lab_value HELM_VERSION)"
+  archive="helm-${version}-${OS}-${ARCH}.tar.gz"
+  tmp="$(mktemp -d)"
+  printf 'Téléchargement de helm : https://get.helm.sh/%s\n' "${archive}"
+  curl -fsSL --retry 3 -o "${tmp}/${archive}" "https://get.helm.sh/${archive}" || fail "Téléchargement impossible : ${archive}"
+  expected="$(curl -fsSL --retry 3 "https://get.helm.sh/${archive}.sha256sum" | awk '{print $1}')" ||
+    fail "Empreinte introuvable : https://get.helm.sh/${archive}.sha256sum"
+  actual="$(sha256_of "${tmp}/${archive}")"
+  if [[ -z "${expected}" || "${expected}" != "${actual}" ]]; then
+    rm -rf "${tmp}"
+    fail "Empreinte SHA-256 incorrecte pour ${archive} (attendu ${expected}, obtenu ${actual}) : installation annulée."
+  fi
+  tar -xzf "${tmp}/${archive}" -C "${tmp}" "${OS}-${ARCH}/helm"
+  mkdir -p "${INSTALL_DIR}"
+  install -m 0755 "${tmp}/${OS}-${ARCH}/helm" "${INSTALL_DIR}/helm"
+  rm -rf "${tmp}"
+  printf '[ok] helm %s installé dans %s (SHA-256 vérifié)\n' "${version}" "${INSTALL_DIR}"
+}
+
 main() {
-  (($# > 0)) || fail "Précisez les outils à installer : kind, kubectl, minikube (ex : $0 kind kubectl)"
+  (($# > 0)) || fail "Précisez les outils à installer : kind, kubectl, minikube, helm (ex : $0 kind kubectl helm)"
   detect_platform
   local tool
   for tool in "$@"; do
     case "${tool}" in
-      kind | kubectl | minikube) "install_${tool}" ;;
-      *) fail "Outil non géré par ce script : ${tool} (kind, kubectl, minikube)." ;;
+      kind | kubectl | minikube | helm) "install_${tool}" ;;
+      *) fail "Outil non géré par ce script : ${tool} (kind, kubectl, minikube, helm)." ;;
     esac
   done
   # shellcheck disable=SC2016 # $PATH doit rester littéral dans le conseil affiché

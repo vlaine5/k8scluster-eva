@@ -21,6 +21,9 @@ addon_destructive_tests: false
 addon_state_namespace: k8s-lab-system
 addon_state_configmap: k8s-lab-addons
 
+# Contrôles de santé après installation (ENABLE_HEALTHCHECKS).
+addon_health_checks: "{{ cfg.ENABLE_HEALTHCHECKS | default('true') }}"
+
 # Délais d'attente.
 addon_health_timeout: 600s
 addon_status_timeout: 10s

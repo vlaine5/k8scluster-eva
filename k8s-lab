@@ -15,6 +15,8 @@ export LAB_ROOT
 
 # shellcheck source=scripts/lib/common.sh
 source "${LAB_ROOT}/scripts/lib/common.sh"
+# shellcheck source=scripts/lib/resolver.sh
+source "${LAB_ROOT}/scripts/lib/resolver.sh"
 # shellcheck source=scripts/lib/doctor.sh
 source "${LAB_ROOT}/scripts/lib/doctor.sh"
 # shellcheck source=scripts/lib/kubeconfig.sh
@@ -33,42 +35,64 @@ source "${LAB_ROOT}/scripts/lib/mode_vagrant.sh"
 source "${LAB_ROOT}/scripts/lib/mode_terraform.sh"
 # shellcheck source=scripts/lib/eks.sh
 source "${LAB_ROOT}/scripts/lib/eks.sh"
+# shellcheck source=scripts/lib/mode_existing.sh
+source "${LAB_ROOT}/scripts/lib/mode_existing.sh"
+# shellcheck source=scripts/lib/mode_attach.sh
+source "${LAB_ROOT}/scripts/lib/mode_attach.sh"
+# shellcheck source=scripts/lib/addons.sh
+source "${LAB_ROOT}/scripts/lib/addons.sh"
+# shellcheck source=scripts/lib/day2.sh
+source "${LAB_ROOT}/scripts/lib/day2.sh"
 
 trap 'error "Commande interrompue (ligne ${LINENO}). Relancez avec DEBUG=1 pour plus de détails."' ERR
 [[ "${DEBUG:-0}" == "1" ]] && set -x
 
 usage() {
   cat <<HELP
-${C_BOLD}k8s-lab${C_RESET} — un cluster Kubernetes pour apprendre.
+${C_BOLD}k8s-lab${C_RESET} — clusters Kubernetes reproductibles, du laptop au homelab.
 
-${C_BOLD}Commandes principales${C_RESET}
-  doctor  [mode]        vérifier les prérequis de votre machine
-  deploy  <mode>        créer le cluster (ne détruit jamais un cluster existant)
-  status                voir les clusters existants
-  test                  tester le cluster actif (nginx + Service + DNS)
+${C_BOLD}Cycle de vie${C_RESET}
+  doctor   [mode]       vérifier les prérequis (et la configuration) pour un mode
+  config   [mode]       configuration effective, plan résolu, avertissements (secrets masqués)
+  validate [mode]       valider .env sans rien modifier
+  deploy   <mode>       créer / compléter le cluster puis installer les addons (idempotent)
+  status                voir les clusters du lab
+  test                  test applicatif sur le cluster actif (nginx + Service + DNS)
   kubeconfig [mode]     configurer kubectl (fichier .kube/config)
-  destroy <mode>        supprimer le cluster (confirmation demandée)
+  destroy  <mode>       supprimer le cluster (confirmation ; jamais en modes existing/attach)
+  uninstall existing    retirer Kubernetes de machines existantes (machines conservées)
+
+${C_BOLD}Addons${C_RESET} (catalogue : docs/addons.md)
+  addons-plan [mode]    plan résolu (profil, dépendances, ordre, versions)
+  addons-apply [mode]   installer / synchroniser        addons-status [mode]   état et santé
+  addons-test [mode]    tests fonctionnels               addons-upgrade [mode]  nouvelles versions verrouillées
+  addons-remove [mode] --addon NOM  désinstaller (données conservées)    addons-catalog   liste
+
+${C_BOLD}Exploitation des clusters kubeadm${C_RESET}
+  upgrade-plan [mode]   plan de mise à niveau (lecture seule)   upgrade [mode]     l'exécuter
+  os-update [mode]      mises à jour de l'OS, nœud par nœud      health [mode]      santé
+  backup [mode]         instantané etcd   restore [mode] SNAPSHOT=...   node-remove [mode] NODE=...
+  versions              versions verrouillées      versions-check   nouvelles versions (sans rien installer)
+  manifest [mode]       manifeste du déploiement (versions, options ; sans secret)
 
 ${C_BOLD}Modes${C_RESET}
-  local :            kind  |  minikube
-  kubeadm sur VMs :  vagrant  |  terraform proxmox  |  terraform vsphere  |  terraform libvirt
-  cloud managé :     terraform eks  (AWS, payant)
-
-${C_BOLD}Exemples${C_RESET}
-  ./k8s-lab doctor kind
-  ./k8s-lab deploy kind
-  ./k8s-lab deploy terraform proxmox
-  ./k8s-lab deploy terraform eks
-  ./k8s-lab destroy kind
+  local :              kind  |  minikube
+  kubeadm sur VMs :    vagrant  |  terraform proxmox  |  terraform vsphere  |  terraform libvirt
+  machines existantes: existing   (inventaire Ansible : EXISTING_INVENTORY)
+  cluster existant :   attach     (addons seulement : EXISTING_KUBECONFIG + EXISTING_CONTEXT)
+  cloud managé :       terraform eks  (AWS, payant)
+  Sans mode : DEPLOYMENT_MODE (et DEPLOYMENT_PROVIDER) de .env.
 
 ${C_BOLD}Options${C_RESET}
-  --yes                 ne poser aucune question (scripts, CI)
+  --yes                 ne poser aucune question (les opérations critiques exigent *_CONFIRM=<nom>)
   --recreate            deploy : supprimer puis recréer le cluster (confirmation demandée)
-  --keep                test : conserver l'application de test (namespace demo)
+  --keep                test / addons-test : conserver les ressources de test
+  --addon NOM[,NOM]     addons-* : limiter l'action à ces addons
+  --destructive         addons-test : inclure les tests destructifs (perte d'un réplica...)
 
-Avec make : make deploy MODE=kind  |  make deploy MODE=terraform PROVIDER=proxmox
-Sans argument, ./k8s-lab ouvre un menu. Réglages effectifs : ./k8s-lab config
-Guides : docs/deployment.md
+Avec make : make deploy MODE=kind  |  make deploy MODE=terraform PROVIDER=proxmox  |  make addons-apply MODE=attach
+Fichier de configuration : .env (modèle : .env.example), autre fichier : LAB_ENV_FILE=chemin
+Guides : docs/README.md
 HELP
 }
 
@@ -100,6 +124,8 @@ cmd_status() {
   minikube_status
   vagrant_status
   terraform_status
+  existing_status
+  attach_status
 
   step "kubectl (.kube/config)"
   export KUBECONFIG="${LAB_KUBECONFIG}"
@@ -117,51 +143,81 @@ cmd_status() {
   fi
 }
 
-cmd_config() {
-  if [[ "${1:-}" == "kind" ]]; then
-    kind_render_config
-    return
+# select_mode [mode] [provider] : mode demandé, sinon DEPLOYMENT_MODE/DEPLOYMENT_PROVIDER de .env.
+select_mode() {
+  local mode="${1:-}" provider="${2:-}"
+  if [[ -z "${mode}" ]]; then
+    mode="${DEPLOYMENT_MODE:-}"
+    [[ "${mode}" != terraform ]] || provider="${DEPLOYMENT_PROVIDER:-}"
   fi
-  step "Configuration effective (environnement > .env > config/lab.env)"
-  local key
-  while IFS= read -r key; do
-    printf '  %-28s %s\n' "${key}" "${!key:-}"
-  done < <(sed -n -E 's/^([A-Z][A-Z0-9_]*)=.*/\1/p' "${LAB_ROOT}/config/lab.env")
-  printf '\n  Secrets (.env) : '
-  local found=0
-  for key in PROXMOX_VE_API_TOKEN PROXMOX_VE_PASSWORD VSPHERE_PASSWORD ESXI_PASSWORD; do
-    if [[ -n "${!key:-}" ]]; then
-      printf '%s=**** ' "${key}"
-      found=1
-    fi
-  done
-  [[ "${found}" == "1" ]] || printf 'aucun'
-  printf '\n'
-}
-
-# dispatch <action> <mode> [provider]
-dispatch() {
-  local action="$1" mode="${2:-}" provider="${3:-}"
+  case "${mode}" in
+    kind | minikube | vagrant | existing | attach)
+      [[ -z "${provider}" ]] || die "Le mode ${mode} ne prend pas de provider (reçu : ${provider})."
+      ;;
+    terraform | tf)
+      mode=terraform
+      tf_check_provider "${provider}"
+      ;;
+    "")
+      die "Précisez le mode." "Exemples : $(hint_cmd deploy kind)   |   $(hint_cmd deploy terraform proxmox)" \
+        "Ou DEPLOYMENT_MODE=... dans .env. Liste des modes : $(hint_cmd help)"
+      ;;
+    *)
+      die "Mode inconnu : \"${mode}\"." "Modes : kind, minikube, vagrant, terraform <proxmox|vsphere|libvirt|eks>, existing, attach"
+      ;;
+  esac
   # Mémorisés pour les conseils affichés en cas d'erreur.
   LAB_MODE="${mode}"
   LAB_PROVIDER="${provider}"
-  case "${mode}" in
-    kind | minikube | vagrant)
-      [[ -z "${provider}" ]] || die "Le mode ${mode} ne prend pas de provider (reçu : ${provider})."
-      "${mode}_${action}"
-      ;;
-    terraform | tf)
-      tf_check_provider "${provider}"
-      "terraform_${action}" "${provider}"
-      ;;
-    "")
-      die "Précisez le mode." "Exemples : $(hint_cmd "${action}" kind)   |   $(hint_cmd "${action}" terraform proxmox)" \
-        "Liste des modes : $(hint_cmd help)"
-      ;;
-    *)
-      die "Mode inconnu : \"${mode}\"." "Modes : kind, minikube, vagrant, terraform <proxmox|vsphere|libvirt|eks>"
-      ;;
+}
+
+cmd_config() {
+  if [[ "${1:-}" == kind-config ]]; then
+    select_mode kind
+    lab_resolve kind >/dev/null
+    kind_render_config
+    return
+  fi
+  if [[ -z "${1:-}" && -z "${DEPLOYMENT_MODE:-}" ]]; then
+    info "Aucun mode précisé (DEPLOYMENT_MODE vide) : configuration résolue pour le mode kind."
+    set -- kind
+  fi
+  select_mode "$@"
+  local args=(--mode "${LAB_MODE}")
+  [[ -z "${LAB_PROVIDER}" ]] || args+=(--provider "${LAB_PROVIDER}")
+  labctl show "${args[@]}"
+}
+
+cmd_validate() {
+  select_mode "$@"
+  lab_resolve "${LAB_MODE}" "${LAB_PROVIDER}"
+}
+
+# dispatch <action> [mode] [provider] : action d'un mode (deploy, destroy, kubeconfig).
+dispatch() {
+  local action="$1"
+  shift
+  select_mode "$@"
+  # Toujours valider avant d'agir ; destroy reste possible même si la configuration a changé.
+  if [[ "${action}" == destroy ]]; then
+    labctl shell --mode "${LAB_MODE}" ${LAB_PROVIDER:+--provider "${LAB_PROVIDER}"} >/dev/null 2>&1 &&
+      eval "$(labctl shell --mode "${LAB_MODE}" ${LAB_PROVIDER:+--provider "${LAB_PROVIDER}"})"
+  else
+    lab_resolve "${LAB_MODE}" "${LAB_PROVIDER}"
+  fi
+  case "${LAB_MODE}" in
+    terraform) "terraform_${action}" "${LAB_PROVIDER}" ;;
+    *) "${LAB_MODE}_${action}" ;;
   esac
+}
+
+# Commandes d'exploitation : <commande> [mode] [provider] après validation.
+day2() {
+  local function="$1"
+  shift
+  select_mode "$@"
+  lab_resolve "${LAB_MODE}" "${LAB_PROVIDER}"
+  "${function}"
 }
 
 cmd_kubeconfig() {
@@ -241,6 +297,8 @@ Choisissez une méthode de déploiement :
      ├─ VMware/vSphere
      └─ libvirt/KVM
   5. AWS EKS           Kubernetes managé dans le cloud      (cloud, payant)
+  e. Machines existantes  kubeadm sur vos serveurs (EXISTING_INVENTORY)
+  a. Cluster existant     addons seulement (EXISTING_KUBECONFIG/CONTEXT)
 
   6. Détruire un cluster
   7. Vérifier les prérequis (doctor)
@@ -249,7 +307,7 @@ Choisissez une méthode de déploiement :
   q. Quitter
 
 MENU
-    read -r -p "Votre choix [1-9, q] : " choice || exit 0
+    read -r -p "Votre choix [1-9, e, a, q] : " choice || exit 0
     case "${choice}" in
       1) menu_run deploy kind ;;
       2) menu_run deploy minikube ;;
@@ -259,6 +317,8 @@ MENU
         if [[ -n "${target}" ]]; then menu_run deploy terraform "${target}"; fi
         ;;
       5) menu_run deploy terraform eks ;;
+      e | E) menu_run deploy existing ;;
+      a | A) menu_run deploy attach ;;
       6)
         target="$(menu_choose_mode)"
         # shellcheck disable=SC2086 # "terraform proxmox" doit donner deux arguments
@@ -279,18 +339,30 @@ main() {
   local args=() arg
   ASSUME_YES="${ASSUME_YES:-0}"
   RECREATE="${RECREATE:-0}"
-  KEEP=0
+  KEEP="${KEEP:-0}"
+  ADDON="${ADDON:-}"
+  DESTRUCTIVE_TESTS="${DESTRUCTIVE_TESTS:-0}"
+  local expect_addon=0
   for arg in "$@"; do
+    if ((expect_addon)); then
+      ADDON="${arg}"
+      expect_addon=0
+      continue
+    fi
     case "${arg}" in
       -y | --yes) ASSUME_YES=1 ;;
       --recreate) RECREATE=1 ;;
       --keep) KEEP=1 ;;
+      --destructive) DESTRUCTIVE_TESTS=1 ;;
+      --addon=*) ADDON="${arg#--addon=}" ;;
+      --addon) expect_addon=1 ;;
       -h | --help) args=(help) ;;
       -*) die "Option inconnue : ${arg}" "Aide : $(hint_cmd help)" ;;
       *) args+=("${arg}") ;;
     esac
   done
-  export ASSUME_YES RECREATE
+  ((expect_addon == 0)) || die "--addon attend un nom d'addon (ex : --addon cert-manager)."
+  export ASSUME_YES RECREATE KEEP ADDON DESTRUCTIVE_TESTS
 
   load_config
   ensure_state_dirs
@@ -311,13 +383,14 @@ main() {
     help) usage ;;
     doctor) cmd_doctor ${rest[@]+"${rest[@]}"} || exit 1 ;;
     deploy)
-      if ((${#rest[@]} == 0)); then
+      if ((${#rest[@]} == 0)) && [[ -z "${DEPLOYMENT_MODE:-}" ]]; then
         info "Aucun mode précisé : kind est utilisé (le plus simple). Autres modes : $(hint_cmd help)"
         rest=(kind)
       fi
-      dispatch deploy "${rest[@]}"
+      dispatch deploy ${rest[@]+"${rest[@]}"}
       ;;
     destroy) dispatch destroy ${rest[@]+"${rest[@]}"} ;;
+    uninstall) day2 cmd_uninstall ${rest[@]+"${rest[@]}"} ;;
     status) cmd_status ;;
     kubeconfig) cmd_kubeconfig ${rest[@]+"${rest[@]}"} ;;
     test)
@@ -325,6 +398,21 @@ main() {
       if [[ "${KEEP}" == "1" ]]; then smoke_app --keep; else smoke_app --cleanup; fi
       ;;
     config) cmd_config ${rest[@]+"${rest[@]}"} ;;
+    validate) cmd_validate ${rest[@]+"${rest[@]}"} ;;
+    plan | addons-plan) cmd_addons plan ${rest[@]+"${rest[@]}"} ;;
+    addons-apply | addons-status | addons-test | addons-upgrade | addons-remove | addons-catalog)
+      cmd_addons "${command#addons-}" ${rest[@]+"${rest[@]}"}
+      ;;
+    upgrade-plan) day2 cmd_upgrade_plan ${rest[@]+"${rest[@]}"} ;;
+    upgrade) day2 cmd_upgrade ${rest[@]+"${rest[@]}"} ;;
+    os-update) day2 cmd_os_update ${rest[@]+"${rest[@]}"} ;;
+    backup) day2 cmd_backup ${rest[@]+"${rest[@]}"} ;;
+    restore) day2 cmd_restore ${rest[@]+"${rest[@]}"} ;;
+    health) day2 cmd_health ${rest[@]+"${rest[@]}"} ;;
+    node-remove) day2 cmd_node_remove ${rest[@]+"${rest[@]}"} ;;
+    manifest) day2 lab_write_manifest ${rest[@]+"${rest[@]}"} ;;
+    versions) labctl versions ;;
+    versions-check) labctl versions-check ;;
     *) die "Commande inconnue : \"${command}\"." "Aide : $(hint_cmd help)" ;;
   esac
 }

@@ -61,8 +61,7 @@ vagrant_deploy() {
 
   ansible_install_kubernetes "${VAGRANT_INVENTORY}"
   kubeconfig_merge "${LAB_KUBE_DIR}/clusters/${context}.yaml" "${context}"
-  smoke_basic "${context}"
-  kubeconfig_hint "${context}"
+  post_deploy "${context}"
   printf '\nSe connecter à une VM : cd vagrant && vagrant ssh %s-cp-1\n' "${NODE_HOSTNAME_PREFIX}"
 }
 

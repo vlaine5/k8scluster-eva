@@ -167,8 +167,7 @@ terraform_deploy() {
     ansible_install_kubernetes "$(tf_inventory "${provider}")"
     kubeconfig_merge "${LAB_KUBE_DIR}/clusters/${context}.yaml" "${context}"
   fi
-  smoke_basic "${context}"
-  kubeconfig_hint "${context}"
+  post_deploy "${context}"
   if [[ "${provider}" == "eks" ]]; then
     printf '\nInformations du cluster : %s -chdir=terraform/providers/eks output\n' "$(terraform_bin)"
     [[ "${AWS_TARGET}" == "aws" ]] && warn "Le cluster EKS est facturé tant qu'il existe. Fin du TP : $(hint_cmd destroy terraform eks)"

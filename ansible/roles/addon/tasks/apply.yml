@@ -97,6 +97,7 @@
         label: "{{ addon_check.kind }} {{ addon_check.namespace | default('') }}/{{ addon_check.name }}"
       vars:
         addon_health_mode: wait
+      when: addon_health_checks | bool
 
     - name: Record the installation of {{ addon_item.id }}
       ansible.builtin.include_tasks: state.yml
