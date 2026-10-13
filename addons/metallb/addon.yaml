@@ -18,7 +18,7 @@ support:
   minikube: {status: experimental, note: "Préférez « minikube tunnel »."}
   eks: {status: unsupported, note: "AWS fournit les load balancers."}
   attach: {status: configured, note: "Refusé si un autre fournisseur LoadBalancer (ServiceLB de k3s...) est détecté."}
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 100, memory_mb: 128}
 node_prereqs:
   firewall_ports: [{port: 7946, proto: tcp}, {port: 7946, proto: udp}]

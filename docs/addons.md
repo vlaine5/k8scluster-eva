@@ -209,7 +209,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `GATEWAY_CONTROLLER=envoy-gateway` |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 | Désinstallation | Les CRD d'Envoy Gateway sont conservées (helm uninstall ne supprime pas les CRD). |
 
 ### gateway-api-crds
@@ -240,7 +240,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `LOADBALANCER_PROVIDER=metallb` |
 | Données | non |
 | Test fonctionnel | `addons/metallb/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 | Désinstallation | Les Services LoadBalancer existants perdent leur IP externe. |
 
 ### traefik
@@ -340,7 +340,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/external-secrets/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 | Désinstallation | Les Secrets déjà synchronisés restent en place ; les CRD sont conservées. |
 
 ### gateway
@@ -382,7 +382,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Namespace | `reloader` (Pod Security : restricted) |
 | Données | non |
 | Test fonctionnel | `addons/reloader/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 
 ### argo-cd
 

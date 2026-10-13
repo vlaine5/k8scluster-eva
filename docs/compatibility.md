@@ -21,18 +21,18 @@ est seulement supporté en théorie. Le détail des tests : [README.md](../READM
 | [prometheus-operator-crds](addons.md#prometheus-operator-crds) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [cilium-gateway](addons.md#cilium-gateway) | 🧪<sup>1</sup> | ❌<sup>2</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>3</sup> | ❌<sup>4</sup> | kind |
 | [cilium-lb](addons.md#cilium-lb) | 🧪<sup>5</sup> | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌<sup>6</sup> | kind |
-| [envoy-gateway](addons.md#envoy-gateway) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>7</sup> | ✅ | non |
+| [envoy-gateway](addons.md#envoy-gateway) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>7</sup> | ✅ | kind |
 | [gateway-api-crds](addons.md#gateway-api-crds) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>8</sup> | kind |
-| [metallb](addons.md#metallb) | ⚙️<sup>9</sup> | 🧪<sup>10</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>11</sup> | ⚙️<sup>12</sup> | non |
+| [metallb](addons.md#metallb) | ⚙️<sup>9</sup> | 🧪<sup>10</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>11</sup> | ⚙️<sup>12</sup> | kind |
 | [traefik](addons.md#traefik) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>13</sup> | ✅ | non |
 | [longhorn](addons.md#longhorn) | ❌<sup>14</sup> | ❌<sup>15</sup> | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>16</sup> | ❌<sup>17</sup> | 🧪<sup>18</sup> | non |
 | [nfs-csi](addons.md#nfs-csi) | ⚙️<sup>19</sup> | 🧪<sup>20</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | 🧪<sup>21</sup> | ✅ | non |
 | [snapshot-controller](addons.md#snapshot-controller) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>22</sup> | ✅ | non |
 | [cert-manager](addons.md#cert-manager) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | attach, kind |
-| [external-secrets](addons.md#external-secrets) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
+| [external-secrets](addons.md#external-secrets) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [gateway](addons.md#gateway) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [metrics-server](addons.md#metrics-server) | ✅ | ⚙️<sup>23</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>24</sup> | kind |
-| [reloader](addons.md#reloader) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
+| [reloader](addons.md#reloader) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [argo-cd](addons.md#argo-cd) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
 | [descheduler](addons.md#descheduler) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
 | [external-dns](addons.md#external-dns) | 🧪<sup>25</sup> | 🧪 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |

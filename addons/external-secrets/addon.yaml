@@ -9,7 +9,7 @@ components: [external-secrets]
 integrates_with: [prometheus-operator-crds]
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 100, memory_mb: 192}
 install:
   namespace: external-secrets
