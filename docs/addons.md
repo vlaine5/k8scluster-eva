@@ -403,7 +403,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 
 ### descheduler
 
-**Descheduler** — Rééquilibrage prudent des Pods (CronJob toutes les 30 minutes) : doublons sur un même nœud, nœuds sous-utilisés. Respecte les PodDisruptionBudget ; namespaces système exclus.
+**Descheduler** — Rééquilibrage prudent des Pods (CronJob toutes les 30 minutes) : doublons sur un même nœud, nœuds sous-utilisés. Respecte les PodDisruptionBudget ; namespaces système, volumes persistants et stockage local exclus.
 
 | | |
 | --- | --- |

@@ -1,8 +1,9 @@
-# Descheduler (CronJob toutes les 10 minutes) : rééquilibre les Pods entre les nœuds
-# (doublons, nœuds sous/sur-utilisés, règles d'affinité violées). Les Pods avec un
-# volume persistant ou du stockage local ne sont jamais évincés.
+# Descheduler (CronJob toutes les 30 minutes) : rééquilibre les Pods entre les nœuds
+# (doublons, nœuds sous/sur-utilisés, règles d'affinité violées). Jamais évincés : les
+# Pods des namespaces système, avec un volume persistant ou du stockage local, des
+# DaemonSets, ou de priorité système.
 kind: CronJob
-schedule: "*/10 * * * *"
+schedule: "*/30 * * * *"
 resources:
   requests: {cpu: 50m, memory: 64Mi}
 deschedulerPolicy:
@@ -11,8 +12,13 @@ deschedulerPolicy:
       pluginConfig:
         - name: DefaultEvictor
           args:
+            namespaceLabelSelector:
+              matchExpressions:
+                - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, kube-public, kube-node-lease]}
+            # PodsWithLocalStorage, DaemonSetPods, SystemCriticalPods et FailedBarePods sont
+            # protégés par défaut : les citer dans extraEnabled rend la politique invalide.
             podProtections:
-              extraEnabled: [PodsWithPVC, PodsWithLocalStorage]
+              extraEnabled: [PodsWithPVC]
         - name: RemoveDuplicates
         - name: RemovePodsViolatingNodeAffinity
           args:
