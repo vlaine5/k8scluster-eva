@@ -66,13 +66,17 @@
     msg: |
       {{ addon_item.id }} : {{ addon_check.kind }} {{ addon_check.namespace | default('') }}/{{ addon_check.name }} is not ready.
       {{ addon_health_result.stderr | default('') | trim | truncate(800) }}
-      {{ (addon_health_describe.stdout | default('')).splitlines()[-40:] | join('\n') }}
+      {{ addon_health_describe_tail }}
       Diagnosis:
         kubectl --context {{ addon_context }} get pods -A | grep -v Running
         kubectl --context {{ addon_context }} -n {{ addon_health_ns }} get events --sort-by=.lastTimestamp | tail -20
       Re-run safely: make addons-apply (only what is missing is installed). docs/troubleshooting.md#addons
   vars:
     addon_health_ns: "{{ addon_check.namespace | default(addon_install.namespace | default('default')) }}"
+    # 40 dernières lignes (statut et événements). Le séparateur vient de YAML ("\n" entre
+    # guillemets doubles) : ansible-core 2.21 ne convertit pas '\n' écrit dans une expression Jinja.
+    addon_health_describe_tail: "{{ (addon_health_describe.stdout | default('')).splitlines()[-40:] | join(addon_health_nl) }}"
+    addon_health_nl: "\n"
   when:
     - addon_health_mode == 'wait'
     - addon_health_result.rc != 0
