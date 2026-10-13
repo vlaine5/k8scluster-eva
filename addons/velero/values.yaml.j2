@@ -22,6 +22,9 @@ configuration:
         region: "{{ cfg.VELERO_REGION }}"
         s3ForcePathStyle: "true"
         s3Url: "{{ cfg.VELERO_S3_URL }}"
+        # Sommes de contrôle CRC32 (défaut du plugin AWS) désactivées : beaucoup de stockages
+        # S3-compatibles (MinIO ancien, Synology, Garage, VersityGW) ne les gèrent pas.
+        checksumAlgorithm: ""
   volumeSnapshotLocation: []
   defaultVolumesToFsBackup: {{ cfg.VELERO_FS_BACKUP | bool }}
   uploaderType: kopia
