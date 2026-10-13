@@ -3,7 +3,8 @@
 # =============================================================================
 #  Exploitation des clusters kubeadm (vagrant, terraform proxmox/vsphere/libvirt,
 #  existing) : plan et exécution des mises à niveau, mises à jour de l'OS,
-#  sauvegardes etcd, restauration, santé, retrait d'un nœud.
+#  sauvegardes etcd, restauration, santé, retrait d'un nœud, test de perte d'un
+#  worker (Longhorn).
 #
 #  Toute opération qui modifie le cluster exige une confirmation explicite ;
 #  les plus risquées (mise à niveau, restauration, retrait) demandent de taper
@@ -117,6 +118,20 @@ cmd_node_remove() {
   ansible_playbook "$(lab_inventory)" node-remove.yml -e "node_remove=${node}" -e "node_remove_confirm=${node}" ||
     die "Le retrait du nœud a échoué (voir ci-dessus)."
   ok "Nœud ${node} retiré du cluster. Retirez-le aussi de l'inventaire / de WORKER_COUNT (docs/day2.md)."
+}
+
+# Test destructif de Longhorn : panne simulée d'un worker (kubelet, Pods et containerd
+# arrêtés), bascule du volume, puis remise en service. Jamais lancé automatiquement.
+cmd_storage_failure_test() {
+  local node="${NODE:-}"
+  day2_require_kubeadm
+  [[ " ${LAB_R_ADDONS:-} " == *" longhorn "* ]] || die "Longhorn n'est pas dans le plan des addons (STORAGE_BACKENDS / ADDONS)."
+  [[ -n "${node}" ]] || die "Précisez le worker à arrêter : NODE=<nom> (kubectl get nodes)."
+  confirm_typed "${node}" STORAGE_FAILURE_CONFIRM \
+    "Test DESTRUCTIF : kubelet, tous les Pods et containerd seront arrêtés sur ${node} pendant plusieurs minutes, puis redémarrés."
+  ansible_playbook "$(lab_inventory)" storage-node-failure.yml -e "node_failure_confirm=${node}" ||
+    die "Le test de perte de nœud a échoué (voir ci-dessus). Vérifiez l'état de ${node} : kubectl get node ${node}"
+  ok "Le volume Longhorn a survécu à la perte de ${node} ; nœud remis en service, réplicas reconstruits."
 }
 
 cmd_uninstall() {

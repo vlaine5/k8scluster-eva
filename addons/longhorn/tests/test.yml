@@ -5,7 +5,7 @@
 #    2. PVC provisionné, écriture, volume « healthy » avec ses réplicas sur des nœuds distincts
 #    3. persistance : Pod supprimé puis recréé (sur un autre nœud si possible)
 #    4. (addon_destructive_tests=true) perte d'un réplica : reconstruction et données intactes
-#  La perte d'un nœud entier est un test séparé : ansible/tests/storage-node-failure.yml
+#  La perte d'un nœud entier est un test séparé : make storage-failure-test (ansible/storage-node-failure.yml)
 # =============================================================================
 
 - name: Read the Longhorn nodes

@@ -72,6 +72,7 @@ ${C_BOLD}Exploitation des clusters kubeadm${C_RESET}
   upgrade-plan [mode]   plan de mise à niveau (lecture seule)   upgrade [mode]     l'exécuter
   os-update [mode]      mises à jour de l'OS, nœud par nœud      health [mode]      santé
   backup [mode]         instantané etcd   restore [mode] SNAPSHOT=...   node-remove [mode] NODE=...
+  storage-failure-test [mode] NODE=...   test DESTRUCTIF : perte d'un worker (Longhorn)
   versions              versions verrouillées      versions-check   nouvelles versions (sans rien installer)
   manifest [mode]       manifeste du déploiement (versions, options ; sans secret)
 
@@ -410,6 +411,7 @@ main() {
     restore) day2 cmd_restore ${rest[@]+"${rest[@]}"} ;;
     health) day2 cmd_health ${rest[@]+"${rest[@]}"} ;;
     node-remove) day2 cmd_node_remove ${rest[@]+"${rest[@]}"} ;;
+    storage-failure-test) day2 cmd_storage_failure_test ${rest[@]+"${rest[@]}"} ;;
     manifest) day2 lab_write_manifest ${rest[@]+"${rest[@]}"} ;;
     versions) labctl versions ;;
     versions-check) labctl versions-check ;;

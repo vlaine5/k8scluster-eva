@@ -1,0 +1,305 @@
+---
+# =============================================================================
+#  Test DESTRUCTIF de Longhorn : perte d'un worker entier.
+#  Jamais lancé automatiquement (ni par make deploy, ni par make addons-test).
+#
+#    1. contrôles : confirmation (nom du worker), Longhorn installé, au moins
+#       2 workers et 2 réplicas, tous les nœuds prêts
+#    2. un Deployment écrit 32 Mio sur un volume Longhorn, de préférence sur le worker visé
+#    3. panne simulée sur ce worker : kubelet arrêté, Pods arrêtés, containerd arrêté
+#       (la machine reste allumée et joignable en SSH)
+#    4. le Pod redémarre sur un autre nœud ; somme de contrôle identique
+#    5. TOUJOURS : containerd et kubelet redémarrés, nœud prêt, volume reconstruit
+#       (« healthy »), puis suppression du namespace et du volume de test
+#
+#    ./k8s-lab storage-failure-test <mode> NODE=k8s-worker-2      (confirmation demandée)
+#    ou : cd ansible && ansible-playbook -i <inventaire> storage-node-failure.yml \
+#           -e @<vars.json> -e node_failure_confirm=k8s-worker-2
+# =============================================================================
+
+- name: Simulate the loss of a worker hosting a Longhorn volume
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  vars:
+    node_failure_confirm: ""
+    node_failure_timeout: 900
+    node_failure_ns: k8s-lab-test-node-failure
+    node_failure_sc: k8s-lab-test-node-failure
+    node_failure_source_sc: "{{ cfg.LONGHORN_STORAGE_CLASS | default('longhorn') }}"
+    node_failure_kubectl: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, --request-timeout=30s]
+    node_failure_image: "{{ lab_test_images.busybox | default('busybox:1.37.0') }}"
+  tasks:
+    - name: Refuse to run without an explicit confirmation (a worker name)
+      ansible.builtin.assert:
+        that:
+          - node_failure_confirm | length > 0
+          - node_failure_confirm in groups['workers'] | default([])
+          - node_failure_confirm not in groups['control_plane']
+          - groups['workers'] | length >= 2
+          - (cfg.LONGHORN_REPLICA_COUNT | default(3)) | int >= 2
+        fail_msg: >-
+          Destructive test: give the worker to stop with -e node_failure_confirm=<worker>
+          (it must be a worker of the inventory; at least 2 workers and LONGHORN_REPLICA_COUNT >= 2
+          are needed for the volume to survive).
+        quiet: true
+
+    - name: Check that Longhorn is installed
+      ansible.builtin.command:
+        argv: "{{ node_failure_kubectl + ['get', 'crd/volumes.longhorn.io', 'storageclass/' ~ node_failure_source_sc, '-o', 'name'] }}"
+      changed_when: false
+
+    - name: Check that every node is ready before the test
+      ansible.builtin.command:
+        argv: "{{ node_failure_kubectl + ['wait', '--for=condition=Ready', 'nodes', '--all', '--timeout=60s'] }}"
+      changed_when: false
+
+    - name: Read the source StorageClass
+      ansible.builtin.command:
+        argv: "{{ node_failure_kubectl + ['get', 'storageclass', node_failure_source_sc, '-o', 'json'] }}"
+      register: node_failure_sc_source
+      changed_when: false
+
+    - name: Run the test
+      block:
+        - name: Create the test namespace and a StorageClass copy with reclaimPolicy Delete
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['apply', '-f', '-'] }}"
+            stdin: "{{ node_failure_objects | to_json }}"
+          vars:
+            node_failure_sc_json: "{{ node_failure_sc_source.stdout | from_json }}"
+            node_failure_objects:
+              apiVersion: v1
+              kind: List
+              items:
+                - apiVersion: v1
+                  kind: Namespace
+                  metadata:
+                    name: "{{ node_failure_ns }}"
+                    labels:
+                      app.kubernetes.io/managed-by: k8s-lab
+                      pod-security.kubernetes.io/enforce: restricted
+                - apiVersion: storage.k8s.io/v1
+                  kind: StorageClass
+                  metadata:
+                    name: "{{ node_failure_sc }}"
+                    labels: {app.kubernetes.io/managed-by: k8s-lab}
+                  provisioner: "{{ node_failure_sc_json.provisioner }}"
+                  parameters: "{{ node_failure_sc_json.parameters | default({}) }}"
+                  reclaimPolicy: Delete
+                  allowVolumeExpansion: "{{ node_failure_sc_json.allowVolumeExpansion | default(false) }}"
+                  volumeBindingMode: "{{ node_failure_sc_json.volumeBindingMode | default('Immediate') }}"
+          changed_when: true
+
+        - name: Create the volume and the Deployment, preferably on {{ node_failure_confirm }}
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['apply', '-f', '-'] }}"
+            stdin: "{{ node_failure_workload | to_json }}"
+          vars:
+            node_failure_workload:
+              apiVersion: v1
+              kind: List
+              items:
+                - apiVersion: v1
+                  kind: PersistentVolumeClaim
+                  metadata: {name: data, namespace: "{{ node_failure_ns }}"}
+                  spec:
+                    accessModes: [ReadWriteOnce]
+                    storageClassName: "{{ node_failure_sc }}"
+                    resources: {requests: {storage: 1Gi}}
+                - apiVersion: apps/v1
+                  kind: Deployment
+                  metadata: {name: writer, namespace: "{{ node_failure_ns }}"}
+                  spec:
+                    replicas: 1
+                    strategy: {type: Recreate}
+                    selector: {matchLabels: {app: node-failure-test}}
+                    template:
+                      metadata: {labels: {app: node-failure-test}}
+                      spec:
+                        terminationGracePeriodSeconds: 5
+                        # Éviction 30 s après la perte du nœud (300 s par défaut).
+                        tolerations:
+                          - {key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 30}
+                          - {key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 30}
+                        affinity:
+                          nodeAffinity:
+                            requiredDuringSchedulingIgnoredDuringExecution:
+                              nodeSelectorTerms:
+                                - matchExpressions:
+                                    - {key: kubernetes.io/hostname, operator: In, values: "{{ groups['workers'] }}"}
+                            preferredDuringSchedulingIgnoredDuringExecution:
+                              - weight: 100
+                                preference:
+                                  matchExpressions:
+                                    - {key: kubernetes.io/hostname, operator: In, values: ["{{ node_failure_confirm }}"]}
+                        securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true,
+                                          seccompProfile: {type: RuntimeDefault}}
+                        containers:
+                          - name: writer
+                            image: "{{ node_failure_image }}"
+                            command: [sh, -c]
+                            args:
+                              - >-
+                                [ -f /data/payload ] || { dd if=/dev/urandom of=/data/payload bs=1M count=32 && sync; };
+                                exec sleep 2147483647
+                            securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+                            volumeMounts: [{name: data, mountPath: /data}]
+                        volumes: [{name: data, persistentVolumeClaim: {claimName: data}}]
+          changed_when: true
+
+        - name: Wait for the Deployment
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['-n', node_failure_ns, 'rollout', 'status', 'deployment/writer', '--timeout=600s'] }}"
+          changed_when: false
+
+        - name: Read the test Pod
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['-n', node_failure_ns, 'get', 'pods', '-l', 'app=node-failure-test', '-o', 'json'] }}"
+          register: node_failure_pods_before
+          changed_when: false
+
+        - name: Remember the Pod and its node
+          ansible.builtin.set_fact:
+            node_failure_pod: "{{ (node_failure_pods_before.stdout | from_json)['items'] | rejectattr('metadata.deletionTimestamp', 'defined') | first }}"
+
+        - name: Check that the Pod runs on {{ node_failure_confirm }}
+          ansible.builtin.assert:
+            that: node_failure_pod.spec.nodeName == node_failure_confirm
+            fail_msg: >-
+              The test Pod was scheduled on {{ node_failure_pod.spec.nodeName }}, not on {{ node_failure_confirm }}
+              (not enough resources there?). Nothing was stopped. Run the test again with that node, or free resources.
+            quiet: true
+
+        - name: Wait until the file is written and read its checksum
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['-n', node_failure_ns, 'exec', node_failure_pod.metadata.name, '--',
+                      'sh', '-c', 'test $(wc -c < /data/payload) -eq 33554432 && sha256sum /data/payload'] }}"
+          register: node_failure_sum_before
+          until: node_failure_sum_before.rc == 0
+          retries: 30
+          delay: 5
+          changed_when: false
+
+        - name: Read the Longhorn volume of the PVC
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['-n', node_failure_ns, 'get', 'pvc', 'data', '-o', 'jsonpath={.spec.volumeName}'] }}"
+          register: node_failure_volume
+          changed_when: false
+
+        - name: Wait until the volume is healthy (every replica in place)
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['-n', 'longhorn-system', 'get', 'volumes.longhorn.io', node_failure_volume.stdout,
+                      '-o', 'jsonpath={.status.robustness}'] }}"
+          register: node_failure_robustness
+          until: node_failure_robustness.stdout == 'healthy'
+          retries: 60
+          delay: 10
+          changed_when: false
+
+        - name: Simulate the failure and check the recovery
+          block:
+            - name: Stop kubelet on {{ node_failure_confirm }}
+              ansible.builtin.systemd_service:
+                name: kubelet
+                state: stopped
+              delegate_to: "{{ node_failure_confirm }}"
+
+            - name: Stop every Pod on {{ node_failure_confirm }}
+              ansible.builtin.shell: |
+                set -o pipefail
+                crictl --runtime-endpoint unix:///run/containerd/containerd.sock pods -q \
+                  | xargs -r crictl --runtime-endpoint unix:///run/containerd/containerd.sock stopp
+              args:
+                executable: /bin/bash
+              delegate_to: "{{ node_failure_confirm }}"
+              changed_when: true
+
+            - name: Stop containerd on {{ node_failure_confirm }}
+              ansible.builtin.systemd_service:
+                name: containerd
+                state: stopped
+              delegate_to: "{{ node_failure_confirm }}"
+
+            - name: Wait until Kubernetes sees the node as not ready
+              ansible.builtin.command:
+                argv: "{{ node_failure_kubectl + ['wait', '--for=condition=Ready=Unknown', 'node/' ~ node_failure_confirm, '--timeout=300s'] }}"
+              changed_when: false
+
+            - name: Wait until the Pod runs again on another node (Longhorn reattaches the volume)
+              ansible.builtin.command:
+                argv: "{{ node_failure_kubectl + ['-n', node_failure_ns, 'get', 'pods', '-l', 'app=node-failure-test', '-o', 'json'] }}"
+              register: node_failure_pods_after
+              until: >-
+                (node_failure_pods_after.stdout | from_json)['items']
+                | rejectattr('metadata.deletionTimestamp', 'defined')
+                | rejectattr('spec.nodeName', 'undefined')
+                | rejectattr('spec.nodeName', 'equalto', node_failure_confirm)
+                | selectattr('status.containerStatuses', 'defined')
+                | map(attribute='status.containerStatuses') | map('first')
+                | selectattr('ready') | list | length > 0
+              retries: "{{ (node_failure_timeout | int) // 10 }}"
+              delay: 10
+              changed_when: false
+
+            - name: Remember the new Pod
+              ansible.builtin.set_fact:
+                node_failure_new_pod: >-
+                  {{ (node_failure_pods_after.stdout | from_json)['items']
+                     | rejectattr('metadata.deletionTimestamp', 'defined')
+                     | rejectattr('spec.nodeName', 'undefined')
+                     | rejectattr('spec.nodeName', 'equalto', node_failure_confirm) | first }}
+
+            - name: Read the checksum on the new node
+              ansible.builtin.command:
+                argv: "{{ node_failure_kubectl + ['-n', node_failure_ns, 'exec', node_failure_new_pod.metadata.name, '--',
+                          'sha256sum', '/data/payload'] }}"
+              register: node_failure_sum_after
+              changed_when: false
+
+            - name: Check that the data survived the loss of the node
+              ansible.builtin.assert:
+                that: node_failure_sum_after.stdout == node_failure_sum_before.stdout
+                fail_msg: "Data changed after the failover: {{ node_failure_sum_before.stdout }} != {{ node_failure_sum_after.stdout }}"
+                success_msg: >-
+                  The volume moved from {{ node_failure_confirm }} to {{ node_failure_new_pod.spec.nodeName }}
+                  with identical data.
+
+          always:
+            - name: Start containerd again on {{ node_failure_confirm }}
+              ansible.builtin.systemd_service:
+                name: containerd
+                state: started
+              delegate_to: "{{ node_failure_confirm }}"
+
+            - name: Start kubelet again on {{ node_failure_confirm }}
+              ansible.builtin.systemd_service:
+                name: kubelet
+                state: started
+              delegate_to: "{{ node_failure_confirm }}"
+
+            - name: Wait until this node is ready again - {{ node_failure_confirm }}
+              ansible.builtin.command:
+                argv: "{{ node_failure_kubectl + ['wait', '--for=condition=Ready', 'node/' ~ node_failure_confirm, '--timeout=600s'] }}"
+              changed_when: false
+
+        - name: Wait until Longhorn has rebuilt every replica
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['-n', 'longhorn-system', 'get', 'volumes.longhorn.io', node_failure_volume.stdout,
+                      '-o', 'jsonpath={.status.robustness}'] }}"
+          register: node_failure_rebuilt
+          until: node_failure_rebuilt.stdout == 'healthy'
+          retries: "{{ (node_failure_timeout | int) // 10 }}"
+          delay: 10
+          changed_when: false
+
+      always:
+        - name: Delete the test namespace (its volume is deleted with it)
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['delete', 'namespace', node_failure_ns, '--ignore-not-found', '--wait=true', '--timeout=300s'] }}"
+          changed_when: true
+
+        - name: Delete the test StorageClass
+          ansible.builtin.command:
+            argv: "{{ node_failure_kubectl + ['delete', 'storageclass', node_failure_sc, '--ignore-not-found'] }}"
+          changed_when: true
