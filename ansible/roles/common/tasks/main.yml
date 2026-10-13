@@ -64,6 +64,16 @@
     path: /proc/modules
   register: common_proc_modules
 
+# Absent de certaines images minimales (Rocky 10) : modprobe persistent y écrit.
+- name: Create the directory of the modules loaded at boot
+  ansible.builtin.file:
+    path: /etc/modules-load.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: common_proc_modules.stat.exists
+
 - name: Load the kernel modules now and at every boot
   community.general.modprobe:
     name: "{{ item }}"

@@ -1,7 +1,16 @@
 ---
 # Rocky Linux : DNF.
+# Rocky 9 installe souvent curl-minimal, en conflit avec le paquet curl : la commande
+# curl suffit au framework, le paquet n'est installé que si elle manque (jamais de
+# remplacement d'un paquet existant).
+- name: Check whether a curl command is already installed
+  ansible.builtin.stat:
+    path: /usr/bin/curl
+  register: common_curl_command
+
 - name: Install the base packages (DNF)
   ansible.builtin.dnf:
-    name: "{{ common_packages_redhat }}"
+    name: "{{ common_packages_redhat | reject('equalto', 'curl') | list if common_curl_command.stat.exists
+              else common_packages_redhat }}"
     state: present
     update_cache: true
