@@ -14,9 +14,11 @@
 # =============================================================================
 name: CI
 
+# Branche principale à chaque push ; les autres branches par leur pull request (un seul
+# run par commit au lieu de deux) ou à la demande (workflow_dispatch).
 on:
   push:
-    branches: ["**"]
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
