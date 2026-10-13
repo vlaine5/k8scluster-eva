@@ -141,6 +141,19 @@ start_nodes() {
   wait_nodes
 }
 
+# Diagnostic d'un nœud injoignable en SSH. Chaque commande peut échouer (unité ou
+# fichier absent selon la distribution) : le diagnostic ne doit jamais interrompre le script.
+node_ssh_diagnostics() {
+  local name="$1"
+  docker exec "${name}" sh -c '
+    echo "--- /run/nologin, /etc/nologin"; ls -l /run/nologin /etc/nologin 2>&1
+    echo "--- unités en échec"; systemctl --failed --no-pager 2>&1
+    echo "--- /etc/pam.d/sshd"; cat /etc/pam.d/sshd 2>&1
+    echo "--- compte"; getent shadow '"${NODE_USER}"' | cut -d: -f2- 2>&1; chage -l '"${NODE_USER}"' 2>&1
+    echo "--- journal (sshd, pam)"; journalctl --no-pager -n 200 2>&1 | grep -Ei "sshd|pam" | head -n 60
+  ' || :
+}
+
 # Attend la fin du démarrage de systemd puis l'ouverture de SSH sur chaque nœud :
 # make doctor vérifie SSH dès le début du déploiement.
 wait_nodes() {
@@ -162,9 +175,7 @@ wait_nodes() {
       fi
       sleep 2
     done
-    docker exec "${name}" systemctl --no-pager status sshd ssh 2>&1 | tail -n 20
-    docker exec "${name}" journalctl --no-pager -n 30 -u sshd -u ssh 2>&1
-    docker exec "${name}" sh -c 'ls -l /run/nologin 2>&1; systemctl --failed --no-pager' 2>&1
+    node_ssh_diagnostics "${name}"
     die "${name} : connexion SSH impossible (${NODE_USER}@$(node_ip "${name}"), clé ${SSH_PRIVATE_KEY_FILE})."
   done < <(node_names)
   ok "Nœuds démarrés, SSH disponible."

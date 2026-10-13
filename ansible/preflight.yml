@@ -27,8 +27,10 @@
   roles:
     - role: preflight
 
+# Sur le 1er control-plane (et non localhost) : k8s_api_endpoint se calcule à partir
+# de hostvars, qui n'est pas disponible quand on lit la variable d'un autre hôte.
 - name: Summarize the inventory
-  hosts: localhost
+  hosts: control_plane[0]
   gather_facts: false
   tasks:
     - name: Show the cluster that would be created
@@ -38,7 +40,7 @@
           - "Workers: {{ groups['workers'] | default([]) | join(', ') or 'none (single-node cluster)' }}"
           - "Operating systems: {{ groups['k8s_cluster'] | map('extract', hostvars, 'preflight_os_name') | zip(groups['k8s_cluster']
             | map('extract', hostvars, 'preflight_os_version')) | map('join', ' ') | unique | join(', ') }}"
-          - "API endpoint: {{ hostvars[groups['control_plane'][0]]['k8s_api_endpoint'] }}"
+          - "API endpoint: {{ k8s_api_endpoint }}"
 
     - name: Warn about mixed operating systems
       ansible.builtin.debug:
