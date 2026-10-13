@@ -48,3 +48,31 @@
     owner: root
     group: root
     mode: "0600"
+  register: api_endpoint_manifest
+
+# Quand le manifeste change, kubelet arrête kube-vip puis le relance (une dizaine de
+# secondes) : la VIP disparaît entre-temps. kube-vip joint l'API locale (alias
+# « kubernetes » -> 127.0.0.1), il reprend donc la VIP seul ; on l'attend ici pour que
+# les tâches suivantes, qui passent par la VIP, ne tombent pas dans cet intervalle.
+- name: Wait until the API answers on the VIP again
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, --raw=/readyz]
+  register: api_endpoint_readyz
+  changed_when: false
+  failed_when: false
+  until: api_endpoint_readyz.rc == 0
+  retries: 36
+  delay: 5
+  when:
+    - api_endpoint_manifest is changed
+    - api_endpoint_phase == 'after-init'
+
+- name: Check that the VIP answers
+  ansible.builtin.assert:
+    that: api_endpoint_readyz is skipped or api_endpoint_readyz.rc == 0
+    fail_msg: >-
+      The API does not answer on {{ k8s_api_endpoint }} 3 minutes after kube-vip was restarted on
+      {{ inventory_hostname }}: {{ api_endpoint_readyz.stderr | default('') | trim | truncate(500) }}.
+      Check kube-vip: sudo crictl ps -a --name kube-vip, then sudo crictl logs <id>
+      (docs/high-availability.md). Nothing was reset.
+    quiet: true

@@ -34,7 +34,8 @@ CONTROL_PLANE_VIP=10.20.0.99 # IP libre du réseau des nœuds, hors DHCP et hors
 ## Installation
 
 1. `kubeadm init` sur `k8s-cp-1` avec `controlPlaneEndpoint` = VIP (kube-vip démarre avant,
-   avec `super-admin.conf`, puis bascule sur `admin.conf`) ;
+   avec `super-admin.conf`, puis bascule sur `admin.conf` ; la VIP disparaît le temps que
+   kubelet relance kube-vip, l'installation attend qu'elle réponde à nouveau) ;
 2. `kubeadm init phase upload-certs` : clé de certificats (chiffrée, valable 2 h) ;
 3. chaque autre control-plane rejoint **un par un** (`--control-plane --certificate-key`),
    santé etcd vérifiée avant et après chaque ajout ;
@@ -43,6 +44,22 @@ CONTROL_PLANE_VIP=10.20.0.99 # IP libre du réseau des nœuds, hors DHCP et hors
 Une machine qui appartient à un autre cluster est refusée. Ajouter un control-plane à un
 cluster mono-control-plane **existant** n'est possible que s'il a été créé avec un endpoint
 stable (VIP) : `controlPlaneEndpoint` ne se change pas après coup.
+
+### Si la VIP ne répond pas
+
+kube-vip joint l'API **locale** de son nœud (alias `kubernetes` → `127.0.0.1`, présent dans
+le certificat de l'API), il n'a donc pas besoin de la VIP pour la reprendre. Si elle ne
+répond pas après l'installation :
+
+```bash
+sudo crictl ps -a --name kube-vip      # sur chaque control-plane
+sudo crictl logs <id>                  # élection du leader, annonce ARP
+ip -4 addr show                        # la VIP doit apparaître sur un seul control-plane
+```
+
+Causes fréquentes : `CONTROL_PLANE_VIP` déjà utilisée sur le réseau, ARP gratuit filtré par
+le commutateur ou l'hyperviseur, interface du nœud différente de celle de l'IP déclarée.
+Rien n'est réinitialisé automatiquement.
 
 ## HA « logicielle » sur un seul hyperviseur
 
