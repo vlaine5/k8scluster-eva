@@ -89,6 +89,13 @@ resource "libvirt_volume" "base" {
       url = var.image_source
     }
   }
+
+  lifecycle {
+    # Les disques des nœuds sont des « overlays » de cette image : la remplacer (nouvelle
+    # image datée dans config/versions.yaml, ancien nom de fichier) recréerait TOUTES les
+    # VMs. Elle reste donc celle de la création du cluster ; mises à jour : make os-update.
+    ignore_changes = [name, create]
+  }
 }
 
 # 5. Disque système de chaque nœud : "overlay" copy-on-write sur l'image de base.
@@ -109,6 +116,11 @@ resource "libvirt_volume" "root" {
     format = {
       type = "qcow2"
     }
+  }
+
+  lifecycle {
+    # Un disque existant n'est jamais recréé à cause de son image de base.
+    ignore_changes = [backing_store]
   }
 }
 
