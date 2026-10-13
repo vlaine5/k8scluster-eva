@@ -1,0 +1,30 @@
+---
+# SELinux (Rocky Linux) : JAMAIS désactivé.
+#
+# Par défaut (containerd_selinux=false), l'hôte reste en enforcing et containerd
+# ne pose pas d'étiquette SELinux sur les conteneurs : ils s'exécutent dans le
+# domaine du runtime (container_runtime_t), non confiné. C'est le mode
+# documenté le plus fiable avec kubeadm. containerd_selinux=true active le
+# confinement container_t (expérimental, docs/security.md#selinux).
+- name: Report the SELinux mode
+  ansible.builtin.debug:
+    msg: >-
+      SELinux on {{ inventory_hostname }}: {{ ansible_facts['selinux']['status'] | default('n/a') }} /
+      {{ ansible_facts['selinux']['mode'] | default('n/a') }} (left unchanged)
+
+- name: Install the SELinux management tools and container policy
+  ansible.builtin.dnf:
+    name: [policycoreutils-python-utils, container-selinux]
+    state: present
+  when: ansible_facts['selinux']['status'] | default('disabled') == 'enabled'
+
+- name: Label the etcd data directory for confined containers
+  community.general.sefcontext:
+    target: "/var/lib/etcd(/.*)?"
+    setype: container_file_t
+    state: present
+  notify: Restore the etcd SELinux labels
+  when:
+    - containerd_selinux | bool
+    - ansible_facts['selinux']['status'] | default('disabled') == 'enabled'
+    - inventory_hostname in groups['control_plane']

@@ -1,0 +1,31 @@
+# {{ ansible_managed }}
+# Valeurs du chart tigera-operator (Calico {{ k8s_cni_version }}).
+installation:
+  enabled: true
+  kubernetesProvider: ""
+  cni:
+    type: Calico
+  calicoNetwork:
+    # BGP n'est utile qu'en IPIP ou en routage direct ; VXLAN n'en a pas besoin.
+    bgp: "{{ 'Enabled' if k8s_cni_mode in ['ipip', 'ipip-crosssubnet', 'direct'] else 'Disabled' }}"
+    ipPools:
+      - cidr: "{{ pod_cidr }}"
+        encapsulation: "{{ {'vxlan': 'VXLAN', 'vxlan-crosssubnet': 'VXLANCrossSubnet', 'ipip': 'IPIP',
+                             'ipip-crosssubnet': 'IPIPCrossSubnet', 'direct': 'None'}[k8s_cni_mode] }}"
+        natOutgoing: Enabled
+        nodeSelector: all()
+        blockSize: 26
+    nodeAddressAutodetectionV4:
+      kubernetes: NodeInternalIP
+  controlPlaneReplicas: {{ 2 if groups['k8s_cluster'] | length > 2 else 1 }}
+# Composants optionnels désactivés pour un homelab (API server Calico, flux Goldmane, UI Whisker).
+apiServer:
+  enabled: false
+goldmane:
+  enabled: false
+whisker:
+  enabled: false
+# Calico parle directement à l'API (indispensable sans kube-proxy).
+kubernetesServiceEndpoint:
+  host: "{{ cni_api_host }}"
+  port: "{{ cni_api_port }}"

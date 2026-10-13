@@ -1,0 +1,25 @@
+---
+# etcdctl exécuté dans le conteneur etcd (certificats kubeadm montés dans le Pod).
+etcd_ctl:
+  - crictl
+  - exec
+  - "{{ etcd_container.stdout | trim }}"
+  - etcdctl
+  - --endpoints=https://127.0.0.1:2379
+  - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+  - --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt
+  - --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
+  - --command-timeout=10s
+
+etcd_health_retries: 36
+
+# Sauvegardes (instantanés) sur le nœud, puis copie sur votre poste.
+etcd_backup_dir: /var/backups/k8s-lab/etcd
+etcd_backup_retention_days: "{{ backup.retention_days | default(7) }}"
+etcd_fetch_to_controller: true
+etcd_local_backup_dir: "{{ playbook_dir }}/../.lab/backups/{{ k8s_cluster_name }}"
+
+# Restauration (ansible/etcd-restore.yml).
+etcd_restore_step: stop
+etcd_restore_parking: /etc/kubernetes
+etcd_restore_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+# Instantané etcd local, vérifié, avec rétention de {{ etcd_backup_retention_days }} jour(s).
+set -Eeuo pipefail
+backup_dir="{{ etcd_backup_dir }}"
+name="etcd-{{ k8s_cluster_name }}-$(hostname -s)-$(date -u +%Y%m%dT%H%M%SZ).db"
+container="$(crictl ps --name '^etcd$' --state Running --quiet | head -n1)"
+[[ -n "${container}" ]] || { echo "etcd n'est pas en cours d'exécution" >&2; exit 1; }
+crictl exec "${container}" etcdctl --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+  --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+  snapshot save "/var/lib/etcd/${name}"
+crictl exec "${container}" etcdutl snapshot status "/var/lib/etcd/${name}" --write-out=table
+install -d -m 0700 "${backup_dir}"
+mv "/var/lib/etcd/${name}" "${backup_dir}/${name}"
+sha256sum "${backup_dir}/${name}" > "${backup_dir}/${name}.sha256"
+find "${backup_dir}" -name 'etcd-*.db*' -mtime +{{ etcd_backup_retention_days }} -print -delete
+echo "Instantané : ${backup_dir}/${name}"

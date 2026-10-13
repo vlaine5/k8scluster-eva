@@ -1,0 +1,87 @@
+---
+# =============================================================================
+#  Prérequis des addons sur les nœuds (calculés par ./k8s-lab à partir des
+#  addons choisis : addons/<id>/addon.yaml -> node_prereqs).
+#    NFS CSI  : client NFS (nfs-common / nfs-utils)
+#    Longhorn : open-iscsi / iscsi-initiator-utils, client NFSv4, cryptsetup,
+#               device-mapper, modules iscsi_tcp et dm_crypt, service iscsid
+# =============================================================================
+
+- name: Install the packages required by the selected addons
+  ansible.builtin.package:
+    name: "{{ node_prereqs.packages[k8s_os_family] }}"
+    state: present
+  when: node_prereqs.packages[k8s_os_family] | default([]) | length > 0
+
+- name: Check whether the kernel supports loadable modules
+  ansible.builtin.stat:
+    path: /proc/modules
+  register: node_prereqs_proc_modules
+
+- name: Load the kernel modules required by the selected addons
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop: "{{ node_prereqs.kernel_modules | default([]) }}"
+  when: node_prereqs_proc_modules.stat.exists
+
+# Rocky : le nom d'initiateur iSCSI peut manquer selon l'installation du paquet.
+- name: Check the iSCSI initiator name
+  ansible.builtin.stat:
+    path: /etc/iscsi/initiatorname.iscsi
+  register: node_prereqs_initiator
+  when: "'iscsid' in node_prereqs.services | default([])"
+
+- name: Generate a unique iSCSI initiator name
+  ansible.builtin.shell:
+    cmd: set -o pipefail && echo "InitiatorName=$(/sbin/iscsi-iname)" > /etc/iscsi/initiatorname.iscsi
+    executable: /bin/bash
+    creates: /etc/iscsi/initiatorname.iscsi
+  when:
+    - "'iscsid' in node_prereqs.services | default([])"
+    - not node_prereqs_initiator.stat.exists
+
+- name: Enable the services required by the selected addons
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: "{{ node_prereqs.services | default([]) }}"
+
+# Longhorn : multipathd peut s'approprier les volumes iSCSI (/dev/sdX) de
+# Longhorn. Sur les VMs du lab, ces périphériques sont exclus de multipath.
+# Sur une machine existante (SAN multipath possible), rien n'est modifié :
+# un avertissement explique la marche à suivre.
+- name: Check whether multipathd is installed
+  ansible.builtin.stat:
+    path: /usr/sbin/multipathd
+  register: node_prereqs_multipathd
+  when: "'iscsid' in node_prereqs.services | default([])"
+
+- name: Exclude the Longhorn devices from multipath (lab VMs only)
+  ansible.builtin.copy:
+    dest: /etc/multipath/conf.d/k8s-lab-longhorn.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (k8s-lab) : https://longhorn.io/kb/troubleshooting-volume-with-multipath/
+      blacklist {
+          devnode "^sd[a-z0-9]+"
+      }
+  notify: Reload multipathd
+  when:
+    - "'iscsid' in node_prereqs.services | default([])"
+    - node_prereqs_multipathd.stat.exists | default(false)
+    - lab_platform != 'existing'
+
+- name: Warn about multipathd on an existing machine
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: multipathd is installed. Longhorn volumes can be grabbed by multipath:
+      check https://longhorn.io/kb/troubleshooting-volume-with-multipath/ before using Longhorn (nothing changed).
+  when:
+    - "'iscsid' in node_prereqs.services | default([])"
+    - node_prereqs_multipathd.stat.exists | default(false)
+    - lab_platform == 'existing'

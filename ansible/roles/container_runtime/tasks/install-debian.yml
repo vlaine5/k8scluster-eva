@@ -1,0 +1,22 @@
+---
+# Ubuntu / Debian : dépôt APT officiel de Docker (paquet containerd.io).
+# Méthode moderne : fichier .sources (format deb822) + clé dans /etc/apt/keyrings,
+# limitée à CE dépôt (Signed-By). L'ancien "apt-key" est obsolète.
+- name: Add the Docker APT repository (provides containerd.io)
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: ["{{ container_runtime_repo_url }}"]
+    suites: ["{{ ansible_facts['distribution_release'] }}"]
+    components: [stable]
+    architectures: ["{{ container_runtime_arch_map[ansible_facts['architecture']] }}"]
+    signed_by: "{{ container_runtime_repo_key_url }}"
+    state: present
+  register: container_runtime_repo
+
+- name: Install containerd (APT)
+  ansible.builtin.apt:
+    name: "containerd.io={{ containerd_version }}"
+    state: present
+    update_cache: "{{ container_runtime_repo.changed }}"
+  notify: Restart containerd

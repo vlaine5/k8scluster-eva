@@ -68,6 +68,18 @@
         path: /etc/kubernetes/kubeadm-join.yaml
         state: absent
 
+- name: Record that this node belongs to the lab cluster
+  ansible.builtin.copy:
+    dest: "{{ k8s_lab_marker }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (k8s-lab) : ne pas supprimer (protection contre un réemploi accidentel).
+      cluster: {{ k8s_cluster_name }}
+      role: worker
+      api_endpoint: {{ k8s_api_endpoint }}
+
 - name: Label the node as a worker
   ansible.builtin.command:
     argv:

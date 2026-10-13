@@ -1,0 +1,36 @@
+---
+# Helm sur le 1er control-plane : version et SHA-256 verrouillés (config/versions.yaml).
+- name: Check the installed Helm version
+  ansible.builtin.command:
+    argv: ["{{ cni_helm_binary }}", version, --template, "{{ '{{' }} .Version {{ '}}' }}"]
+  register: cni_helm_version
+  changed_when: false
+  failed_when: false
+
+- name: Install Helm {{ lab_lock.helm.version }}
+  when: cni_helm_version.stdout | default('') != lab_lock.helm.version
+  block:
+    - name: Download the Helm archive (checksum verified)
+      ansible.builtin.get_url:
+        url: "https://get.helm.sh/helm-{{ lab_lock.helm.version }}-linux-{{ cni_arch }}.tar.gz"
+        dest: "/usr/local/src/helm-{{ lab_lock.helm.version }}-linux-{{ cni_arch }}.tar.gz"
+        checksum: "sha256:{{ lab_lock.helm.sha256[cni_arch] }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Extract the Helm binary
+      ansible.builtin.unarchive:
+        src: "/usr/local/src/helm-{{ lab_lock.helm.version }}-linux-{{ cni_arch }}.tar.gz"
+        dest: /usr/local/src
+        remote_src: true
+        include: ["linux-{{ cni_arch }}/helm"]
+
+    - name: Install the Helm binary
+      ansible.builtin.copy:
+        src: "/usr/local/src/linux-{{ cni_arch }}/helm"
+        dest: "{{ cni_helm_binary }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"

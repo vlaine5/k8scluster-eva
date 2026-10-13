@@ -1,19 +1,54 @@
 ---
 # =============================================================================
-#  Installation du plugin réseau des Pods (CNI).
+#  Installation du plugin réseau des Pods (CNI), depuis le 1er control-plane.
 #
 #  Sans CNI, les nœuds restent "NotReady" et les Pods ne reçoivent pas d'IP.
-#  Pour ajouter un autre CNI (Calico, Cilium...) : créez tasks/<nom>.yml et
-#  ajoutez <nom> à la liste de la tâche "Check that the requested CNI is supported".
+#    flannel : manifeste officiel épinglé (SHA-256) + Kustomize
+#    calico  : opérateur Tigera (chart Helm officiel tigera-operator)
+#    cilium  : chart Helm officiel (eBPF, remplacement de kube-proxy, Hubble,
+#              Gateway API, LB IPAM selon la configuration)
+#  Changer de CNI sur un cluster existant n'est JAMAIS fait automatiquement :
+#  docs/cni.md#changer-de-cni
 # =============================================================================
 
 - name: Check that the requested CNI is supported
   ansible.builtin.assert:
-    that: cni in ["flannel", "none"]
+    that: cni in ["flannel", "calico", "cilium", "none"]
     fail_msg: >-
-      cni={{ cni }} is not supported. Use "flannel", or "none" to install your own CNI
+      cni={{ cni }} is not supported. Use flannel, calico, cilium, or none to install your own CNI
       after the deployment.
     quiet: true
+
+- name: Detect a CNI already installed in the cluster
+  ansible.builtin.command:
+    argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", get, daemonsets, --all-namespaces, -o, "jsonpath={.items[*].metadata.name}"]
+  register: cni_existing_daemonsets
+  changed_when: false
+
+- name: Refuse to replace the CNI of an existing cluster
+  ansible.builtin.assert:
+    that: cni_detected | length == 0 or cni_detected == [cni]
+    fail_msg: >-
+      This cluster already runs {{ cni_detected | join(', ') }} but cni={{ cni }}. Changing the Pod network of a
+      running cluster is a migration (every Pod is restarted, NetworkPolicies are interpreted differently): it is
+      never done automatically. Keep CNI={{ cni_detected | first }}, or rebuild the cluster (docs/cni.md#changer-de-cni).
+    quiet: true
+  vars:
+    cni_detected: >-
+      {{ cni_signatures | dict2items | selectattr('key', 'in', cni_existing_daemonsets.stdout.split())
+         | map(attribute='value') | unique | list }}
+
+- name: Install Helm on the control-plane (Calico, Cilium)
+  ansible.builtin.include_tasks: helm.yml
+  when:
+    - cni in ['calico', 'cilium']
+    - cni_helm_binary is abs
+
+- name: Install the Gateway API CRDs before Cilium (Cilium Gateway API)
+  ansible.builtin.include_tasks: gateway_api_crds.yml
+  when:
+    - cni == 'cilium'
+    - gateway_api_crds.install_with_cni | default(false)
 
 - name: Install the CNI plugin
   ansible.builtin.include_tasks: "{{ cni }}.yml"

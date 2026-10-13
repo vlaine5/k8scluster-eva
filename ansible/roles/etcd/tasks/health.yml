@@ -1,0 +1,64 @@
+---
+# =============================================================================
+#  Santé et quorum d'etcd (etcd « empilé » sur les control-planes kubeadm).
+#  etcdctl est exécuté DANS le conteneur etcd (crictl exec) : aucun outil à
+#  installer, aucun appel au kubelet nécessaire.
+# =============================================================================
+
+- name: Find the running etcd container
+  ansible.builtin.command:
+    argv: [crictl, ps, --name, "^etcd$", --state, Running, --quiet]
+  register: etcd_container
+  until: etcd_container.stdout | trim | length > 0
+  retries: 30
+  delay: 5
+  changed_when: false
+  become: true
+
+- name: Read the etcd members
+  ansible.builtin.command:
+    argv: "{{ etcd_ctl + ['member', 'list', '--write-out=json'] }}"
+  register: etcd_members_raw
+  changed_when: false
+  become: true
+  until: etcd_members_raw.rc == 0
+  retries: 12
+  delay: 5
+
+- name: Wait until every etcd member is a healthy voting member
+  ansible.builtin.command:
+    argv: "{{ etcd_ctl + ['endpoint', 'health', '--cluster', '--write-out=json'] }}"
+  register: etcd_health_raw
+  changed_when: false
+  failed_when: false
+  become: true
+  until: >-
+    etcd_health_raw.rc == 0
+    and (etcd_health_raw.stdout | from_json | rejectattr('health') | list | length == 0)
+  retries: "{{ etcd_health_retries }}"
+  delay: 5
+
+- name: Summarize the etcd cluster
+  ansible.builtin.set_fact:
+    etcd_members: "{{ (etcd_members_raw.stdout | from_json).members | default([]) }}"
+    etcd_unhealthy: >-
+      {{ (etcd_health_raw.stdout | default('[]') | from_json if etcd_health_raw.stdout | default('') | length > 0 else [])
+         | rejectattr('health') | map(attribute='endpoint') | list }}
+
+- name: Check the etcd quorum
+  ansible.builtin.assert:
+    that:
+      - etcd_health_raw.rc == 0
+      - etcd_unhealthy | length == 0
+      - etcd_members | selectattr('isLearner', 'defined') | selectattr('isLearner') | list | length == 0
+    fail_msg: >-
+      etcd is not healthy: {{ etcd_members | length }} member(s), unhealthy endpoint(s): {{ etcd_unhealthy | join(', ') or 'n/a' }}.
+      Quorum requires {{ (etcd_members | length // 2) + 1 }} healthy member(s). Do not add or remove control-planes
+      until this is fixed (docs/high-availability.md#etcd).
+    quiet: true
+
+- name: Show the etcd members
+  ansible.builtin.debug:
+    msg: >-
+      etcd: {{ etcd_members | length }} member(s) {{ etcd_members | map(attribute='name') | join(', ') }},
+      quorum {{ (etcd_members | length // 2) + 1 }}, tolerates {{ ((etcd_members | length) - 1) // 2 }} failure(s).

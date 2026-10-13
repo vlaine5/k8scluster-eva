@@ -1,0 +1,27 @@
+---
+# Rocky Linux : dépôt RPM officiel. Comme le recommande la documentation de
+# Kubernetes, les paquets sont exclus des mises à jour (exclude=...) : seule
+# une installation explicite (--disableexcludes=kubernetes) les modifie.
+- name: Add the Kubernetes DNF repository (pkgs.k8s.io)
+  ansible.builtin.yum_repository:
+    name: kubernetes
+    description: Kubernetes v{{ kubernetes_minor_version }} (pkgs.k8s.io)
+    baseurl: "{{ kubernetes_repo_url_redhat }}"
+    gpgkey: "{{ kubernetes_repo_url_redhat }}repodata/repomd.xml.key"
+    gpgcheck: true
+    repo_gpgcheck: true
+    enabled: true
+    exclude: "{{ kubernetes_packages + ['cri-tools', 'kubernetes-cni'] }}"
+
+- name: Install kubelet, kubeadm and kubectl at the requested version (DNF)
+  ansible.builtin.dnf:
+    name: "{{ kubernetes_packages | map('regex_replace', '$', '-' ~ kubernetes_version) | list }}"
+    state: present
+    disable_excludes: kubernetes
+    allow_downgrade: false
+
+- name: Install the complementary tools (DNF)
+  ansible.builtin.dnf:
+    name: "{{ kubernetes_extra_packages }}"
+    state: present
+    disable_excludes: kubernetes

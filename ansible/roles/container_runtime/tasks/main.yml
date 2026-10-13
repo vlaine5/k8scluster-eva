@@ -1,7 +1,8 @@
 ---
 # =============================================================================
-#  Installation du runtime de conteneurs (containerd).
+#  Installation du runtime de conteneurs (containerd 2.x, paquet containerd.io).
 #  https://kubernetes.io/docs/setup/production-environment/container-runtimes/
+#  L'installation dépend de la famille (APT / DNF) ; la configuration est commune.
 # =============================================================================
 
 - name: Check that the requested container runtime is supported
@@ -9,7 +10,7 @@
     that: container_runtime == "containerd"
     fail_msg: >-
       container_runtime={{ container_runtime }} is not supported. Only "containerd" is
-      implemented (to add CRI-O, create roles/container_runtime/tasks/crio.yml).
+      implemented (to add CRI-O, create roles/container_runtime/tasks/install-crio-<family>.yml).
     quiet: true
 
 - name: Check that the CPU architecture is supported
@@ -18,26 +19,8 @@
     fail_msg: "Unsupported architecture: {{ ansible_facts['architecture'] }}"
     quiet: true
 
-# Méthode moderne : fichier .sources (format deb822) + clé dans /etc/apt/keyrings,
-# limitée à CE dépôt (Signed-By). L'ancien "apt-key" est obsolète.
-- name: Add the Docker APT repository (provides containerd.io)
-  ansible.builtin.deb822_repository:
-    name: docker
-    types: [deb]
-    uris: ["{{ container_runtime_repo_url }}"]
-    suites: ["{{ ansible_facts['distribution_release'] }}"]
-    components: [stable]
-    architectures: ["{{ container_runtime_arch_map[ansible_facts['architecture']] }}"]
-    signed_by: "{{ container_runtime_repo_key_url }}"
-    state: present
-  register: container_runtime_repo
-
-- name: Install containerd
-  ansible.builtin.apt:
-    name: "containerd.io={{ containerd_version }}"
-    state: present
-    update_cache: "{{ container_runtime_repo.changed }}"
-  notify: Restart containerd
+- name: Install containerd for the family {{ k8s_os_family }}
+  ansible.builtin.include_tasks: "install-{{ k8s_os_family }}.yml"
 
 - name: Create the containerd configuration directory
   ansible.builtin.file:

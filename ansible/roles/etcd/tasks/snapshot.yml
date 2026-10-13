@@ -1,0 +1,102 @@
+---
+# =============================================================================
+#  Instantané d'etcd (sauvegarde de TOUTES les ressources du cluster), vérifié,
+#  puis rapatrié sur votre poste avec les certificats du control-plane.
+#  docs/backup-dr.md
+# =============================================================================
+
+- name: Check etcd health before the snapshot
+  ansible.builtin.include_tasks: health.yml
+
+- name: Name the snapshot
+  ansible.builtin.set_fact:
+    etcd_snapshot_name: "etcd-{{ k8s_cluster_name }}-{{ inventory_hostname }}-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}.db"
+
+# Le conteneur etcd ne voit que /var/lib/etcd et les certificats : l'instantané
+# y est écrit, puis déplacé dans le répertoire de sauvegarde de l'hôte.
+- name: Save the snapshot inside the etcd data volume
+  ansible.builtin.command:
+    argv: "{{ etcd_ctl + ['snapshot', 'save', '/var/lib/etcd/' ~ etcd_snapshot_name] }}"
+  become: true
+  changed_when: true
+
+- name: Verify the snapshot (etcdutl snapshot status)
+  ansible.builtin.command:
+    argv: [crictl, exec, "{{ etcd_container.stdout | trim }}", etcdutl, snapshot, status, "/var/lib/etcd/{{ etcd_snapshot_name }}", --write-out=json]
+  register: etcd_snapshot_status
+  changed_when: false
+  become: true
+
+- name: Create the node backup directory
+  ansible.builtin.file:
+    path: "{{ etcd_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+- name: Move the snapshot out of the etcd data directory
+  ansible.builtin.command:
+    argv: [mv, "/var/lib/etcd/{{ etcd_snapshot_name }}", "{{ etcd_backup_dir }}/{{ etcd_snapshot_name }}"]
+    creates: "{{ etcd_backup_dir }}/{{ etcd_snapshot_name }}"
+  become: true
+
+- name: Archive the control-plane certificates (needed to rebuild the control-plane)
+  community.general.archive:
+    path: /etc/kubernetes/pki
+    dest: "{{ etcd_backup_dir }}/pki-{{ etcd_snapshot_name | regex_replace('\\.db$', '') }}.tar.gz"
+    format: gz
+    mode: "0600"
+  become: true
+
+- name: Remove the node-local snapshots older than the retention
+  ansible.builtin.find:
+    paths: "{{ etcd_backup_dir }}"
+    patterns: ["etcd-*.db", "pki-etcd-*.tar.gz"]
+    age: "{{ etcd_backup_retention_days }}d"
+  register: etcd_old_snapshots
+  become: true
+
+- name: Delete the expired node-local snapshots
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ etcd_old_snapshots.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  become: true
+
+- name: Fetch the snapshot and the certificates to the workstation
+  ansible.builtin.fetch:
+    src: "{{ etcd_backup_dir }}/{{ item }}"
+    dest: "{{ etcd_local_backup_dir }}/"
+    flat: true
+  loop:
+    - "{{ etcd_snapshot_name }}"
+    - "pki-{{ etcd_snapshot_name | regex_replace('\\.db$', '') }}.tar.gz"
+  when: etcd_fetch_to_controller | bool
+  become: true
+
+- name: Restrict the permissions of the local copies (they contain the cluster CA key)
+  ansible.builtin.file:
+    path: "{{ etcd_local_backup_dir }}/{{ item }}"
+    mode: "0600"
+  loop:
+    - "{{ etcd_snapshot_name }}"
+    - "pki-{{ etcd_snapshot_name | regex_replace('\\.db$', '') }}.tar.gz"
+  delegate_to: localhost
+  become: false
+  when: etcd_fetch_to_controller | bool
+
+- name: Report the snapshot
+  ansible.builtin.debug:
+    msg:
+      - "Snapshot: {{ etcd_snapshot_name }} ({{ etcd_snapshot_info.totalKey }} keys, revision {{ etcd_snapshot_info.revision }})"
+      - "Node copy: {{ etcd_backup_dir }}/{{ etcd_snapshot_name }}"
+      - "{{ etcd_local_copy if etcd_fetch_to_controller | bool else 'Not fetched to the workstation' }}"
+  vars:
+    etcd_snapshot_info: "{{ etcd_snapshot_status.stdout | from_json }}"
+    etcd_local_copy: >-
+      Workstation copy: {{ etcd_local_backup_dir | realpath }}/{{ etcd_snapshot_name }} (+ pki archive, mode 0600:
+      store it encrypted, it contains the cluster CA key)

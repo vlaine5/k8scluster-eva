@@ -1,0 +1,19 @@
+---
+# =============================================================================
+#  CNI installé DEPUIS VOTRE POSTE sur un cluster kind créé sans CNI natif
+#  (disableDefaultCNI). Mêmes valeurs Helm que pour kubeadm (rôle cni).
+#  Lancé par ./k8s-lab deploy kind quand CNI=calico ou CNI=cilium, avec un
+#  mini-inventaire (.lab/kind/inventory.ini : localhost dans control_plane).
+# =============================================================================
+
+- name: Install the Pod network on a local kind cluster
+  hosts: control_plane
+  connection: local
+  gather_facts: true
+  vars:
+    cni_kubeconfig: "{{ lab_kubeconfig_file }}"
+    # helm de votre poste (aucune installation dans /usr/local/bin).
+    cni_helm_binary: helm
+    cni_addons_dir: "{{ playbook_dir }}/../.lab/kind/addons"
+  roles:
+    - role: cni

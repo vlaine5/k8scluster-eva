@@ -2,15 +2,14 @@
 galaxy_info:
   role_name: common
   author: k8s-lab
-  description: Prepare a Debian/Ubuntu node for Kubernetes (swap, kernel modules, sysctl, hostname)
+  description: Prepare an Ubuntu, Debian or Rocky Linux node for Kubernetes (packages, swap, kernel, sysctl, firewall, MAC)
   license: MIT
   min_ansible_version: "2.16"
   platforms:
     - name: Ubuntu
-      versions:
-        - noble
+      versions: [noble]
     - name: Debian
-      versions:
-        - bookworm
-        - trixie
+      versions: [bookworm, trixie]
+    - name: EL
+      versions: ["9", "10"]
 dependencies: []

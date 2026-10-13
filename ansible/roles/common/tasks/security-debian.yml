@@ -1,0 +1,15 @@
+---
+# AppArmor (Ubuntu, Debian) : il reste actif. containerd charge son profil par
+# défaut (cri-containerd.apparmor.d) avec apparmor_parser, qui doit donc exister
+# quand AppArmor est activé dans le noyau.
+- name: Check whether AppArmor is enabled in the kernel
+  ansible.builtin.slurp:
+    src: /sys/module/apparmor/parameters/enabled
+  register: common_apparmor
+  failed_when: false
+
+- name: Install the AppArmor userspace tools used by containerd
+  ansible.builtin.apt:
+    name: apparmor
+    state: present
+  when: (common_apparmor.content | default('') | b64decode | trim) == 'Y'

@@ -1,0 +1,35 @@
+---
+# Correspondance nom Ansible de la distribution -> nom du lab (config/versions.yaml).
+preflight_os_names:
+  Ubuntu: ubuntu
+  Debian: debian
+  Rocky: rocky
+
+# Kubernetes >= 1.35 exige cgroup v2. Ne passez à false que si vous savez
+# pourquoi (hôte ancien) ET que vous ajoutez failCgroupV1: false dans
+# control_plane_kubelet_config.
+preflight_require_cgroup_v2: true
+
+# Exigences de kubeadm (control-plane : 2 vCPU, ~1,7 Go).
+preflight_min_memory_cp_mb: 1700
+preflight_min_memory_worker_mb: 1000
+preflight_min_var_free_gb: 10
+
+# Contrôles stricts (ports, logiciels, DNS) même hors du mode existing.
+preflight_strict: false
+
+# Ports de Kubernetes qui doivent être libres avant l'installation.
+preflight_ports_control_plane: [6443, 2379, 2380, 10250, 10257, 10259]
+preflight_ports_worker: [10250, 10256]
+
+# Paquets incompatibles avec containerd.io / pkgs.k8s.io (jamais désinstallés par le lab).
+preflight_conflicting_packages:
+  - containerd
+  - runc
+  - kubernetes-cni
+  - snap-kubectl
+  - microk8s
+  - k3s
+  - rke2-server
+  - rke2-agent
+  - podman-docker

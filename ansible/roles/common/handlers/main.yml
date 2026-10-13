@@ -1,0 +1,6 @@
+---
+- name: Restore the etcd SELinux labels
+  ansible.builtin.command:
+    argv: [restorecon, -R, /var/lib/etcd]
+    removes: /var/lib/etcd
+  changed_when: true

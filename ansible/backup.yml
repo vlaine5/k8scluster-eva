@@ -1,0 +1,18 @@
+---
+# =============================================================================
+#  Sauvegarde du control-plane : instantané etcd vérifié + certificats (pki),
+#  rapatriés dans .lab/backups/<cluster>/ (mode 0600). docs/backup-dr.md
+#
+#    cd ansible
+#    ansible-playbook -i inventories/<inventaire>.ini backup.yml
+# =============================================================================
+
+- name: Snapshot etcd on the first healthy control-plane
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Take, verify and fetch an etcd snapshot
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: snapshot.yml

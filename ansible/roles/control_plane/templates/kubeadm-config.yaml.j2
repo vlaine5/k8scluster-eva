@@ -4,7 +4,7 @@
 # Référence : https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/
 #
 # Attention : modifier ce fichier APRÈS l'initialisation n'a aucun effet sur
-# le cluster existant (il faut recréer le cluster ou utiliser kubeadm upgrade).
+# le cluster existant (procédures contrôlées : make upgrade, docs/upgrades.md).
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
 localAPIEndpoint:
@@ -23,12 +23,18 @@ nodeRegistration:
 {% if control_plane_ignore_preflight_errors | length > 0 %}
   ignorePreflightErrors: {{ control_plane_ignore_preflight_errors | to_json }}
 {% endif %}
+{% if kube_proxy_mode == 'cilium' %}
+# Cilium remplace kube-proxy (eBPF) : kube-proxy n'est pas déployé. Cilium est
+# configuré avec l'adresse de l'API (k8sServiceHost) pour fonctionner sans lui.
+skipPhases:
+  - addon/kube-proxy
+{% endif %}
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
 clusterName: "{{ k8s_cluster_name }}"
 kubernetesVersion: "v{{ kubernetes_version }}"
-# Adresse stable de l'API server (permettrait d'ajouter d'autres control-planes).
+# Adresse stable de l'API : VIP kube-vip / répartiteur en HA, sinon le 1er control-plane.
 controlPlaneEndpoint: "{{ k8s_api_endpoint }}"
 networking:
   podSubnet: "{{ pod_cidr }}"
@@ -38,16 +44,45 @@ apiServer:
   certSANs:
     - "{{ k8s_node_ip }}"
     - "{{ inventory_hostname }}"
+{% for host in groups['control_plane'] %}
+{% if host != inventory_hostname %}
+    - "{{ hostvars[host]['k8s_node_ip'] }}"
+    - "{{ host }}"
+{% endif %}
+{% endfor %}
+{% if k8s_api_host not in [k8s_node_ip, inventory_hostname] %}
+    - "{{ k8s_api_host }}"
+{% endif %}
 {% for san in control_plane_extra_cert_sans %}
     - "{{ san }}"
 {% endfor %}
+# Métriques du control-plane joignables par Prometheus (ports authentifiés 10257/10259 ;
+# métriques etcd en lecture seule sur 2381). Sans cela, la supervision les voit « down ».
+controllerManager:
+  extraArgs:
+    - name: bind-address
+      value: "0.0.0.0"
+scheduler:
+  extraArgs:
+    - name: bind-address
+      value: "0.0.0.0"
+etcd:
+  local:
+    extraArgs:
+      - name: listen-metrics-urls
+        value: "http://0.0.0.0:2381"
 ---
 # KubeletConfiguration : cgroupDriver systemd (comme containerd, SystemdCgroup = true).
+# serverTLSBootstrap : certificat de service du kubelet signé par la CA du cluster
+# (approuvé par kubelet-csr-approver) : metrics-server le vérifie sans option « insecure ».
 # control_plane_kubelet_config permet d'ajouter ou de remplacer des clés.
-{{ {'apiVersion': 'kubelet.config.k8s.io/v1beta1', 'kind': 'KubeletConfiguration', 'cgroupDriver': 'systemd'}
-   | combine(control_plane_kubelet_config) | to_nice_yaml(indent=2) }}
-{% if control_plane_kube_proxy_config | length > 0 %}
+{{ ({'apiVersion': 'kubelet.config.k8s.io/v1beta1', 'kind': 'KubeletConfiguration', 'cgroupDriver': 'systemd'}
+    | combine({'serverTLSBootstrap': true} if kubelet_serving_certs == 'signed' else {})
+    | combine({'failSwapOn': false, 'memorySwap': {'swapBehavior': 'LimitedSwap'}} if node_swap == 'keep' else {})
+    | combine(control_plane_kubelet_config, recursive=true)) | to_nice_yaml(indent=2) }}
+{% if kube_proxy_mode != 'cilium' %}
 ---
-{{ {'apiVersion': 'kubeproxy.config.k8s.io/v1alpha1', 'kind': 'KubeProxyConfiguration'}
-   | combine(control_plane_kube_proxy_config) | to_nice_yaml(indent=2) }}
+{{ ({'apiVersion': 'kubeproxy.config.k8s.io/v1alpha1', 'kind': 'KubeProxyConfiguration',
+     'mode': kube_proxy_mode, 'metricsBindAddress': '0.0.0.0:10249'}
+    | combine(control_plane_kube_proxy_config, recursive=true)) | to_nice_yaml(indent=2) }}
 {% endif %}

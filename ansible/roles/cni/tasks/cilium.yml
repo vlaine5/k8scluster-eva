@@ -1,0 +1,45 @@
+---
+# Cilium (eBPF) : chart Helm officiel. Selon la configuration résolue :
+#   - remplacement de kube-proxy (KUBE_PROXY_MODE=cilium) : kubeadm n'a pas
+#     déployé kube-proxy et Cilium joint l'API par k8sServiceHost/Port ;
+#   - Hubble (+ Relay, + UI), Gateway API, LB IPAM avec annonces L2 ou BGP.
+# Prérequis eBPF : noyau >= 5.10 (RHEL/Rocky 9 : 5.14 avec rétroportages).
+- name: Read the kernel version
+  ansible.builtin.set_fact:
+    cni_kernel: "{{ ansible_facts['kernel'] | default('0') | regex_search('^[0-9]+\\.[0-9]+') }}"
+
+- name: Check the kernel requirement of Cilium
+  ansible.builtin.assert:
+    that: >-
+      cni_kernel is version(lab_lock.components.cilium.kernel_min | default('5.10'), '>=')
+      or ansible_facts['os_family'] | default('') == 'RedHat'
+    fail_msg: >-
+      Cilium {{ k8s_cni_version }} needs a Linux kernel >= {{ lab_lock.components.cilium.kernel_min }} with eBPF
+      ({{ inventory_hostname }} runs {{ ansible_facts['kernel'] | default('?') }}). Choose another CNI or OS.
+    quiet: true
+  when: ansible_facts['kernel'] is defined
+
+- name: Check that the kube-proxy replacement has the API endpoint
+  ansible.builtin.assert:
+    that: kube_proxy_mode != 'cilium' or cni_api_host | length > 0
+    fail_msg: "kube-proxy replacement needs the API address (k8sServiceHost): none was resolved."
+    quiet: true
+
+- name: Install Cilium {{ k8s_cni_version }}
+  kubernetes.core.helm:
+    name: cilium
+    chart_ref: "{{ lab_lock.components.cilium.chart }}"
+    chart_repo_url: "{{ lab_lock.components.cilium.repo }}"
+    chart_version: "{{ k8s_cni_version }}"
+    release_namespace: kube-system
+    values: "{{ lookup('ansible.builtin.template', 'cilium-values.yaml.j2') | from_yaml }}"
+    binary_path: "{{ cni_helm_binary }}"
+    kubeconfig: "{{ cni_kubeconfig }}"
+    wait: false
+    timeout: 10m0s
+
+- name: Wait for the Cilium agents and operator
+  ansible.builtin.command:
+    argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", -n, kube-system, rollout, status, "{{ item }}", --timeout=600s]
+  loop: "{{ ['daemonset/cilium', 'deployment/cilium-operator'] + (['deployment/hubble-relay'] if hubble.enabled | default(false) else []) }}"
+  changed_when: false

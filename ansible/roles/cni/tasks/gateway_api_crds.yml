@@ -1,0 +1,44 @@
+---
+# CRD Gateway API : manifeste officiel de la release (version exigée par le
+# contrôleur, SHA-256 vérifié), appliqué en server-side apply avec le
+# gestionnaire de champs "k8s-lab" (un seul propriétaire des CRD).
+- name: Check that the Gateway API manifest checksum is known
+  ansible.builtin.assert:
+    that: gateway_api_crds.sha256[gateway_api_crds.channel] is defined
+    fail_msg: "No SHA-256 for Gateway API {{ gateway_api_crds.version }} ({{ gateway_api_crds.channel }}) in config/versions.yaml."
+    quiet: true
+
+- name: Create the Gateway API directory
+  ansible.builtin.file:
+    path: "{{ cni_addons_dir }}/gateway-api"
+    state: directory
+    mode: "0750"
+
+- name: Download the Gateway API CRDs (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ gateway_api_crds.url | replace('{version}', gateway_api_crds.version) | replace('{channel}', gateway_api_crds.channel) }}"
+    dest: "{{ cni_addons_dir }}/gateway-api/{{ gateway_api_crds.version }}-{{ gateway_api_crds.channel }}.yaml"
+    checksum: "sha256:{{ gateway_api_crds.sha256[gateway_api_crds.channel] }}"
+    mode: "0644"
+
+- name: Compare the Gateway API CRDs with the cluster
+  ansible.builtin.command:
+    argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", diff, --server-side, --field-manager=k8s-lab,
+           -f, "{{ cni_addons_dir }}/gateway-api/{{ gateway_api_crds.version }}-{{ gateway_api_crds.channel }}.yaml"]
+  register: cni_gateway_diff
+  changed_when: false
+  failed_when: cni_gateway_diff.rc > 1
+
+- name: Apply the Gateway API CRDs
+  ansible.builtin.command:
+    argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", apply, --server-side, --field-manager=k8s-lab,
+           -f, "{{ cni_addons_dir }}/gateway-api/{{ gateway_api_crds.version }}-{{ gateway_api_crds.channel }}.yaml"]
+  when: cni_gateway_diff.rc == 1
+  changed_when: true
+
+- name: Wait for the Gateway API CRDs to be established
+  ansible.builtin.command:
+    argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", wait, --for=condition=Established, --timeout=120s,
+           crd/gatewayclasses.gateway.networking.k8s.io, crd/gateways.gateway.networking.k8s.io,
+           crd/httproutes.gateway.networking.k8s.io]
+  changed_when: false

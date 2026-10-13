@@ -1,0 +1,115 @@
+---
+# =============================================================================
+#  DESTRUCTIF : restaure etcd depuis un instantané, sur TOUS les control-planes.
+#  Le cluster revient à l'état de l'instantané (les objets créés depuis sont
+#  perdus). Les données etcd actuelles sont conservées dans
+#  /var/lib/etcd.before-restore-<date> sur chaque control-plane.
+#
+#    cd ansible
+#    ansible-playbook -i inventories/<inventaire>.ini etcd-restore.yml \
+#      -e etcd_restore_snapshot=/chemin/etcd-....db -e restore_confirm=<nom-du-cluster>
+#
+#  Procédure complète et cas particuliers : docs/backup-dr.md#restaurer-etcd
+# =============================================================================
+
+- name: Check the restore request
+  hosts: control_plane
+  gather_facts: false
+  vars:
+    restore_confirm: ""
+  tasks:
+    - name: Refuse to run without an explicit confirmation (the cluster name)
+      ansible.builtin.assert:
+        that:
+          - restore_confirm == k8s_cluster_name
+          - etcd_restore_snapshot is defined
+        fail_msg: >-
+          Restoring etcd rolls the WHOLE cluster "{{ k8s_cluster_name }}" back to the snapshot.
+          Re-run with -e etcd_restore_snapshot=<file> -e restore_confirm={{ k8s_cluster_name }}.
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+
+    - name: Check that the snapshot exists on the workstation
+      ansible.builtin.stat:
+        path: "{{ etcd_restore_snapshot }}"
+      register: restore_snapshot_file
+      run_once: true
+      delegate_to: localhost
+
+    - name: Fail when the snapshot file is missing
+      ansible.builtin.assert:
+        that: restore_snapshot_file.stat.exists
+        fail_msg: "Snapshot not found: {{ etcd_restore_snapshot }}"
+        quiet: true
+      run_once: true
+
+    # run_once + set_fact : la même valeur est attribuée à tous les control-planes.
+    - name: Fix the restore timestamp for every control-plane
+      ansible.builtin.set_fact:
+        etcd_restore_stamp: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+      run_once: true
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+- name: Stop the API servers and etcd on every control-plane
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Stop etcd
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: restore.yml
+      vars:
+        etcd_restore_step: stop
+
+- name: Restore the snapshot on every control-plane
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restore etcd
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: restore.yml
+      vars:
+        etcd_restore_step: restore
+
+- name: Restart etcd and the API servers
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Start etcd
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: restore.yml
+      vars:
+        etcd_restore_step: start
+
+    - name: Wait for the API server
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, --raw=/readyz]
+      register: restore_readyz
+      until: restore_readyz.rc == 0
+      retries: 60
+      delay: 5
+      changed_when: false
+
+- name: Verify etcd after the restore
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check etcd health and quorum
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: health.yml
+
+    - name: Explain the next steps
+      ansible.builtin.debug:
+        msg:
+          - "etcd restored from {{ etcd_restore_snapshot | basename }}. Previous data kept in /var/lib/etcd.before-restore-{{ etcd_restore_stamp }}."
+          - "Restart the workloads that cache cluster state if needed (kubectl rollout restart), then run: make health"

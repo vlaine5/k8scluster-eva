@@ -1,0 +1,133 @@
+---
+# =============================================================================
+#  Mode existing : machines déjà installées. Détection des risques AVANT toute
+#  modification (ports, logiciels en conflit, DNS, heure, pare-feu, SELinux),
+#  puis affichage des modifications prévues.
+# =============================================================================
+
+- name: Check passwordless sudo
+  ansible.builtin.command:
+    argv: ["true"]
+  become: true
+  changed_when: false
+
+- name: List the listening TCP ports
+  ansible.builtin.command:
+    argv: [ss, -Htln]
+  register: preflight_ss
+  changed_when: false
+  become: true
+
+- name: Find the Kubernetes ports already used by another program
+  ansible.builtin.set_fact:
+    preflight_busy_ports: >-
+      {{ preflight_required_ports | select('in', preflight_listening) | list }}
+  vars:
+    preflight_listening: >-
+      {{ preflight_ss.stdout_lines | map('regex_search', '^\\S+\\s+\\S+\\s+\\S+\\s+\\S*:(\\d+)\\s', '\\1')
+         | select | map('first') | map('int') | list }}
+    preflight_required_ports: >-
+      {{ preflight_ports_control_plane if inventory_hostname in groups['control_plane'] else preflight_ports_worker }}
+
+- name: Refuse a node whose Kubernetes ports are already in use
+  ansible.builtin.assert:
+    that: preflight_busy_ports | length == 0 or preflight_in_cluster
+    fail_msg: >-
+      {{ inventory_hostname }}: port(s) {{ preflight_busy_ports | join(', ') }} already in use (sudo ss -tlnp).
+      Kubernetes needs them: stop the program using them or choose another machine. Nothing was changed.
+    quiet: true
+
+- name: Gather the installed packages
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Detect conflicting software
+  ansible.builtin.set_fact:
+    preflight_conflicts: "{{ preflight_conflicting_packages | select('in', ansible_facts.packages) | list }}"
+    preflight_docker: "{{ 'docker-ce' in ansible_facts.packages or 'docker.io' in ansible_facts.packages }}"
+
+- name: Refuse packages that conflict with containerd.io / Kubernetes packages
+  ansible.builtin.assert:
+    that: preflight_conflicts | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} has conflicting packages installed: {{ preflight_conflicts | join(', ') }}.
+      The framework never removes software: uninstall them yourself (after checking what depends on them),
+      or use another machine. See docs/existing-mode.md.
+    quiet: true
+
+- name: Check DNS resolution of the package repositories
+  ansible.builtin.command:
+    argv: [getent, hosts, "{{ item }}"]
+  loop: [pkgs.k8s.io, download.docker.com, registry.k8s.io]
+  changed_when: false
+  register: preflight_dns
+  failed_when: false
+
+- name: Refuse a node that cannot resolve the repositories
+  ansible.builtin.assert:
+    that: preflight_dns.results | selectattr('rc', 'ne', 0) | list | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} cannot resolve {{ preflight_dns.results | selectattr('rc', 'ne', 0) | map(attribute='item') | join(', ') }}:
+      check /etc/resolv.conf and Internet access (proxy, firewall).
+    quiet: true
+
+- name: Check time synchronisation
+  ansible.builtin.command:
+    argv: [timedatectl, show, --property=NTPSynchronized, --value]
+  register: preflight_ntp
+  changed_when: false
+  failed_when: false
+
+- name: Detect firewalld
+  ansible.builtin.command:
+    argv: [systemctl, is-active, firewalld]
+  register: preflight_firewalld
+  changed_when: false
+  failed_when: false
+
+- name: Detect ufw (its real state, not the state of ufw.service)
+  ansible.builtin.command:
+    argv: [ufw, status]
+  register: preflight_ufw
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Show the planned changes (nothing has been changed yet)
+  ansible.builtin.debug:
+    msg:
+      - "{{ inventory_hostname }} ({{ preflight_os_name }} {{ preflight_os_version }}, kernel {{ ansible_facts['kernel'] }})"
+      - "Packages to install: {{ preflight_packages | join(', ') }}"
+      - "Repositories added: pkgs.k8s.io (v{{ kubernetes_minor_version }}), download.docker.com (containerd.io)"
+      - "Files written: {{ preflight_files | join(', ') }}"
+      - "Swap: {{ preflight_swap_summary }}"
+      - "Firewall: {{ preflight_firewall_summary }}"
+      - "SELinux: {{ ansible_facts['selinux']['status'] | default('n/a') }} {{ ansible_facts['selinux']['mode'] | default('') }} (never disabled)"
+      - "Hostname and /etc/hosts: unchanged (existing mode)"
+      - "Docker: {{ preflight_docker_summary }}"
+      - "Time sync: {{ 'OK' if preflight_ntp.stdout | default('') == 'yes' else 'NOT synchronised (certificates and etcd need a correct clock)' }}"
+      - "Already in a lab cluster: {{ preflight_in_cluster }}"
+  vars:
+    preflight_packages: >-
+      {{ ['containerd.io ' ~ containerd_version, 'kubelet/kubeadm/kubectl ' ~ kubernetes_version, 'cri-tools', 'conntrack', 'socat']
+         + node_prereqs.packages[k8s_os_family] | default([]) }}
+    preflight_files:
+      - /etc/containerd/config.toml
+      - /etc/crictl.yaml
+      - /etc/sysctl.d/99-kubernetes.conf
+      - /etc/modules-load.d (overlay, br_netfilter)
+      - /etc/kubernetes/*
+      - "{{ k8s_lab_marker }}"
+    preflight_swap_summary: >-
+      {{ 'swap detected, it will be DISABLED (swapoff + /etc/fstab entries commented)'
+         if ansible_facts['swaptotal_mb'] | int > 0 and node_swap == 'disable' else 'nothing to change' }}
+    preflight_docker_summary: >-
+      {{ 'installed - containerd will get the CRI plugin enabled; sharing a node with Docker is discouraged'
+         if preflight_docker else 'not installed' }}
+    preflight_active_fw: >-
+      {{ (['firewalld'] if preflight_firewalld.stdout | default('') == 'active' else [])
+         + (['ufw'] if 'Status: active' in preflight_ufw.stdout | default('') else []) }}
+    preflight_firewall_summary: >-
+      {{ ('active: ' ~ preflight_active_fw | join(',') ~ (' - only the Kubernetes/CNI ports will be opened' if node_firewall != 'unmanaged'
+          else ' - NODE_FIREWALL=unmanaged: open the ports yourself (docs/security.md)'))
+         if preflight_active_fw | length > 0 else 'none active' }}

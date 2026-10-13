@@ -1,0 +1,19 @@
+---
+# Rocky Linux : mise à jour DNF (les paquets Kubernetes sont exclus du dépôt).
+- name: Upgrade the packages (DNF)
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest # noqa package-latest - mise à jour volontaire du système, nœud drainé
+    update_cache: true
+
+- name: Check whether a reboot is required (needs-restarting)
+  ansible.builtin.command:
+    argv: [dnf, needs-restarting, --reboothint]
+  register: os_update_needs_restart
+  changed_when: false
+  failed_when: os_update_needs_restart.rc not in [0, 1]
+
+- name: Reboot the node when the update requires it
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+  when: os_update_needs_restart.rc == 1

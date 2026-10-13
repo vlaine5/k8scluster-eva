@@ -1,0 +1,5 @@
+---
+# Version cible : KUBERNETES_VERSION de .env (passée par ./k8s-lab upgrade).
+upgrade_target_version: "{{ kubernetes_version }}"
+upgrade_target_minor: "{{ upgrade_target_version.split('.')[0:2] | join('.') }}"
+upgrade_drain_timeout: 10m

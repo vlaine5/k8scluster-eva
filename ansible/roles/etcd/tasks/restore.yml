@@ -1,0 +1,87 @@
+---
+# =============================================================================
+#  Restauration d'etcd depuis un instantané (TOUS les control-planes).
+#  DESTRUCTIF pour l'état actuel du cluster : il revient à l'instant de
+#  l'instantané. L'ancien répertoire de données est CONSERVÉ (renommé).
+#  Procédure officielle : https://etcd.io/docs/latest/op-guide/recovery/
+#  Lancé par ansible/etcd-restore.yml (confirmation obligatoire).
+# =============================================================================
+
+- name: Find the etcd image used by this control-plane
+  ansible.builtin.command:
+    argv: [awk, '/image:/ {print $2; exit}', /etc/kubernetes/manifests/etcd.yaml]
+  register: etcd_image
+  changed_when: false
+  become: true
+  when: etcd_restore_step == 'stop'
+
+- name: Stop the API server and etcd (static Pod manifests moved aside)
+  ansible.builtin.command:
+    argv: [mv, "/etc/kubernetes/manifests/{{ item }}.yaml", "{{ etcd_restore_parking }}/{{ item }}.yaml"]
+    removes: "/etc/kubernetes/manifests/{{ item }}.yaml"
+  loop: [kube-apiserver, etcd]
+  become: true
+  when: etcd_restore_step == 'stop'
+
+- name: Wait until the etcd container is gone
+  ansible.builtin.command:
+    argv: [crictl, ps, --name, "^etcd$", --quiet]
+  register: etcd_still_running
+  until: etcd_still_running.stdout | trim | length == 0
+  retries: 30
+  delay: 4
+  changed_when: false
+  become: true
+  when: etcd_restore_step == 'stop'
+
+- name: Keep the current etcd data directory (never deleted)
+  ansible.builtin.command:
+    argv: [mv, /var/lib/etcd, "/var/lib/etcd.before-restore-{{ etcd_restore_stamp }}"]
+    removes: /var/lib/etcd/member
+  become: true
+  when: etcd_restore_step == 'restore'
+
+- name: Copy the snapshot to the control-plane
+  ansible.builtin.copy:
+    src: "{{ etcd_restore_snapshot }}"
+    dest: "/var/lib/etcd-restore-{{ etcd_restore_stamp }}.db"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  when: etcd_restore_step == 'restore'
+
+- name: Restore the snapshot into a new data directory (etcdutl from the etcd image)
+  ansible.builtin.command:
+    argv:
+      - ctr
+      - --namespace=k8s.io
+      - run
+      - --rm
+      - --net-host
+      - --mount=type=bind,src=/var/lib,dst=/var/lib,options=rbind:rw
+      - "{{ hostvars[inventory_hostname]['etcd_image']['stdout'] | trim }}"
+      - k8s-lab-etcd-restore
+      - etcdutl
+      - snapshot
+      - restore
+      - "/var/lib/etcd-restore-{{ etcd_restore_stamp }}.db"
+      - --data-dir=/var/lib/etcd
+      - --name={{ inventory_hostname }}
+      - --initial-cluster={{ etcd_initial_cluster }}
+      - --initial-advertise-peer-urls=https://{{ k8s_node_ip }}:2380
+      - --initial-cluster-token=k8s-lab-restore-{{ etcd_restore_stamp }}
+    creates: /var/lib/etcd/member
+  become: true
+  when: etcd_restore_step == 'restore'
+  vars:
+    etcd_initial_cluster: >-
+      {% for host in groups['control_plane'] %}{{ host }}=https://{{ hostvars[host]['k8s_node_ip'] }}:2380{{ '' if loop.last else ',' }}{% endfor %}
+
+- name: Restart etcd and the API server
+  ansible.builtin.command:
+    argv: [mv, "{{ etcd_restore_parking }}/{{ item }}.yaml", "/etc/kubernetes/manifests/{{ item }}.yaml"]
+    removes: "{{ etcd_restore_parking }}/{{ item }}.yaml"
+  loop: [etcd, kube-apiserver]
+  become: true
+  when: etcd_restore_step == 'start'

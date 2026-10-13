@@ -1,14 +1,18 @@
 ---
 # =============================================================================
-#  DESTRUCTIF : remet les nœuds à zéro avec "kubeadm reset".
+#  DESTRUCTIF : désinstalle Kubernetes des nœuds avec "kubeadm reset".
 #
-#  Les VMs sont conservées, mais le cluster Kubernetes est supprimé (etcd,
-#  certificats, Pods...). Utile après un "kubeadm init" raté, ou pour
-#  s'entraîner à recréer un cluster sans recréer les VMs.
+#  Les machines sont conservées, mais le cluster est supprimé (etcd,
+#  certificats, Pods...). Un instantané etcd est d'abord rapatrié sur votre
+#  poste (reset_backup=true par défaut). Ne sont JAMAIS supprimés : les données
+#  Longhorn (LONGHORN_DATA_PATH), les exports NFS, les sauvegardes
+#  (/var/backups/k8s-lab), les anciennes données etcd (/var/lib/etcd.before-*),
+#  les paquets installés et les utilisateurs.
 #
 #    cd ansible
-#    ansible-playbook -i inventories/<inventaire>.ini reset.yml -e reset_confirm=true
+#    ansible-playbook -i inventories/<inventaire>.ini reset.yml -e reset_confirm=<nom-du-cluster>
 #
+#  ./k8s-lab uninstall le fait pour vous (mode existing) après confirmation.
 #  Relancez ensuite site.yml pour recréer le cluster.
 # =============================================================================
 
@@ -17,14 +21,15 @@
   become: true
   gather_facts: false
   vars:
-    reset_confirm: false
+    reset_confirm: ""
+    reset_backup: true
   tasks:
-    - name: Refuse to run without an explicit confirmation
+    - name: Refuse to run without an explicit confirmation (the cluster name)
       ansible.builtin.assert:
-        that: reset_confirm | bool
+        that: reset_confirm in [k8s_cluster_name, 'true']
         fail_msg: >-
-          This playbook DESTROYS the Kubernetes cluster on every host of the inventory.
-          Re-run it with -e reset_confirm=true if this is really what you want.
+          This playbook DESTROYS the Kubernetes cluster "{{ k8s_cluster_name }}" on every host of the inventory.
+          Re-run it with -e reset_confirm={{ k8s_cluster_name }} if this is really what you want.
         quiet: true
       run_once: true
       delegate_to: localhost
@@ -35,6 +40,20 @@
         path: /usr/bin/kubeadm
       register: reset_kubeadm
 
+    - name: Check whether this control-plane runs etcd
+      ansible.builtin.stat:
+        path: /etc/kubernetes/manifests/etcd.yaml
+      register: reset_etcd_manifest
+
+    - name: Save a last etcd snapshot on the workstation before the reset
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: snapshot.yml
+      when:
+        - reset_backup | bool
+        - inventory_hostname == groups['control_plane'][0]
+        - reset_etcd_manifest.stat.exists
+
     - name: Run kubeadm reset
       ansible.builtin.command:
         argv: [kubeadm, reset, --force]
@@ -42,14 +61,12 @@
       changed_when: true
 
     # kubeadm reset ne nettoie pas le réseau des Pods : sans cela, un nouveau
-    # cluster obtiendrait d'autres sous-réseaux Flannel que ceux de cni0.
+    # cluster hériterait d'interfaces et de routes de l'ancien CNI.
     - name: Delete the network interfaces left by the CNI
       ansible.builtin.command:
         argv: [ip, link, delete, "{{ item }}"]
         removes: /sys/class/net/{{ item }}
-      loop:
-        - cni0
-        - flannel.1
+      loop: [cni0, flannel.1, vxlan.calico, tunl0, cilium_host, cilium_net, cilium_vxlan, cilium_geneve, kube-ipvs0]
 
     - name: Remove the files that kubeadm reset keeps
       ansible.builtin.file:
@@ -59,11 +76,22 @@
         - /etc/cni/net.d
         - /var/lib/cni
         - /run/flannel
+        - /var/run/calico
+        - /var/lib/calico
         - /etc/kubernetes/addons
+        - /etc/kubernetes/manifests/kube-vip.yaml
         - /etc/kubernetes/kubeadm-config.yaml
         - /root/.kube
+        - "{{ k8s_lab_marker }}"
 
     - name: Remove the kubeconfig of the SSH user
       ansible.builtin.file:
         path: "~{{ ansible_user | default('root') }}/.kube/config"
         state: absent
+
+    - name: Remind what was kept
+      ansible.builtin.debug:
+        msg: >-
+          Kept on {{ inventory_hostname }}: installed packages, containerd, users, firewall rules,
+          Longhorn data ({{ longhorn_disk.mount_path | default('/var/lib/longhorn') }}), /var/backups/k8s-lab.
+          A reboot clears the remaining eBPF/iptables state of the CNI.

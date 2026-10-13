@@ -1,0 +1,99 @@
+---
+# =============================================================================
+#  Mise à niveau d'UN nœud (procédure officielle kubeadm) :
+#  https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/
+#    1. kubeadm à la version cible
+#    2. kubeadm upgrade apply (1er control-plane) / kubeadm upgrade node (autres)
+#    3. drain du nœud
+#    4. kubelet et kubectl à la version cible, redémarrage du kubelet
+#    5. uncordon, attente de l'état Ready, vérification de la version
+# =============================================================================
+
+- name: Read the kubelet version of the node
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, "{{ inventory_hostname }}",
+           -o, "jsonpath={.status.nodeInfo.kubeletVersion}"]
+  delegate_to: "{{ k8s_control_plane_host }}"
+  register: upgrade_node_version
+  changed_when: false
+
+- name: Upgrade the node
+  when: upgrade_node_version.stdout != 'v' ~ upgrade_target_version
+  block:
+    - name: Point the package repository to Kubernetes {{ upgrade_target_minor }}
+      ansible.builtin.include_tasks: "repo-{{ k8s_os_family }}.yml"
+
+    - name: Install kubeadm {{ upgrade_target_version }}
+      ansible.builtin.include_tasks: "packages-{{ k8s_os_family }}.yml"
+      vars:
+        upgrade_packages: [kubeadm]
+
+    - name: Show the upgrade plan computed by kubeadm (first control-plane)
+      ansible.builtin.command:
+        argv: [kubeadm, upgrade, plan, "v{{ upgrade_target_version }}"]
+      register: upgrade_kubeadm_plan
+      changed_when: false
+      when: inventory_hostname == k8s_control_plane_host
+
+    - name: Display the kubeadm plan
+      ansible.builtin.debug:
+        msg: "{{ upgrade_kubeadm_plan.stdout_lines | default([]) }}"
+      when: inventory_hostname == k8s_control_plane_host
+
+    - name: Upgrade the control-plane components (kubeadm upgrade apply)
+      ansible.builtin.command:
+        argv: [kubeadm, upgrade, apply, "v{{ upgrade_target_version }}", --yes]
+      changed_when: true
+      when: inventory_hostname == k8s_control_plane_host
+
+    - name: Upgrade the local kubelet configuration (kubeadm upgrade node)
+      ansible.builtin.command:
+        argv: [kubeadm, upgrade, node]
+      changed_when: true
+      when: inventory_hostname != k8s_control_plane_host
+
+    - name: Drain the node (Pods rescheduled elsewhere, PodDisruptionBudgets respected)
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, drain, "{{ inventory_hostname }}",
+               --ignore-daemonsets, --delete-emptydir-data, "--timeout={{ upgrade_drain_timeout }}"]
+      delegate_to: "{{ k8s_control_plane_host }}"
+      changed_when: true
+
+    - name: Install kubelet and kubectl {{ upgrade_target_version }}
+      ansible.builtin.include_tasks: "packages-{{ k8s_os_family }}.yml"
+      vars:
+        upgrade_packages: [kubelet, kubectl]
+
+    - name: Restart the kubelet
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+  always:
+    - name: Uncordon the node (even after a failure, to keep it schedulable)
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, uncordon, "{{ inventory_hostname }}"]
+      delegate_to: "{{ k8s_control_plane_host }}"
+      register: upgrade_uncordon
+      changed_when: "'uncordoned' in upgrade_uncordon.stdout"
+      failed_when: false
+
+- name: Wait until the node is Ready with the target version
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, node, "{{ inventory_hostname }}", -o,
+           "jsonpath={.status.nodeInfo.kubeletVersion} {.status.conditions[?(@.type=='Ready')].status}"]
+  delegate_to: "{{ k8s_control_plane_host }}"
+  register: upgrade_node_state
+  until: upgrade_node_state.stdout == 'v' ~ upgrade_target_version ~ ' True'
+  retries: 60
+  delay: 5
+  changed_when: false
+
+- name: Check etcd after upgrading a control-plane
+  ansible.builtin.include_role:
+    name: etcd
+    tasks_from: health.yml
+    apply:
+      delegate_to: "{{ k8s_control_plane_host }}"
+  when: inventory_hostname in groups['control_plane']

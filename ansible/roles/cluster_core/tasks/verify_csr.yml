@@ -1,0 +1,22 @@
+---
+# Tous les certificats de service des kubelets du lab doivent être approuvés
+# (sinon kubectl logs/exec et metrics-server échouent).
+- name: Wait until no kubelet serving certificate request is pending
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, csr,
+           -o, "jsonpath={range .items[?(@.spec.signerName=='kubernetes.io/kubelet-serving')]}{.spec.username}={.status.conditions[0].type}{'\\n'}{end}"]
+  register: cluster_core_csr_list
+  changed_when: false
+  until: cluster_core_csr_list.stdout_lines | select('match', '^system:node:[^=]+=$') | list | length == 0
+  retries: 30
+  delay: 10
+
+- name: Check that every node has an approved serving certificate
+  ansible.builtin.assert:
+    that: >-
+      groups['k8s_cluster'] | map('regex_replace', '^(.*)$', 'system:node:\1=Approved')
+      | difference(cluster_core_csr_list.stdout_lines) | length == 0
+    fail_msg: >-
+      Some kubelet serving certificates are not approved: {{ cluster_core_csr_list.stdout_lines }}.
+      Check kubelet-csr-approver: kubectl -n kube-system logs deploy/kubelet-csr-approver
+    quiet: true

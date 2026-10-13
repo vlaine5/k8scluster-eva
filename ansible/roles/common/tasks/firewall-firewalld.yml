@@ -1,0 +1,29 @@
+---
+# firewalld (souvent actif sur Rocky Linux) : il n'est PAS désactivé. On ouvre
+# uniquement les ports de Kubernetes, du CNI et des addons, et on déclare le
+# réseau des Pods et des Services dans la zone « trusted » pour que le trafic
+# routé entre Pods ne soit pas rejeté. Validation réelle requise :
+# docs/security.md#pare-feu
+- name: Open the Kubernetes, CNI and addon ports (firewalld)
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ common_firewall_ports }}"
+
+- name: Trust the Pod and Service networks (firewalld)
+  ansible.posix.firewalld:
+    source: "{{ item }}"
+    zone: trusted
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ [pod_cidr, service_cidr] | select | list }}"
+
+- name: Allow masquerading of Pod traffic leaving the node (firewalld)
+  ansible.posix.firewalld:
+    masquerade: true
+    permanent: true
+    immediate: true
+    state: enabled

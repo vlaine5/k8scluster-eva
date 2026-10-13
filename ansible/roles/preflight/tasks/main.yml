@@ -1,0 +1,161 @@
+---
+# =============================================================================
+#  Contrôles préalables, EN LECTURE SEULE : rien n'est modifié sur les nœuds.
+#
+#  Lancé au début de site.yml (tous les modes kubeadm) et seul par
+#  preflight.yml (mode existing : avant de demander confirmation).
+#  En mode existing, les contrôles sont stricts : une machine qui appartient
+#  déjà à un autre cluster, un port occupé ou un logiciel en conflit arrête tout.
+# =============================================================================
+
+- name: Read the facts needed by the checks
+  ansible.builtin.set_fact:
+    preflight_os_name: "{{ preflight_os_names[ansible_facts['distribution']] | default(ansible_facts['distribution'] | lower) }}"
+    preflight_os_version: >-
+      {{ ansible_facts['distribution_version'] if ansible_facts['distribution'] == 'Ubuntu'
+         else ansible_facts['distribution_major_version'] }}
+
+- name: Look up the node operating system in the supported matrix
+  ansible.builtin.set_fact:
+    preflight_os_entry: "{{ lab_lock.os[preflight_os_name][preflight_os_version] | default({}) }}"
+
+- name: Check that the operating system is supported
+  ansible.builtin.assert:
+    that:
+      - preflight_os_entry | length > 0
+      - ansible_facts['service_mgr'] == "systemd"
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+      ({{ ansible_facts['service_mgr'] }}). Supported: {{ preflight_supported | join(', ') }} with systemd
+      (config/versions.yaml, docs/os.md).
+    quiet: true
+  vars:
+    preflight_supported: >-
+      {{ lab_lock.os | dict2items | map(attribute='key')
+         | zip(lab_lock.os.values() | map('list') | map('join', '/')) | map('join', ' ') | list }}
+
+- name: Check that the operating system matches NODE_OS / NODE_OS_VERSION
+  ansible.builtin.assert:
+    that:
+      - preflight_os_name == node_os_expected.name
+      - preflight_os_version == node_os_expected.version | string
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ preflight_os_name }} {{ preflight_os_version }} but the configuration expects
+      {{ node_os_expected.name }} {{ node_os_expected.version }} (NODE_OS / NODE_OS_VERSION).
+      Fix the configuration, or use NODE_OS=auto in existing mode.
+    quiet: true
+  when: node_os_expected.name | default('auto') not in ['auto', 'platform']
+
+- name: Warn about an experimental operating system
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: {{ preflight_os_name }} {{ preflight_os_version }} is EXPERIMENTAL in this framework (docs/compatibility.md)."
+  when: preflight_os_entry.status | default('') == 'experimental'
+
+- name: Check the CPU architecture
+  ansible.builtin.assert:
+    that: ansible_facts['architecture'] in ['x86_64', 'aarch64']
+    fail_msg: "Unsupported CPU architecture on {{ inventory_hostname }}: {{ ansible_facts['architecture'] }}"
+    quiet: true
+
+# Kubernetes >= 1.35 refuse par défaut de démarrer sur un hôte en cgroup v1.
+- name: Check that the node uses cgroup v2
+  ansible.builtin.stat:
+    path: /sys/fs/cgroup/cgroup.controllers
+  register: preflight_cgroup_v2
+
+- name: Fail with an explanation when cgroup v2 is not available
+  ansible.builtin.assert:
+    that: preflight_cgroup_v2.stat.exists or not (preflight_require_cgroup_v2 | bool)
+    fail_msg: >-
+      {{ inventory_hostname }} does not use cgroup v2, required by Kubernetes {{ kubernetes_minor_version }}.
+      Use a supported distribution or enable the unified hierarchy (systemd.unified_cgroup_hierarchy=1).
+    quiet: true
+
+- name: Check CPU and memory against kubeadm requirements
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['processor_vcpus'] | int >= (2 if inventory_hostname in groups['control_plane'] else 1)
+      - ansible_facts['memtotal_mb'] | int >= (preflight_min_memory_cp_mb if inventory_hostname in groups['control_plane'] else preflight_min_memory_worker_mb)
+    fail_msg: >-
+      {{ inventory_hostname }} has {{ ansible_facts['processor_vcpus'] }} vCPU and {{ ansible_facts['memtotal_mb'] }} MiB:
+      a control-plane needs >= 2 vCPU and {{ preflight_min_memory_cp_mb }} MiB, a worker >= {{ preflight_min_memory_worker_mb }} MiB.
+    quiet: true
+
+- name: Measure the free space for container images and etcd
+  ansible.builtin.command:
+    argv: [df, --output=avail, -BG, /var]
+  register: preflight_var_free
+  changed_when: false
+
+- name: Warn when /var has little free space
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: only {{ preflight_var_free.stdout_lines[-1] | trim }} free on /var
+      (images, logs and etcd need ~{{ preflight_min_var_free_gb }}G).
+  when: preflight_var_free.stdout_lines[-1] | trim | regex_replace('G$', '') | int < preflight_min_var_free_gb
+
+# --- Unicité des nœuds (exigée par kubeadm : VMs clonées !) -----------------------
+- name: Read the machine product UUID
+  ansible.builtin.slurp:
+    src: /sys/class/dmi/id/product_uuid
+  register: preflight_product_uuid
+  become: true
+  failed_when: false
+
+- name: Record identity facts
+  ansible.builtin.set_fact:
+    preflight_identity:
+      hostname: "{{ inventory_hostname }}"
+      uuid: "{{ (preflight_product_uuid.content | default('') | b64decode | trim) or inventory_hostname }}"
+      mac: "{{ ansible_facts['default_ipv4']['macaddress'] | default(inventory_hostname) }}"
+
+- name: Check that MAC addresses and product UUIDs are unique in the cluster
+  ansible.builtin.assert:
+    that:
+      - groups['k8s_cluster'] | map('extract', hostvars, ['preflight_identity', 'uuid']) | unique | length == groups['k8s_cluster'] | length
+      - groups['k8s_cluster'] | map('extract', hostvars, ['preflight_identity', 'mac']) | unique | length == groups['k8s_cluster'] | length
+    fail_msg: >-
+      Several nodes share the same product_uuid or MAC address (cloned VMs without a new identity?).
+      kubeadm requires unique values: regenerate the clone identity (new MAC, new SMBIOS UUID).
+    quiet: true
+  run_once: true
+
+# --- Appartenance à un cluster existant ------------------------------------------
+- name: Look for an existing Kubernetes installation
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/kubernetes/kubelet.conf
+    - /etc/kubernetes/admin.conf
+    - "{{ k8s_lab_marker }}"
+  register: preflight_k8s_files
+
+- name: Read the k8s-lab marker
+  ansible.builtin.slurp:
+    src: "{{ k8s_lab_marker }}"
+  register: preflight_marker
+  when: preflight_k8s_files.results[2].stat.exists
+  become: true
+
+- name: Classify the node
+  ansible.builtin.set_fact:
+    preflight_in_cluster: "{{ preflight_k8s_files.results[0].stat.exists or preflight_k8s_files.results[1].stat.exists }}"
+    preflight_marker_cluster: "{{ (preflight_marker.content | default('') | b64decode | from_yaml or {}).cluster | default('') }}"
+
+- name: Refuse a node that belongs to another Kubernetes cluster
+  ansible.builtin.assert:
+    that: >-
+      not preflight_in_cluster
+      or preflight_marker_cluster == k8s_cluster_name
+      or (preflight_marker_cluster | length == 0 and lab_platform != 'existing')
+    fail_msg: >-
+      {{ inventory_hostname }} already belongs to a Kubernetes cluster
+      {{ ('(' ~ preflight_marker_cluster ~ ')') if preflight_marker_cluster else 'that was not deployed by this lab' }}.
+      Nothing was changed. The framework never runs "kubeadm reset" automatically: if this node must be reused,
+      back up its data, then follow docs/existing-mode.md#reutiliser-une-machine (explicit reset procedure).
+    quiet: true
+
+# --- Contrôles stricts du mode existing ------------------------------------------
+- name: Run the strict checks of the existing mode
+  ansible.builtin.include_tasks: existing.yml
+  when: lab_platform == 'existing' or preflight_strict | bool

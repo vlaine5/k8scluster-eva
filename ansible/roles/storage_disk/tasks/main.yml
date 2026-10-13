@@ -1,0 +1,110 @@
+---
+# =============================================================================
+#  Disque dédié à Longhorn : identification, contrôles, formatage SÛR, montage.
+#
+#  Règles de sécurité (jamais contournées) :
+#    1. le disque est identifié de façon déterministe (numéro de série posé par
+#       Terraform/Vagrant, adresse SCSI, ou chemin explicite) ; jamais deviné ;
+#    2. un disque monté, partitionné, ou portant la moindre signature
+#       (système de fichiers, LVM, RAID, table de partitions) n'est JAMAIS formaté ;
+#    3. un disque vide n'est formaté que s'il a été créé par le lab (numéro de
+#       série k8slab-longhorn) ou si LONGHORN_DISK_ALLOW_FORMAT=true ;
+#    4. un disque déjà formaté par le lab (étiquette k8slab-longhorn) est
+#       simplement monté : relancer le déploiement est sans risque.
+# =============================================================================
+
+- name: List the block devices
+  ansible.builtin.command:
+    argv: [lsblk, --json, --bytes, --output, "NAME,PATH,SERIAL,HCTL,TYPE,SIZE,MOUNTPOINTS,FSTYPE,LABEL"]
+  register: storage_disk_lsblk
+  changed_when: false
+
+- name: Resolve the explicit device path (symbolic links /dev/disk/by-*)
+  ansible.builtin.stat:
+    path: "{{ storage_disk_device }}"
+    get_checksum: false
+  register: storage_disk_resolved
+  when: storage_disk_device | length > 0
+
+- name: Identify the dedicated disk
+  ansible.builtin.set_fact:
+    storage_disk_candidates: >-
+      {{ storage_disk_disks | selectattr('path', 'equalto', storage_disk_real) | list
+         if storage_disk_device | length > 0 else
+         storage_disk_disks | rejectattr(storage_disk_match_key, 'none')
+         | selectattr(storage_disk_match_key, 'match', storage_disk_match_regex) | list }}
+  vars:
+    storage_disk_disks: "{{ (storage_disk_lsblk.stdout | from_json).blockdevices | selectattr('type', 'equalto', 'disk') | list }}"
+    storage_disk_real: >-
+      {{ (storage_disk_resolved.stat.lnk_source | default(storage_disk_device))
+         if (storage_disk_resolved.stat.islnk | default(false)) else storage_disk_device }}
+
+- name: Fail when the dedicated disk is not found exactly once
+  ansible.builtin.assert:
+    that: storage_disk_candidates | length == 1
+    fail_msg: >-
+      {{ inventory_hostname }}: {{ storage_disk_candidates | length }} disk(s) match the Longhorn disk selector
+      ({{ storage_disk_device or (storage_disk_match_key ~ ' ~ ' ~ storage_disk_match_regex) }}). Exactly one is required:
+      nothing was formatted. Check the VM disks (lsblk -o NAME,SERIAL,HCTL,SIZE) and docs/storage-longhorn.md.
+    quiet: true
+
+- name: Describe the selected disk
+  ansible.builtin.set_fact:
+    storage_disk_selected: "{{ storage_disk_candidates | first }}"
+    storage_disk_created_by_lab: "{{ (storage_disk_candidates | first).serial | default('') == storage_disk_serial }}"
+
+- name: Read the signatures present on the disk (no change)
+  ansible.builtin.command:
+    argv: [wipefs, --no-act, --noheadings, --output, "TYPE,LABEL", "{{ storage_disk_selected.path }}"]
+  register: storage_disk_signatures
+  changed_when: false
+
+- name: Classify the disk
+  ansible.builtin.set_fact:
+    storage_disk_is_ours: >-
+      {{ storage_disk_selected.fstype | default('') == storage_disk_fstype and storage_disk_selected.label | default('') == storage_disk_label }}
+    storage_disk_is_blank: >-
+      {{ storage_disk_signatures.stdout | trim | length == 0
+         and storage_disk_selected.children | default([]) | length == 0
+         and (storage_disk_selected.mountpoints | default([]) | select | list | length == 0) }}
+
+- name: Refuse a disk that contains data
+  ansible.builtin.assert:
+    that: storage_disk_is_ours or storage_disk_is_blank
+    fail_msg: >-
+      {{ inventory_hostname }}: {{ storage_disk_selected.path }} is NOT empty
+      (signatures: {{ storage_disk_signatures.stdout_lines | join(', ') or 'partitions/mounts' }}).
+      It was NOT formatted. Use an empty disk, or clean it yourself after checking its content.
+    quiet: true
+
+- name: Refuse to format a blank disk without authorization
+  ansible.builtin.assert:
+    that: storage_disk_is_ours or storage_disk_created_by_lab or longhorn_disk.allow_format | default(false) | bool
+    fail_msg: >-
+      {{ inventory_hostname }}: {{ storage_disk_selected.path }} is empty but was not created by the lab. Formatting it requires
+      LONGHORN_DISK_ALLOW_FORMAT=true in .env (explicit authorization). Nothing was formatted.
+    quiet: true
+
+- name: Format the blank dedicated disk with label {{ storage_disk_label }}
+  community.general.filesystem:
+    dev: "{{ storage_disk_selected.path }}"
+    fstype: "{{ storage_disk_fstype }}"
+    opts: "-L {{ storage_disk_label }}"
+    force: false
+  when: not storage_disk_is_ours
+
+- name: Create the Longhorn data directory
+  ansible.builtin.file:
+    path: "{{ longhorn_disk.mount_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0711"
+
+- name: Mount the dedicated disk on the Longhorn data directory (and in /etc/fstab)
+  ansible.posix.mount:
+    path: "{{ longhorn_disk.mount_path }}"
+    src: "LABEL={{ storage_disk_label }}"
+    fstype: "{{ storage_disk_fstype }}"
+    opts: defaults,nofail
+    state: mounted

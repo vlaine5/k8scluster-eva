@@ -1,0 +1,26 @@
+---
+# Calico : opérateur Tigera installé par son chart Helm officiel, qui crée la
+# ressource Installation (pool d'IP = pod_cidr, encapsulation = CNI_MODE).
+# https://docs.tigera.io/calico/latest/getting-started/kubernetes/helm
+- name: Install Calico (tigera-operator {{ k8s_cni_version }})
+  kubernetes.core.helm:
+    name: calico
+    chart_ref: "{{ lab_lock.components.calico.chart }}"
+    chart_repo_url: "{{ lab_lock.components.calico.repo }}"
+    chart_version: "{{ k8s_cni_version }}"
+    release_namespace: tigera-operator
+    create_namespace: true
+    values: "{{ lookup('ansible.builtin.template', 'calico-values.yaml.j2') | from_yaml }}"
+    binary_path: "{{ cni_helm_binary }}"
+    kubeconfig: "{{ cni_kubeconfig }}"
+    wait: true
+    timeout: 10m0s
+
+- name: Wait for the Calico components to be available (tigerastatus)
+  ansible.builtin.command:
+    argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", wait, --for=condition=Available, --timeout=30s, tigerastatus/calico]
+  register: cni_calico_status
+  until: cni_calico_status.rc == 0
+  retries: 40
+  delay: 15
+  changed_when: false

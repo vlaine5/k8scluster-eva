@@ -1,0 +1,11 @@
+---
+- name: Point the Kubernetes DNF repository to the target minor version
+  ansible.builtin.yum_repository:
+    name: kubernetes
+    description: Kubernetes v{{ upgrade_target_minor }} (pkgs.k8s.io)
+    baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ upgrade_target_minor }}/rpm/"
+    gpgkey: "https://pkgs.k8s.io/core:/stable:/v{{ upgrade_target_minor }}/rpm/repodata/repomd.xml.key"
+    gpgcheck: true
+    repo_gpgcheck: true
+    enabled: true
+    exclude: [kubelet, kubeadm, kubectl, cri-tools, kubernetes-cni]

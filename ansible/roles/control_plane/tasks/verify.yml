@@ -45,6 +45,37 @@
   changed_when: false
   when: cni != "none"
 
+- name: Check the kubelet serving certificates
+  ansible.builtin.include_role:
+    name: cluster_core
+    tasks_from: verify_csr.yml
+  when:
+    - kubelet_serving_certs == 'signed'
+    - cni != "none"
+
+- name: Check etcd health and quorum
+  ansible.builtin.include_role:
+    name: etcd
+    tasks_from: health.yml
+
+- name: Check that etcd has one member per control-plane
+  ansible.builtin.assert:
+    that: etcd_members | length == groups['control_plane'] | length
+    fail_msg: >-
+      etcd has {{ etcd_members | length }} member(s) for {{ groups['control_plane'] | length }} control-plane(s):
+      {{ etcd_members | map(attribute='name') | list }}. See docs/high-availability.md#etcd.
+    quiet: true
+
+- name: Check that the API answers on its stable endpoint ({{ k8s_api_endpoint }})
+  ansible.builtin.uri:
+    url: "https://{{ k8s_api_endpoint }}/readyz"
+    validate_certs: false
+    return_content: true
+  register: control_plane_endpoint_readyz
+  until: control_plane_endpoint_readyz.status == 200
+  retries: 12
+  delay: 5
+
 - name: Show the nodes
   ansible.builtin.command:
     argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, nodes, -o, wide]

@@ -1,0 +1,50 @@
+---
+# =============================================================================
+#  Adresse stable de l'API Kubernetes : VIP portée par kube-vip (ARP, pod
+#  statique sur chaque control-plane, élection d'un leader).
+#
+#  À NE PAS confondre avec MetalLB / Cilium LB : ceux-ci servent les Services
+#  applicatifs et ne fonctionnent qu'une fois Kubernetes démarré ; la VIP de
+#  l'API doit exister AVANT (kubeadm init l'utilise déjà).
+#
+#  Particularité kubeadm >= 1.29 : pendant "kubeadm init", admin.conf n'a pas
+#  encore ses droits ; kube-vip utilise alors super-admin.conf sur le 1er
+#  control-plane, puis repasse sur admin.conf (api_endpoint_phase=after-init).
+#  https://kube-vip.io/docs/installation/static/
+# =============================================================================
+
+- name: Find the network interface that carries the node IP
+  ansible.builtin.set_fact:
+    api_endpoint_interface: >-
+      {{ ansible_facts['interfaces'] | map('regex_replace', '-', '_')
+         | map('extract', ansible_facts) | selectattr('ipv4', 'defined')
+         | selectattr('ipv4.address', 'equalto', k8s_node_ip) | map(attribute='device') | first | default('') }}
+
+- name: Check that the interface of the node IP was found
+  ansible.builtin.assert:
+    that: api_endpoint_interface | length > 0
+    fail_msg: "No interface of {{ inventory_hostname }} carries {{ k8s_node_ip }}: kube-vip cannot announce the VIP."
+    quiet: true
+
+- name: Choose the kubeconfig used by kube-vip
+  ansible.builtin.set_fact:
+    api_endpoint_kubeconfig: >-
+      {{ '/etc/kubernetes/super-admin.conf'
+         if (inventory_hostname == k8s_control_plane_host and api_endpoint_phase == 'before-init')
+         else '/etc/kubernetes/admin.conf' }}
+
+- name: Create the static Pod directory
+  ansible.builtin.file:
+    path: /etc/kubernetes/manifests
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the kube-vip static Pod
+  ansible.builtin.template:
+    src: kube-vip.yaml.j2
+    dest: /etc/kubernetes/manifests/kube-vip.yaml
+    owner: root
+    group: root
+    mode: "0600"

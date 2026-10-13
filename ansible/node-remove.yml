@@ -1,0 +1,112 @@
+---
+# =============================================================================
+#  Retrait CONTRÔLÉ d'un nœud (worker ou control-plane) du cluster.
+#  La VM / la machine n'est PAS supprimée (Terraform : réduisez ensuite
+#  WORKER_COUNT / CONTROL_PLANE_COUNT ; mode existing : retirez-la de l'inventaire).
+#
+#    1. contrôles : confirmation (nom du nœud), quorum etcd APRÈS retrait
+#       (un control-plane ne peut être retiré que s'il en reste un nombre impair
+#       suffisant et que tous les autres membres etcd sont sains)
+#    2. instantané etcd (control-plane)
+#    3. drain, kubeadm reset sur le nœud (retire son membre etcd), suppression de l'objet Node
+#
+#    cd ansible
+#    ansible-playbook -i inventories/<inv>.ini node-remove.yml -e node_remove=k8s-worker-3 -e node_remove_confirm=k8s-worker-3
+# =============================================================================
+
+- name: Check the removal request
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  vars:
+    node_remove: ""
+    node_remove_confirm: ""
+  tasks:
+    - name: Refuse to run without an explicit confirmation (the node name, twice)
+      ansible.builtin.assert:
+        that:
+          - node_remove | length > 0
+          - node_remove_confirm == node_remove
+          - node_remove in groups['k8s_cluster']
+          - node_remove != k8s_control_plane_host or groups['control_plane'] | length > 1
+        fail_msg: >-
+          Give the node to remove twice: -e node_remove=<node> -e node_remove_confirm=<node>
+          (it must be in the inventory; the only control-plane cannot be removed).
+        quiet: true
+
+    - name: Check etcd before removing a control-plane
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: health.yml
+      when: node_remove in groups['control_plane']
+
+    - name: Check that etcd keeps a quorum after the removal
+      ansible.builtin.assert:
+        that: (etcd_members | length) - 1 >= ((etcd_members | length) // 2) + 1 or (etcd_members | length) - 1 in [1]
+        fail_msg: >-
+          Removing {{ node_remove }} would leave {{ (etcd_members | length) - 1 }} etcd member(s) out of
+          {{ etcd_members | length }}: the quorum would be lost. Add a control-plane first, or rebuild the cluster.
+        quiet: true
+      when: node_remove in groups['control_plane']
+
+    - name: Warn about an even number of control-planes after the removal
+      ansible.builtin.debug:
+        msg: >-
+          {{ (etcd_members | length) - 1 }} control-planes will remain: an even number does not improve fault tolerance.
+          Remove a second one or add one back to return to an odd count (1, 3, 5).
+      when:
+        - node_remove in groups['control_plane']
+        - ((etcd_members | length) - 1) % 2 == 0
+
+    - name: Take an etcd snapshot before the removal
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: snapshot.yml
+      when: node_remove in groups['control_plane']
+
+    - name: Drain the node
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, drain, "{{ node_remove }}",
+               --ignore-daemonsets, --delete-emptydir-data, --timeout=10m]
+      changed_when: true
+
+- name: Reset Kubernetes on the removed node
+  hosts: "{{ node_remove | default('none') }}"
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Run kubeadm reset (removes the etcd member of a control-plane)
+      ansible.builtin.command:
+        argv: [kubeadm, reset, --force]
+        removes: /etc/kubernetes/kubelet.conf
+      changed_when: true
+
+    - name: Remove kube-vip and the lab marker
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes/manifests/kube-vip.yaml
+        - "{{ k8s_lab_marker }}"
+
+- name: Delete the Node object and check the cluster
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Delete the Node object
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, delete, node, "{{ node_remove }}", --ignore-not-found]
+      changed_when: true
+
+    - name: Check etcd after the removal
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: health.yml
+      when: node_remove in groups['control_plane']
+
+    - name: Explain the next step
+      ansible.builtin.debug:
+        msg: >-
+          {{ node_remove }} left the cluster. Its machine still exists: lower WORKER_COUNT / CONTROL_PLANE_COUNT and
+          run make deploy (Terraform deletes the VM only after this removal), or remove it from your inventory.

@@ -1,0 +1,69 @@
+---
+# =============================================================================
+#  Mise à jour du SYSTÈME des nœuds (correctifs de sécurité, noyau), un nœud à
+#  la fois : drain -> mise à jour des paquets -> redémarrage si nécessaire ->
+#  attente Ready -> uncordon. Les paquets Kubernetes restent gelés (hold /
+#  exclude) : leur mise à jour passe par upgrade.yml.
+#  Changement de version MAJEURE de distribution : remplacement contrôlé des
+#  nœuds (docs/upgrades.md#systeme), jamais une mise à niveau en place.
+#
+#    cd ansible
+#    ansible-playbook -i inventories/<inv>.ini os-update.yml -e os_update_confirm=<nom-du-cluster>
+# =============================================================================
+
+- name: Check the request
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  vars:
+    os_update_confirm: ""
+  tasks:
+    - name: Refuse to run without an explicit confirmation (the cluster name)
+      ansible.builtin.assert:
+        that: os_update_confirm == k8s_cluster_name
+        fail_msg: "Re-run with -e os_update_confirm={{ k8s_cluster_name }} (nodes are drained and may reboot)."
+        quiet: true
+
+    - name: Check that every node is Ready before starting
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, wait, --for=condition=Ready, nodes, --all, --timeout=60s]
+      changed_when: false
+
+- name: Update the operating system, one node at a time (control-planes first)
+  hosts: control_plane:workers
+  become: true
+  gather_facts: true
+  serial: 1
+  tasks:
+    - name: Check the etcd quorum before touching a control-plane
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: health.yml
+        apply:
+          delegate_to: "{{ k8s_control_plane_host if inventory_hostname != k8s_control_plane_host else groups['control_plane'] | last }}"
+      when: inventory_hostname in groups['control_plane']
+
+    - name: Drain the node
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, drain, "{{ inventory_hostname }}",
+               --ignore-daemonsets, --delete-emptydir-data, --timeout=10m]
+      delegate_to: "{{ k8s_control_plane_host }}"
+      changed_when: true
+      when: groups['k8s_cluster'] | length > 1
+
+    - name: Update the packages (Kubernetes packages stay held)
+      ansible.builtin.include_tasks: tasks/os-update-{{ k8s_os_family }}.yml
+
+    - name: Uncordon the node
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, uncordon, "{{ inventory_hostname }}"]
+      delegate_to: "{{ k8s_control_plane_host }}"
+      register: os_update_uncordon
+      changed_when: "'uncordoned' in os_update_uncordon.stdout"
+
+    - name: Wait until the node is Ready again
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, wait, --for=condition=Ready, "node/{{ inventory_hostname }}",
+               --timeout=600s]
+      delegate_to: "{{ k8s_control_plane_host }}"
+      changed_when: false

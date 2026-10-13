@@ -1,0 +1,7 @@
+---
+# Rocky Linux : DNF.
+- name: Install the base packages (DNF)
+  ansible.builtin.dnf:
+    name: "{{ common_packages_redhat }}"
+    state: present
+    update_cache: true
