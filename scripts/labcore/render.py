@@ -291,7 +291,7 @@ def matrix_markdown(catalog: Catalog) -> str:
                 notes.append(f"- **{addon.id} / {PLATFORM_LABELS[platform]}** : {support.note}")
                 cell += f"<sup>{len(notes)}</sup>"
             cells.append(cell)
-        validated = ", ".join(addon.validated) or "non"
+        validated = ", ".join(v.removeprefix("ci-") for v in addon.validated) or "non"
         rows.append(f"| [{addon.id}](addons.md#{addon.id}) | " + " | ".join(cells) + f" | {validated} |")
     legend = ("Légende : ✅ supporté · ⚙️ supporté avec configuration particulière · 🧪 expérimental · "
               "❌ non supporté. « Testé en CI » indique les environnements où l'addon est réellement "
@@ -449,6 +449,8 @@ def catalog_details_markdown(catalog: Catalog) -> str:
         rows.append(("Données", "oui : jamais supprimées automatiquement" if addon.stateful else "non"))
         rows.append(("Test fonctionnel", f"`addons/{addon.id}/{data['tests']}`" if data.get("tests") else
                      "via les addons qui l'utilisent"))
+        rows.append(("Testé en CI", ", ".join(v.removeprefix("ci-") for v in addon.validated)
+                     or "non (validé statiquement : rendu et helm template)"))
         notes = data.get("remove", {}).get("notes")
         if notes:
             rows.append(("Désinstallation", " ".join(str(notes).split())))

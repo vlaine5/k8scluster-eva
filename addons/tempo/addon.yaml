@@ -9,7 +9,7 @@ components: [tempo]
 integrates_with: [monitoring, prometheus-operator-crds]
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 200, memory_mb: 512}
 install:
   namespace: tracing

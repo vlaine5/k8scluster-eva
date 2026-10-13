@@ -9,7 +9,7 @@ internal: true
 components: [prometheus-operator-crds]
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 install:
   namespace: monitoring
   pod_security: privileged

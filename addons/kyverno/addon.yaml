@@ -11,7 +11,7 @@ integrates_with: [prometheus-operator-crds]
 settings: [KYVERNO_POLICY_MODE]
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 300, memory_mb: 768}
 install:
   namespace: kyverno

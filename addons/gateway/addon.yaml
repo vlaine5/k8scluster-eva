@@ -13,7 +13,7 @@ depends_on: [gateway-controller]
 integrates_with: [cert-manager, external-dns]
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 install:
   namespace: gateway-system
   pod_security: restricted

@@ -12,7 +12,7 @@ settings: [LOGGING_RETENTION, LOGGING_PERSISTENCE, LOGGING_NODE_LOGS]
 stateful: true
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 300, memory_mb: 768}
 install:
   namespace: logging

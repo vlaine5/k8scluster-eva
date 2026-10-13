@@ -18,7 +18,7 @@ support:
   minikube: unsupported
   eks: unsupported
   attach: {status: unsupported, note: "Modifierait la configuration du CNI."}
-validated: []
+validated: [ci-kind]
 install:
   manifests: [servicemonitor.yaml.j2]
 health:

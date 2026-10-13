@@ -18,7 +18,7 @@ support:
   kind: {status: configured, note: "Composants du control-plane non supervisés (liés à 127.0.0.1 par kind)."}
   minikube: {status: configured, note: "Composants du control-plane non supervisés."}
   eks: {status: configured, note: "Control-plane géré par AWS : non supervisé."}
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 600, memory_mb: 1536}
 install:
   namespace: monitoring

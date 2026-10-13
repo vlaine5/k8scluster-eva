@@ -18,7 +18,7 @@ support:
     note: >-
       Avec Cilium existant : cni.exclusive=false et socketLB.hostNamespaceOnly=true doivent déjà être réglés.
       k3s/RKE2 : chemins CNI non standard, non pris en charge.
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 500, memory_mb: 1024}
 install:
   namespace: istio-system

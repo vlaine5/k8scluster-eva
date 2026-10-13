@@ -14,7 +14,7 @@ support:
   kind: {status: experimental, note: "Utilise le noyau de l'hôte Docker."}
   minikube: experimental
   eks: experimental
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 200, memory_mb: 512}
 install:
   namespace: kube-system

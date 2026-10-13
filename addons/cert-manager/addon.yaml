@@ -11,7 +11,7 @@ settings: [CERT_MANAGER_ISSUER, ACME_EMAIL, ACME_ENVIRONMENT, ACME_DNS01_PROVIDE
 secrets: [CLOUDFLARE_API_TOKEN, RFC2136_TSIG_SECRET]
 support:
   default: supported
-validated: []
+validated: [ci-attach, ci-kind]
 resources: {cpu_m: 100, memory_mb: 256}
 install:
   namespace: cert-manager

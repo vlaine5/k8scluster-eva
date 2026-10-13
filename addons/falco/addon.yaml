@@ -15,7 +15,7 @@ support:
   minikube: experimental
   eks: experimental
   attach: {status: configured, note: "Le noyau des nœuds (BTF) est vérifié au démarrage de Falco."}
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 200, memory_mb: 512}
 install:
   namespace: falco

@@ -160,6 +160,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Namespace | `monitoring` (Pod Security : privileged) |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
+| Testé en CI | kind |
 | Désinstallation | Les CRD sont conservées (les supprimer effacerait toutes les règles et cibles de supervision). |
 
 ### cilium-gateway
@@ -175,6 +176,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `GATEWAY_CONTROLLER=cilium` |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
+| Testé en CI | kind |
 | Désinstallation | Désactiver la Gateway Cilium = changer GATEWAY_CONTROLLER puis redéployer (mise à jour de la configuration de Cilium). |
 
 ### cilium-lb
@@ -190,6 +192,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `LOADBALANCER_PROVIDER=cilium-l2\|cilium-bgp` |
 | Données | non |
 | Test fonctionnel | `addons/cilium-lb/tests/test.yml` |
+| Testé en CI | kind |
 | Désinstallation | Les Services LoadBalancer existants perdent leur IP externe. |
 
 ### envoy-gateway
@@ -206,6 +209,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `GATEWAY_CONTROLLER=envoy-gateway` |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Les CRD d'Envoy Gateway sont conservées (helm uninstall ne supprime pas les CRD). |
 
 ### gateway-api-crds
@@ -218,6 +222,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Composants | gateway-api |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
+| Testé en CI | kind |
 | Désinstallation | Les CRD ne sont JAMAIS supprimées automatiquement : les supprimer effacerait toutes les routes de toutes les applications. |
 
 ### metallb
@@ -235,6 +240,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `LOADBALANCER_PROVIDER=metallb` |
 | Données | non |
 | Test fonctionnel | `addons/metallb/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Les Services LoadBalancer existants perdent leur IP externe. |
 
 ### traefik
@@ -251,6 +257,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `GATEWAY_CONTROLLER=traefik` |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Les routes (HTTPRoute) des applications restent en place mais ne sont plus servies. |
 
 ### longhorn
@@ -269,6 +276,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Secrets (.env uniquement) | `LONGHORN_BACKUP_S3_ACCESS_KEY`, `LONGHORN_BACKUP_S3_SECRET_KEY` |
 | Données | oui : jamais supprimées automatiquement |
 | Test fonctionnel | `addons/longhorn/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Longhorn exige un drapeau de confirmation (deleting-confirmation-flag) pour se désinstaller : le framework ne le positionne JAMAIS. Les volumes et leurs données restent sur les disques. Procédure manuelle : docs/storage-longhorn.md#desinstallation |
 
 ### nfs-csi
@@ -286,6 +294,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Réglages (.env) | `NFS_SERVER`, `NFS_SHARE`, `NFS_VERSION`, `NFS_STORAGE_CLASS`, `NFS_RECLAIM_POLICY`, `NFS_MOUNT_OPTIONS`, `NFS_SUBDIR` |
 | Données | oui : jamais supprimées automatiquement |
 | Test fonctionnel | `addons/nfs-csi/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | helm uninstall du pilote uniquement. La StorageClass, les PV et les DONNÉES sur le NAS sont conservés. Les PVC existants ne pourront plus être montés tant que le pilote est absent. |
 
 ### snapshot-controller
@@ -299,6 +308,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Exige | any_addon : nfs-csi, longhorn |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Les CRD (et donc les instantanés) sont conservées. |
 
 ### cert-manager
@@ -315,6 +325,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Secrets (.env uniquement) | `CLOUDFLARE_API_TOKEN`, `RFC2136_TSIG_SECRET` |
 | Données | non |
 | Test fonctionnel | `addons/cert-manager/tests/test.yml` |
+| Testé en CI | attach, kind |
 | Désinstallation | Les CRD sont conservées (crds.keep=true) : supprimer les CRD supprimerait tous les certificats. Les Secrets TLS déjà émis restent valides jusqu'à leur expiration. |
 
 ### external-secrets
@@ -329,6 +340,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/external-secrets/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Les Secrets déjà synchronisés restent en place ; les CRD sont conservées. |
 
 ### gateway
@@ -343,6 +355,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | cert-manager, external-dns |
 | Données | non |
 | Test fonctionnel | `addons/gateway/tests/test.yml` |
+| Testé en CI | kind |
 | Désinstallation | Supprimer la Gateway coupe toutes les routes qui y sont attachées. |
 
 ### metrics-server
@@ -356,6 +369,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Namespace | `kube-system` (Pod Security : baseline) |
 | Données | non |
 | Test fonctionnel | `addons/metrics-server/tests/test.yml` |
+| Testé en CI | kind |
 
 ### reloader
 
@@ -368,6 +382,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Namespace | `reloader` (Pod Security : restricted) |
 | Données | non |
 | Test fonctionnel | `addons/reloader/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 
 ### argo-cd
 
@@ -383,6 +398,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Secrets (.env uniquement) | `ARGOCD_REPO_USERNAME`, `ARGOCD_REPO_PASSWORD` |
 | Données | non |
 | Test fonctionnel | `addons/argo-cd/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Désinstaller Argo CD ne supprime PAS les applications qu'il a déployées (les ressources restent). Les CRD Application/ApplicationSet sont conservées. |
 
 ### descheduler
@@ -397,6 +413,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Exige | min_workers : 2 |
 | Données | non |
 | Test fonctionnel | `addons/descheduler/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 
 ### external-dns
 
@@ -413,6 +430,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Secrets (.env uniquement) | `RFC2136_TSIG_SECRET`, `CLOUDFLARE_API_TOKEN`, `PIHOLE_PASSWORD` |
 | Données | non |
 | Test fonctionnel | `addons/external-dns/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Les enregistrements DNS déjà créés sont conservés (upsert-only). |
 
 ### falco
@@ -428,6 +446,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Exige | kernel_min : 5.8 |
 | Données | non |
 | Test fonctionnel | `addons/falco/tests/test.yml` |
+| Testé en CI | kind |
 
 ### hubble
 
@@ -442,6 +461,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `ENABLE_HUBBLE=true` |
 | Données | non |
 | Test fonctionnel | `addons/hubble/tests/test.yml` |
+| Testé en CI | kind |
 | Désinstallation | Désactiver Hubble = ENABLE_HUBBLE=false puis redéployer (mise à jour de la configuration de Cilium). |
 
 ### istio
@@ -456,6 +476,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | prometheus-operator-crds, gateway-api-crds |
 | Données | non |
 | Test fonctionnel | `addons/istio/tests/test.yml` |
+| Testé en CI | kind |
 | Désinstallation | Retirez d'abord le label istio-injection de vos namespaces puis redémarrez les Pods concernés. |
 
 ### keda
@@ -470,6 +491,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/keda/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 
 ### kyverno
 
@@ -484,6 +506,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Réglages (.env) | `KYVERNO_POLICY_MODE` |
 | Données | non |
 | Test fonctionnel | `addons/kyverno/tests/test.yml` |
+| Testé en CI | kind |
 | Désinstallation | Désinstaller supprime les webhooks d'admission : les politiques cessent de s'appliquer. |
 
 ### logging
@@ -499,6 +522,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Réglages (.env) | `LOGGING_RETENTION`, `LOGGING_PERSISTENCE`, `LOGGING_NODE_LOGS` |
 | Données | oui : jamais supprimées automatiquement |
 | Test fonctionnel | `addons/logging/tests/test.yml` |
+| Testé en CI | kind |
 | Désinstallation | Le PVC de Loki (si persistance) est conservé. |
 
 ### monitoring
@@ -517,6 +541,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Secrets (.env uniquement) | `GRAFANA_ADMIN_PASSWORD` |
 | Données | oui : jamais supprimées automatiquement |
 | Test fonctionnel | `addons/monitoring/tests/test.yml` |
+| Testé en CI | kind |
 | Désinstallation | Les PVC de Prometheus/Grafana (si persistance) sont conservés. |
 
 ### node-feature-discovery
@@ -531,6 +556,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/node-feature-discovery/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 
 ### opentelemetry-collector
 
@@ -544,6 +570,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | tempo, logging, monitoring, prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/opentelemetry-collector/tests/test.yml` |
+| Testé en CI | kind |
 
 ### tempo
 
@@ -557,6 +584,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | monitoring, prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/tempo/tests/test.yml` |
+| Testé en CI | kind |
 
 ### tetragon
 
@@ -571,6 +599,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Exige | kernel_min : 5.4 |
 | Données | non |
 | Test fonctionnel | `addons/tetragon/tests/test.yml` |
+| Testé en CI | kind |
 
 ### trivy-operator
 
@@ -584,6 +613,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/trivy-operator/tests/test.yml` |
+| Testé en CI | kind |
 
 ### velero
 
@@ -600,5 +630,6 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Secrets (.env uniquement) | `VELERO_S3_ACCESS_KEY`, `VELERO_S3_SECRET_KEY` |
 | Données | non |
 | Test fonctionnel | `addons/velero/tests/test.yml` |
+| Testé en CI | non (validé statiquement : rendu et helm template) |
 | Désinstallation | Les sauvegardes dans le bucket S3 ne sont JAMAIS supprimées par le framework. |
 <!-- END GENERATED: details -->

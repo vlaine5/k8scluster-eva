@@ -10,7 +10,7 @@ integrates_with: [prometheus-operator-crds]
 support:
   default: supported
   kind: {status: experimental, note: "Analyses lentes (téléchargement de la base de vulnérabilités)."}
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 200, memory_mb: 512}
 install:
   namespace: trivy-system

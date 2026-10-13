@@ -24,7 +24,7 @@ support:
   minikube: {status: unsupported, note: "Le CNI de minikube n'est pas configurable finement."}
   eks: {status: unsupported, note: "EKS utilise AWS VPC CNI."}
   attach: {status: unsupported, note: "Modifierait la configuration du CNI."}
-validated: []
+validated: [ci-kind]
 health:
   - {kind: GatewayClass, name: cilium}
 remove:
