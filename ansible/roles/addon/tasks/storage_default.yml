@@ -24,5 +24,11 @@
   ansible.builtin.command:
     argv: "{{ addon_kubectl + ['annotate', 'storageclass', lab.default_storage_class.name, '--overwrite',
            'storageclass.kubernetes.io/is-default-class=true'] }}"
-  register: addon_storage_default
-  changed_when: "'annotated' in addon_storage_default.stdout"
+  # kubectl annotate répond « annotated » même sans changement : n'agir que si nécessaire.
+  when: >-
+    (addon_storage_classes.stdout | from_json)['items']
+    | selectattr('metadata.name', 'equalto', lab.default_storage_class.name)
+    | map(attribute='metadata.annotations', default={}) | map('dict2items') | flatten
+    | selectattr('key', 'equalto', 'storageclass.kubernetes.io/is-default-class')
+    | selectattr('value', 'equalto', 'true') | list | length == 0
+  changed_when: true
