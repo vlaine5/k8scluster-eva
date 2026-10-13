@@ -213,8 +213,8 @@ jobs:
           make kubeconfig
           make test
 
-      - name: Diagnostic en cas d'échec
-        if: failure()
+      - name: Diagnostic en cas d'échec (ou d'annulation)
+        if: failure() || cancelled()
         run: |
           export KUBECONFIG="$PWD/.kube/config"
           kubectl get nodes -o wide || true
@@ -292,8 +292,8 @@ jobs:
             exit 1
           fi
 
-      - name: Diagnostic en cas d'échec
-        if: failure()
+      - name: Diagnostic en cas d'échec (ou d'annulation)
+        if: failure() || cancelled()
         run: |
           export KUBECONFIG="$PWD/.kube/config"
           kubectl get nodes -o wide || true
@@ -346,8 +346,8 @@ jobs:
       - name: make test (nginx + Service + DNS)
         run: make test
 
-      - name: Diagnostic en cas d'échec
-        if: failure()
+      - name: Diagnostic en cas d'échec (ou d'annulation)
+        if: failure() || cancelled()
         run: |
           minikube logs --profile k8s-lab --length 200 || true
 
@@ -411,8 +411,8 @@ jobs:
           fi
           kubectl --kubeconfig "$EXISTING_KUBECONFIG" get nodes
 
-      - name: Diagnostic en cas d'échec
-        if: failure()
+      - name: Diagnostic en cas d'échec (ou d'annulation)
+        if: failure() || cancelled()
         run: |
           kubectl --kubeconfig "$EXISTING_KUBECONFIG" get pods -A -o wide
           kubectl --kubeconfig "$EXISTING_KUBECONFIG" get events -A --sort-by=.lastTimestamp | tail -n 60
