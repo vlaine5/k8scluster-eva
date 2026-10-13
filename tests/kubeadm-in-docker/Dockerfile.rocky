@@ -6,8 +6,9 @@
 #  systemd, la pile PAM « account » de sshd refuse les connexions par clé (« Access
 #  denied ... by PAM account configuration »), alors que la même image fonctionne hors
 #  conteneur (vérifié en chroot Rocky 9.8, OpenSSH 9.9). Mot de passe « * » au lieu de
-#  « !! » : sans PAM, sshd considère « ! » comme un compte verrouillé. Sans effet sur
-#  les vraies machines Rocky, que le framework ne modifie pas sur ce point.
+#  « !! » : sans PAM, sshd considère « ! » comme un compte verrouillé. Pour la même
+#  raison, sudo n'y consulte pas la pile PAM « account » (Defaults !pam_acct_mgmt).
+#  Sans effet sur les vraies machines Rocky, que le framework ne modifie pas sur ce point.
 # =============================================================================
 ARG BASE_IMAGE=docker.io/rockylinux/rockylinux:9
 FROM ${BASE_IMAGE}
@@ -19,7 +20,8 @@ RUN dnf install -y -q systemd openssh-server sudo python3 ca-certificates iprout
     && dnf clean all
 
 RUN useradd -m -s /bin/bash -G wheel "${NODE_USER}" \
-    && echo "${NODE_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${NODE_USER}" && chmod 0440 "/etc/sudoers.d/${NODE_USER}" \
+    && printf '%s ALL=(ALL) NOPASSWD:ALL\nDefaults:%s !pam_acct_mgmt\n' "${NODE_USER}" "${NODE_USER}" > "/etc/sudoers.d/${NODE_USER}" \
+    && chmod 0440 "/etc/sudoers.d/${NODE_USER}" && visudo -cq \
     && install -d -m 0700 -o "${NODE_USER}" -g "${NODE_USER}" "/home/${NODE_USER}/.ssh" \
     && rm -f /etc/ssh/ssh_host_* \
     && rm -f /usr/lib/tmpfiles.d/systemd-nologin.conf \
