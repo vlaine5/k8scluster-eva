@@ -1,0 +1,28 @@
+id: falco
+name: Falco
+description: >-
+  Détection d'événements de sécurité à l'exécution (shell dans un conteneur, lecture de fichiers
+  sensibles...) par eBPF (pilote modern_ebpf). Exige un noyau >= 5.8 avec BTF.
+category: security
+phase: 8
+components: [falco]
+conflicts_with: [tetragon]
+requires:
+  kernel_min: "5.8"
+support:
+  default: supported
+  kind: {status: experimental, note: "Utilise le noyau de l'hôte Docker."}
+  minikube: experimental
+  eks: experimental
+  attach: {status: configured, note: "Le noyau des nœuds (BTF) est vérifié au démarrage de Falco."}
+validated: []
+resources: {cpu_m: 200, memory_mb: 512}
+install:
+  namespace: falco
+  pod_security: privileged
+  releases:
+    - {name: falco, component: falco, namespace: falco, values: values.yaml.j2, timeout: 10m}
+health:
+  - {kind: DaemonSet, namespace: falco, name: falco}
+tests: tests/test.yml
+docs: docs/security.md#falco-et-tetragon

@@ -1,0 +1,39 @@
+id: monitoring
+name: Prometheus, Grafana et Alertmanager
+description: >-
+  kube-prometheus-stack : supervision des nœuds, Pods et composants Kubernetes, alertes
+  essentielles, tableaux de bord Grafana. Dimensionné pour un homelab ; persistance optionnelle.
+category: observability
+phase: 8
+components: [kube-prometheus-stack]
+depends_on: [prometheus-operator-crds]
+integrates_with: [gateway, nfs-csi, longhorn]
+settings: [MONITORING_RETENTION, MONITORING_PERSISTENCE, MONITORING_STORAGE_SIZE_GB, GRAFANA_EXPOSE]
+secrets: [GRAFANA_ADMIN_PASSWORD]
+requires:
+  storage_class: true
+stateful: true
+support:
+  default: supported
+  kind: {status: configured, note: "Composants du control-plane non supervisés (liés à 127.0.0.1 par kind)."}
+  minikube: {status: configured, note: "Composants du control-plane non supervisés."}
+  eks: {status: configured, note: "Control-plane géré par AWS : non supervisé."}
+validated: []
+resources: {cpu_m: 600, memory_mb: 1536}
+install:
+  namespace: monitoring
+  pod_security: privileged
+  secrets: [grafana-admin]
+  releases:
+    - {name: kube-prometheus-stack, component: kube-prometheus-stack, namespace: monitoring, values: values.yaml.j2, timeout: 15m, skip_crds: true}
+  manifests: [httproute.yaml.j2]
+health:
+  - {kind: Deployment, namespace: monitoring, name: kube-prometheus-stack-operator}
+  - {kind: Deployment, namespace: monitoring, name: kube-prometheus-stack-grafana}
+  - {kind: StatefulSet, namespace: monitoring, name: prometheus-kube-prometheus-stack-prometheus}
+  - {kind: StatefulSet, namespace: monitoring, name: alertmanager-kube-prometheus-stack-alertmanager}
+  - {kind: DaemonSet, namespace: monitoring, name: kube-prometheus-stack-prometheus-node-exporter}
+tests: tests/test.yml
+remove:
+  notes: "Les PVC de Prometheus/Grafana (si persistance) sont conservés."
+docs: docs/observability.md

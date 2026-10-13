@@ -1,0 +1,27 @@
+id: tetragon
+name: Tetragon
+description: >-
+  Observabilité de sécurité et application de politiques à l'exécution par eBPF (projet Cilium) :
+  exécutions de processus, accès fichiers, connexions réseau. Exige un noyau avec BTF.
+category: security
+phase: 8
+components: [tetragon]
+conflicts_with: [falco]
+requires:
+  kernel_min: "5.4"
+support:
+  default: supported
+  kind: {status: experimental, note: "Utilise le noyau de l'hôte Docker."}
+  minikube: experimental
+  eks: experimental
+validated: []
+resources: {cpu_m: 200, memory_mb: 512}
+install:
+  namespace: kube-system
+  releases:
+    - {name: tetragon, component: tetragon, namespace: kube-system, values: values.yaml.j2, timeout: 10m}
+  manifests: [tracingpolicy.yaml.j2]
+health:
+  - {kind: DaemonSet, namespace: kube-system, name: tetragon}
+tests: tests/test.yml
+docs: docs/security.md#falco-et-tetragon

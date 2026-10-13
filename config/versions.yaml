@@ -1,0 +1,397 @@
+# =============================================================================
+#  k8s-lab — VERROUILLAGE DES VERSIONS (source unique de vérité)
+# =============================================================================
+#
+#  Toutes les versions de composants installés par le framework sont ici :
+#  Kubernetes, containerd, images des OS, CNI, Gateway API, charts Helm des
+#  addons. Aucune autre partie du code ne fixe de version (le script
+#  scripts/check-config-sync.sh le vérifie pour les copies indispensables).
+#
+#  Règles :
+#    - jamais "latest" ni branche "master" : une version exacte, vérifiée ;
+#    - les manifestes téléchargés ont un SHA-256 ;
+#    - "kube_min" vient du champ kubeVersion du chart ou de la doc officielle ;
+#    - "kube_tested" = versions mineures de Kubernetes que le PROJET amont
+#      déclare tester. Hors de cette liste : avertissement (ou erreur avec
+#      COMPATIBILITY_POLICY=strict).
+#
+#  Vérifier les mises à jour disponibles (sans rien installer) :
+#    make versions-check
+#  Procédure de mise à jour : docs/upgrades.md
+#
+#  Versions vérifiées le 2026-10-13 auprès des sources officielles (index
+#  des dépôts Helm, tags Git des projets, miroirs des distributions).
+# =============================================================================
+schema_version: 1
+checked_on: "2026-10-13"
+
+# -----------------------------------------------------------------------------
+#  Kubernetes (kubeadm) — dépôt officiel pkgs.k8s.io
+# -----------------------------------------------------------------------------
+kubernetes:
+  # Version par défaut (doit être égale à KUBERNETES_VERSION de config/lab.env).
+  # 1.37.1 est la dernière version publiée, mais Cilium 1.20, Envoy Gateway 1.9
+  # et la plupart des contrôleurs ne la déclarent pas encore testée : 1.36.5 est
+  # la version la plus récente compatible avec TOUT le catalogue (docs/versions.md).
+  version: "1.36.5"
+  # Mineures que le framework sait installer (dépôts pkgs.k8s.io existants).
+  supported_minors: ["1.34", "1.35", "1.36", "1.37"]
+  # Dernier patch connu de chaque mineure (make versions-check les compare).
+  latest_patches:
+    "1.34": "1.34.12"
+    "1.35": "1.35.9"
+    "1.36": "1.36.5"
+    "1.37": "1.37.1"
+  # Images kindest/node publiées avec kind v0.33.0 (épinglées par digest).
+  kind_node_images:
+    "1.37": "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5"
+    "1.36": "kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed"
+    "1.35": "kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0"
+    "1.34": "kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d"
+
+# containerd 2.x (paquet containerd.io du dépôt Docker, apt et dnf).
+containerd:
+  version: "2.3.*"
+  latest_seen: "2.4.1"
+
+# Helm installé sur le 1er control-plane (CNI Calico/Cilium, approbateur de CSR).
+helm:
+  version: "v4.3.0"
+  sha256:
+    amd64: "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
+    arm64: "31c5794dd55c66a51e6b7d2e2ac7a114ae8b1de41ff1d9ba51748ac973b06a08"
+
+# VIP de l'API Kubernetes en mode HA (pod statique sur chaque control-plane).
+kube_vip:
+  version: "v1.2.4"
+  image: "ghcr.io/kube-vip/kube-vip"
+
+# -----------------------------------------------------------------------------
+#  Systèmes d'exploitation des nœuds (modes VM : vagrant, terraform)
+# -----------------------------------------------------------------------------
+#  status : supported | experimental        validated : ci | none
+#  x86_64_level : niveau de micro-architecture minimal exigé par la distribution.
+#  ATTENTION : Rocky Linux 10 (comme RHEL 10) exige x86-64-v3 (AVX2) : il ne
+#  démarre PAS sur un CPU Westmere (Xeon X5690) ni avec NODE_CPU_TYPE=x86-64-v2-AES.
+os:
+  ubuntu:
+    "24.04":
+      codename: noble
+      family: debian
+      status: supported
+      validated: ci
+      kernel: "6.8"
+      x86_64_level: v1
+      ssh_user: ubuntu
+      vagrant_box: bento/ubuntu-24.04
+      image_url: https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-amd64.img
+      image_sha256: 6a81c37564db9b1ee84e141922625e1d7c5b389b99bb3c572e0243607d5bb4d2
+    "26.04":
+      codename: resolute
+      family: debian
+      status: experimental
+      validated: ci
+      kernel: "7.0"
+      x86_64_level: v1
+      ssh_user: ubuntu
+      vagrant_box: bento/ubuntu-26.04
+      image_url: https://cloud-images.ubuntu.com/releases/resolute/release-20260927/ubuntu-26.04-server-cloudimg-amd64.img
+      image_sha256: 8800651811af9a85465ad1d552add729947bb16488dddb4a9b5305a3d97332b2
+  debian:
+    "12":
+      codename: bookworm
+      family: debian
+      status: supported
+      validated: ci
+      kernel: "6.1"
+      x86_64_level: v1
+      ssh_user: debian
+      vagrant_box: bento/debian-12
+      # Image "generic" (noyau complet : iscsi_tcp, dm_crypt... requis par Longhorn).
+      # Debian publie des SHA-512 : ce SHA-256 a été calculé après vérification du SHA512SUMS officiel.
+      image_url: https://cloud.debian.org/images/cloud/bookworm/20261006-2623/debian-12-generic-amd64-20261006-2623.qcow2
+      image_sha256: 412eee91cefc75316edda6fcc3b3f735857c54e31dbb6ed635cfe2cfa092c9ad
+    "13":
+      codename: trixie
+      family: debian
+      status: supported
+      validated: ci
+      kernel: "6.12"
+      x86_64_level: v1
+      ssh_user: debian
+      vagrant_box: bento/debian-13
+      image_url: https://cloud.debian.org/images/cloud/trixie/20261001-2618/debian-13-generic-amd64-20261001-2618.qcow2
+      image_sha256: 07f9fe05fe7cb1702047034830150baddd66c8be06e233bb226c84aa8a275263
+  rocky:
+    "9":
+      codename: el9
+      family: redhat
+      status: supported
+      validated: ci
+      kernel: "5.14"
+      x86_64_level: v2
+      ssh_user: rocky
+      vagrant_box: bento/rockylinux-9
+      image_url: https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2
+      image_sha256: 92c206cc6f790c61583247eefe87890f8828420662c17cacf247cec78ab4eec8
+    "10":
+      codename: el10
+      family: redhat
+      status: experimental
+      validated: ci
+      kernel: "6.12"
+      x86_64_level: v3
+      ssh_user: rocky
+      vagrant_box: bento/rockylinux-10
+      image_url: https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2
+      image_sha256: 9fc9e9ff16888bb68ac39b0392e25c9c92684d50c85f1cce6ab549363bbc4b48
+
+# -----------------------------------------------------------------------------
+#  Composants (CNI, Gateway API, addons)
+# -----------------------------------------------------------------------------
+#  type : helm (dépôt HTTP) | helm-oci | manifest (URL + SHA-256)
+components:
+  # --- CNI -------------------------------------------------------------------
+  flannel:
+    type: manifest
+    version: "v0.28.10"
+    url: "https://github.com/flannel-io/flannel/releases/download/{version}/kube-flannel.yml"
+    sha256:
+      v0.28.9: "1c06a15a771009c263bdb1f51c928af46f7606fe969f3963652167938d536aaa"
+      v0.28.10: "393bdbce53eb50c8eb97dd513b218518b7d6e7985dc7b889be956e112a711084"
+    docs: https://github.com/flannel-io/flannel
+  calico:
+    type: helm
+    repo: https://docs.tigera.io/calico/charts
+    chart: tigera-operator
+    version: "v3.33.0"
+    kube_min: "1.31"
+    docs: https://docs.tigera.io/calico/latest/getting-started/kubernetes/requirements
+  cilium:
+    type: helm
+    repo: https://helm.cilium.io
+    chart: cilium
+    version: "1.20.2"
+    kube_min: "1.33"
+    kube_tested: ["1.33", "1.34", "1.35", "1.36"]
+    kernel_min: "5.10"
+    gateway_api: "v1.6.1"
+    docs: https://docs.cilium.io/en/v1.20/network/kubernetes/compatibility/
+
+  # --- Gateway API (CRD officielles, SHA-256 des manifestes de release) -------
+  gateway-api:
+    type: manifest
+    url: "https://github.com/kubernetes-sigs/gateway-api/releases/download/{version}/{channel}-install.yaml"
+    sha256:
+      v1.6.1:
+        standard: "24d931f22abd8e40c973264319ead7cfa09d0fb7716b7ab1ee2ff174cb063a73"
+        experimental: "d7fa77650e4ef28fca0411536fcb5e237deb4d50301cfded3be49d9a1b7bbd02"
+      v1.6.2:
+        standard: "faede450fa178126aba41337737b97d351ebe87d93c910237ce1e072d1ca40d9"
+        experimental: "fb03263a4a720cc7abe9b36ede6e308b558d2d725a39595d664f34fe37f9c503"
+    latest_seen: "v1.6.3"
+  traefik:
+    type: helm
+    repo: https://traefik.github.io/charts
+    chart: traefik
+    version: "41.7.1"
+    app_version: "v3.7.14"
+    kube_min: "1.25"
+    gateway_api: "v1.6.2"
+    docs: https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-gateway/
+  envoy-gateway:
+    type: helm-oci
+    chart: oci://docker.io/envoyproxy/gateway-helm
+    crds_chart: oci://docker.io/envoyproxy/gateway-crds-helm
+    version: "v1.9.2"
+    kube_min: "1.33"
+    kube_tested: ["1.33", "1.34", "1.35", "1.36"]
+    gateway_api: "v1.6.1"
+    docs: https://gateway.envoyproxy.io/news/releases/matrix/
+
+  # --- Réseau -------------------------------------------------------------------
+  metallb:
+    type: helm
+    repo: https://metallb.github.io/metallb
+    chart: metallb
+    version: "0.16.1"
+    kube_min: "1.19"
+  external-dns:
+    type: helm
+    repo: https://kubernetes-sigs.github.io/external-dns
+    chart: external-dns
+    version: "1.23.0"
+    app_version: "0.23.0"
+
+  # --- Stockage -----------------------------------------------------------------
+  csi-driver-nfs:
+    type: helm
+    repo: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+    chart: csi-driver-nfs
+    version: "4.13.5"
+  longhorn:
+    type: helm
+    repo: https://charts.longhorn.io
+    chart: longhorn
+    version: "1.13.0"
+    kube_min: "1.34"
+    # OS vérifiés par le projet Longhorn pour la 1.13 (les autres : "non vérifié").
+    os_verified: ["ubuntu-26.04", "rocky-10"]
+    docs: https://longhorn.io/docs/1.13.0/best-practices/
+  snapshot-controller:
+    type: manifest
+    version: "v8.7.0"
+    base_url: "https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/{version}"
+    files:
+      client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml: "75e6565aac2c0f2949ed13ea884bbaa388cb7be576b558b709cf1168e011828d"
+      client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml: "895a3c1e73b60f06a0deb566dd123d01bdf1b2efc5d5ff5231ff8bbcf42dafc7"
+      client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml: "b032116e987fb1d7d93cec7d942833adeb9d95c9bdc7e00c10b280c2fe4a6c33"
+      deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml: "99c4ac480b6c9563be0d85599e29cc7b68b25a82d250b0e789726727551e8d38"
+      deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml: "54b9342a7433c377b83a671babf416660078a716ec2e63f658a77aa629de5581"
+
+  # --- Services d'infrastructure ---------------------------------------------------
+  cert-manager:
+    type: helm
+    repo: https://charts.jetstack.io
+    chart: cert-manager
+    version: "v1.21.2"
+    kube_min: "1.22"
+  metrics-server:
+    type: helm
+    repo: https://kubernetes-sigs.github.io/metrics-server
+    chart: metrics-server
+    version: "3.14.0"
+    app_version: "0.9.0"
+  kubelet-csr-approver:
+    type: helm
+    repo: https://postfinance.github.io/kubelet-csr-approver
+    chart: kubelet-csr-approver
+    version: "1.2.15"
+  external-secrets:
+    type: helm
+    repo: https://charts.external-secrets.io
+    chart: external-secrets
+    version: "2.12.0"
+    kube_min: "1.19"
+  reloader:
+    type: helm
+    repo: https://stakater.github.io/stakater-charts
+    chart: reloader
+    version: "2.2.18"
+
+  # --- Plateforme ---------------------------------------------------------------------
+  argo-cd:
+    type: helm
+    repo: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    version: "10.10.3"
+    app_version: "v3.5.5"
+    kube_min: "1.25"
+  prometheus-operator-crds:
+    type: helm
+    repo: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-operator-crds
+    version: "32.0.1"
+    app_version: "v0.94.1"
+  kube-prometheus-stack:
+    type: helm
+    repo: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    version: "92.3.1"
+    kube_min: "1.25"
+  loki:
+    type: helm
+    # Le chart Loki est maintenu dans grafana-community depuis 2026.
+    repo: https://grafana-community.github.io/helm-charts
+    chart: loki
+    version: "18.15.1"
+    app_version: "3.7.8"
+  alloy:
+    type: helm
+    repo: https://grafana.github.io/helm-charts
+    chart: alloy
+    version: "1.13.1"
+    app_version: "v1.20.1"
+  tempo:
+    type: helm
+    repo: https://grafana-community.github.io/helm-charts
+    chart: tempo
+    version: "3.1.0"
+  opentelemetry-collector:
+    type: helm
+    repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    version: "0.176.0"
+    app_version: "0.162.0"
+  kyverno:
+    type: helm
+    repo: https://kyverno.github.io/kyverno
+    chart: kyverno
+    version: "3.9.1"
+    app_version: "v1.19.1"
+    kube_min: "1.25"
+  kyverno-policies:
+    type: helm
+    repo: https://kyverno.github.io/kyverno
+    chart: kyverno-policies
+    version: "3.9.1"
+  trivy-operator:
+    type: helm
+    repo: https://aquasecurity.github.io/helm-charts
+    chart: trivy-operator
+    version: "0.37.0"
+  falco:
+    type: helm
+    repo: https://falcosecurity.github.io/charts
+    chart: falco
+    version: "9.2.0"
+    kernel_min: "5.8"
+  tetragon:
+    type: helm
+    repo: https://helm.cilium.io
+    chart: tetragon
+    version: "1.7.1"
+    kernel_min: "5.4"
+  velero:
+    type: helm
+    repo: https://vmware-tanzu.github.io/helm-charts
+    chart: velero
+    version: "12.2.1"
+    app_version: "1.18.2"
+    kube_min: "1.16"
+    aws_plugin_image: "velero/velero-plugin-for-aws:v1.14.4"
+  keda:
+    type: helm
+    repo: https://kedacore.github.io/charts
+    chart: keda
+    version: "2.21.0"
+    kube_min: "1.23"
+  descheduler:
+    type: helm
+    repo: https://kubernetes-sigs.github.io/descheduler
+    chart: descheduler
+    version: "0.37.0"
+  node-feature-discovery:
+    type: helm
+    repo: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+    chart: node-feature-discovery
+    version: "0.19.0"
+  istio-base:
+    type: helm
+    repo: https://istio-release.storage.googleapis.com/charts
+    chart: base
+    version: "1.30.5"
+  istiod:
+    type: helm
+    repo: https://istio-release.storage.googleapis.com/charts
+    chart: istiod
+    version: "1.30.5"
+
+# -----------------------------------------------------------------------------
+#  Images utilitaires des tests (épinglées)
+# -----------------------------------------------------------------------------
+test_images:
+  busybox: "busybox:1.38"
+  curl: "curlimages/curl:8.17.0"
+  echo: "registry.k8s.io/e2e-test-images/agnhost:2.61"
+  nfs_server: "registry.k8s.io/volume-nfs:0.8"

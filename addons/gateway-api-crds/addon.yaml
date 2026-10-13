@@ -1,0 +1,27 @@
+# Définition d'un addon : voir docs/addon-development.md
+id: gateway-api-crds
+name: CRD Gateway API
+description: >-
+  Ressources standard de Kubernetes Gateway API (GatewayClass, Gateway, HTTPRoute, GRPCRoute,
+  ReferenceGrant...) à la version exigée par le contrôleur choisi. Ajoutées automatiquement.
+category: network
+phase: 5
+internal: true
+components: [gateway-api]
+stateful: false
+support:
+  default: supported
+  attach: {status: configured, note: "Si les CRD existent déjà, leur version (bundle-version) doit être compatible ; sinon refus."}
+validated: [ci-kind]
+install:
+  tasks: tasks/install.yml
+health:
+  - {kind: CustomResourceDefinition, name: gateways.gateway.networking.k8s.io}
+  - {kind: CustomResourceDefinition, name: httproutes.gateway.networking.k8s.io}
+  - {kind: CustomResourceDefinition, name: gatewayclasses.gateway.networking.k8s.io}
+remove:
+  notes: "Les CRD ne sont JAMAIS supprimées automatiquement : les supprimer effacerait toutes les routes de toutes les applications."
+upgrade_notes: >-
+  Une nouvelle version des CRD n'est appliquée qu'avec la version de contrôleur qui la supporte
+  (config/versions.yaml). Lisez les notes de version de Gateway API avant un changement de mineure.
+docs: docs/gateway-api.md

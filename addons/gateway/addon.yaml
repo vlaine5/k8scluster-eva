@@ -1,0 +1,27 @@
+id: gateway
+name: Gateway partagée du lab
+description: >-
+  Gateway « lab-gateway » (namespace gateway-system) partagée par les applications : écouteur HTTP
+  (redirection vers HTTPS si TLS), écouteur HTTPS avec certificat *.GATEWAY_DOMAIN émis par
+  cert-manager. Les applications y attachent leurs HTTPRoute depuis les namespaces étiquetés
+  gateway.k8s-lab.io/expose=true.
+category: network
+phase: 7
+internal: true
+components: []
+depends_on: [gateway-controller]
+integrates_with: [cert-manager, external-dns]
+support:
+  default: supported
+validated: []
+install:
+  namespace: gateway-system
+  pod_security: restricted
+  manifests: [gateway.yaml.j2]
+  tasks: tasks/install.yml
+health:
+  - {kind: Gateway, namespace: gateway-system, name: lab-gateway, condition: Programmed}
+tests: tests/test.yml
+remove:
+  notes: "Supprimer la Gateway coupe toutes les routes qui y sont attachées."
+docs: docs/gateway-api.md

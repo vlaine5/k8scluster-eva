@@ -1,0 +1,31 @@
+id: cilium-lb
+name: Cilium LB IPAM (L2 / BGP)
+description: >-
+  Attribution d'IP aux Services LoadBalancer par Cilium (CiliumLoadBalancerIPPool) et annonce en L2
+  (CiliumL2AnnouncementPolicy, cilium-l2) ou en BGP (CiliumBGPClusterConfig, cilium-bgp).
+  Jamais en même temps que MetalLB.
+category: network
+phase: 5
+components: [cilium]
+conflicts_with: [metallb]
+selected_by:
+  LOADBALANCER_PROVIDER: [cilium-l2, cilium-bgp]
+requires:
+  cni: [cilium]
+  kube_proxy_replacement: true
+  settings: [LOADBALANCER_IP_POOL]
+support:
+  default: supported
+  kind: {status: experimental, note: "Pool dans le réseau Docker « kind »."}
+  minikube: unsupported
+  eks: unsupported
+  attach: {status: unsupported, note: "Modifierait la configuration du CNI."}
+validated: []
+install:
+  manifests: [pool.yaml.j2]
+health:
+  - {kind: CiliumLoadBalancerIPPool, name: lab-pool}
+tests: tests/test.yml
+remove:
+  notes: "Les Services LoadBalancer existants perdent leur IP externe."
+docs: docs/loadbalancer.md

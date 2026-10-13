@@ -1,0 +1,24 @@
+id: keda
+name: KEDA
+description: >-
+  Autoscaling piloté par des événements (files de messages, cron, métriques Prometheus...) avec
+  ScaledObject / ScaledJob, y compris jusqu'à zéro réplica.
+category: autoscaling
+phase: 8
+components: [keda]
+integrates_with: [prometheus-operator-crds]
+conflicts_with: []
+support:
+  default: supported
+validated: []
+resources: {cpu_m: 200, memory_mb: 384}
+install:
+  namespace: keda
+  pod_security: restricted
+  releases:
+    - {name: keda, component: keda, namespace: keda, values: values.yaml.j2, timeout: 10m}
+health:
+  - {kind: Deployment, namespace: keda, name: keda-operator}
+  - {kind: Deployment, namespace: keda, name: keda-operator-metrics-apiserver}
+tests: tests/test.yml
+docs: docs/addons.md#keda

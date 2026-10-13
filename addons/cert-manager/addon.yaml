@@ -1,0 +1,33 @@
+id: cert-manager
+name: cert-manager
+description: >-
+  Émission et renouvellement automatiques de certificats TLS : CA interne (aucun domaine public
+  requis), ACME (Let's Encrypt) en HTTP-01 ou DNS-01, intégration Gateway API.
+category: security
+phase: 7
+components: [cert-manager]
+integrates_with: [prometheus-operator-crds, gateway-api-crds]
+settings: [CERT_MANAGER_ISSUER, ACME_EMAIL, ACME_ENVIRONMENT, ACME_DNS01_PROVIDER, RFC2136_NAMESERVER, RFC2136_TSIG_KEY_NAME, RFC2136_TSIG_ALGORITHM]
+secrets: [CLOUDFLARE_API_TOKEN, RFC2136_TSIG_SECRET]
+support:
+  default: supported
+validated: [ci-kind]
+resources: {cpu_m: 100, memory_mb: 256}
+install:
+  namespace: cert-manager
+  pod_security: restricted
+  secrets: [cert-manager-dns01-credentials]
+  releases:
+    - {name: cert-manager, component: cert-manager, namespace: cert-manager, values: values.yaml.j2, timeout: 10m}
+  manifests: [issuers.yaml.j2]
+health:
+  - {kind: Deployment, namespace: cert-manager, name: cert-manager}
+  - {kind: Deployment, namespace: cert-manager, name: cert-manager-webhook}
+  - {kind: Deployment, namespace: cert-manager, name: cert-manager-cainjector}
+tests: tests/test.yml
+remove:
+  notes: >-
+    Les CRD sont conservées (crds.keep=true) : supprimer les CRD supprimerait tous les certificats.
+    Les Secrets TLS déjà émis restent valides jusqu'à leur expiration.
+upgrade_notes: "Lisez https://cert-manager.io/docs/releases/ avant un changement de mineure."
+docs: docs/addons.md#cert-manager

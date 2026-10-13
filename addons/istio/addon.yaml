@@ -1,0 +1,29 @@
+id: istio
+name: Istio (service mesh)
+description: >-
+  Service mesh Istio en mode sidecar : identités SPIFFE, mTLS entre workloads, routage applicatif,
+  télémétrie. Activé namespace par namespace (label istio-injection=enabled). Avec Cilium, le
+  framework adapte la configuration de Cilium (socketLB.hostNamespaceOnly).
+category: mesh
+phase: 8
+components: [istio-base, istiod]
+integrates_with: [prometheus-operator-crds, gateway-api-crds]
+support:
+  default: supported
+  kind: experimental
+  minikube: experimental
+  attach: {status: configured, note: "Avec Cilium existant, socketLB.hostNamespaceOnly doit déjà être activé."}
+validated: []
+resources: {cpu_m: 500, memory_mb: 1024}
+install:
+  namespace: istio-system
+  pod_security: privileged
+  releases:
+    - {name: istio-base, component: istio-base, namespace: istio-system, values: values-base.yaml.j2, timeout: 5m}
+    - {name: istiod, component: istiod, namespace: istio-system, values: values.yaml.j2, timeout: 10m}
+health:
+  - {kind: Deployment, namespace: istio-system, name: istiod}
+tests: tests/test.yml
+remove:
+  notes: "Retirez d'abord le label istio-injection de vos namespaces puis redémarrez les Pods concernés."
+docs: docs/service-mesh.md

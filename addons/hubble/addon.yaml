@@ -1,0 +1,29 @@
+id: hubble
+name: Hubble (observabilité réseau Cilium)
+description: >-
+  Visibilité des flux réseau entre workloads (Hubble, Hubble Relay, interface web optionnelle),
+  métriques exportées vers Prometheus si la supervision est installée. Activé dans la
+  configuration de Cilium (ENABLE_HUBBLE) : CNI=cilium obligatoire.
+category: observability
+phase: 8
+components: [cilium]
+integrates_with: [monitoring]
+selected_by:
+  ENABLE_HUBBLE: ["true"]
+requires:
+  cni: [cilium]
+support:
+  default: supported
+  kind: experimental
+  minikube: unsupported
+  eks: unsupported
+  attach: {status: unsupported, note: "Modifierait la configuration du CNI."}
+validated: []
+install:
+  manifests: [servicemonitor.yaml.j2]
+health:
+  - {kind: Deployment, namespace: kube-system, name: hubble-relay}
+tests: tests/test.yml
+remove:
+  notes: "Désactiver Hubble = ENABLE_HUBBLE=false puis redéployer (mise à jour de la configuration de Cilium)."
+docs: docs/cni.md#hubble

@@ -1,0 +1,23 @@
+id: prometheus-operator-crds
+name: CRD Prometheus Operator
+description: >-
+  CRD ServiceMonitor, PodMonitor, PrometheusRule... installées AVANT les autres addons pour que
+  chacun puisse déclarer sa supervision quel que soit l'ordre d'installation.
+category: observability
+phase: 4
+internal: true
+components: [prometheus-operator-crds]
+support:
+  default: supported
+validated: []
+install:
+  namespace: monitoring
+  pod_security: privileged
+  releases:
+    - {name: prometheus-operator-crds, component: prometheus-operator-crds, namespace: monitoring, values: values.yaml.j2, timeout: 5m}
+health:
+  - {kind: CustomResourceDefinition, name: servicemonitors.monitoring.coreos.com}
+  - {kind: CustomResourceDefinition, name: prometheusrules.monitoring.coreos.com}
+remove:
+  notes: "Les CRD sont conservées (les supprimer effacerait toutes les règles et cibles de supervision)."
+docs: docs/observability.md

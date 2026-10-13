@@ -1,0 +1,33 @@
+id: velero
+name: Velero
+description: >-
+  Sauvegarde et restauration des ressources Kubernetes et, par copie de fichiers (Kopia), du contenu
+  des volumes, vers un stockage S3-compatible. N'assure PAS seul la cohérence d'une base de données
+  en cours d'écriture (voir docs/backup-dr.md).
+category: backup
+phase: 8
+components: [velero]
+integrates_with: [prometheus-operator-crds, snapshot-controller]
+requires:
+  settings: [VELERO_S3_URL, VELERO_BUCKET]
+  secrets: [VELERO_S3_ACCESS_KEY, VELERO_S3_SECRET_KEY]
+settings: [VELERO_S3_URL, VELERO_BUCKET, VELERO_REGION, VELERO_FS_BACKUP, BACKUP_SCHEDULE, BACKUP_RETENTION_DAYS]
+support:
+  default: supported
+  kind: {status: experimental, note: "Nécessite un stockage S3 joignable."}
+  minikube: experimental
+validated: []
+resources: {cpu_m: 300, memory_mb: 512}
+install:
+  namespace: velero
+  pod_security: privileged
+  secrets: [velero-s3-credentials]
+  releases:
+    - {name: velero, component: velero, namespace: velero, values: values.yaml.j2, timeout: 10m}
+health:
+  - {kind: Deployment, namespace: velero, name: velero}
+  - {kind: BackupStorageLocation, namespace: velero, name: default, condition: Available}
+tests: tests/test.yml
+remove:
+  notes: "Les sauvegardes dans le bucket S3 ne sont JAMAIS supprimées par le framework."
+docs: docs/backup-dr.md

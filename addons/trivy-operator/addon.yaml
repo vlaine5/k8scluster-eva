@@ -1,0 +1,23 @@
+id: trivy-operator
+name: Trivy Operator
+description: >-
+  Analyse continue des vulnérabilités des images et des erreurs de configuration des workloads
+  (VulnerabilityReport, ConfigAuditReport). Une analyse à la fois (limité pour un homelab).
+category: security
+phase: 8
+components: [trivy-operator]
+integrates_with: [prometheus-operator-crds]
+support:
+  default: supported
+  kind: {status: experimental, note: "Analyses lentes (téléchargement de la base de vulnérabilités)."}
+validated: []
+resources: {cpu_m: 200, memory_mb: 512}
+install:
+  namespace: trivy-system
+  pod_security: baseline
+  releases:
+    - {name: trivy-operator, component: trivy-operator, namespace: trivy-system, values: values.yaml.j2, timeout: 10m}
+health:
+  - {kind: Deployment, namespace: trivy-system, name: trivy-operator}
+tests: tests/test.yml
+docs: docs/security.md#trivy-operator

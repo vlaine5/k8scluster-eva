@@ -1,0 +1,23 @@
+id: tempo
+name: Grafana Tempo
+description: >-
+  Stockage et consultation des traces distribuées (OTLP gRPC/HTTP). Source de données Grafana
+  ajoutée automatiquement si la supervision est installée.
+category: observability
+phase: 8
+components: [tempo]
+integrates_with: [monitoring, prometheus-operator-crds]
+support:
+  default: supported
+validated: []
+resources: {cpu_m: 200, memory_mb: 512}
+install:
+  namespace: tracing
+  pod_security: restricted
+  releases:
+    - {name: tempo, component: tempo, namespace: tracing, values: values.yaml.j2, timeout: 10m}
+  manifests: [grafana-datasource.yaml.j2]
+health:
+  - {kind: StatefulSet, namespace: tracing, name: tempo}
+tests: tests/test.yml
+docs: docs/observability.md#traces
