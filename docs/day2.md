@@ -11,6 +11,7 @@
 | Mises à jour | [upgrades.md](upgrades.md) |
 | Ajouter des workers | augmenter `WORKER_COUNT`, puis `make deploy` |
 | Retirer un nœud | `make node-remove MODE=… NODE=k8s-worker-3` |
+| Test destructif de Longhorn (perte d'un worker) | `make storage-failure-test MODE=… NODE=k8s-worker-2` ([storage-longhorn.md](storage-longhorn.md#tests)) |
 
 ## Ajouter des nœuds
 

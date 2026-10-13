@@ -79,7 +79,7 @@ os:
       codename: noble
       family: debian
       status: supported
-      validated: ci
+      validated: none
       kernel: "6.8"
       x86_64_level: v1
       ssh_user: ubuntu
@@ -90,7 +90,7 @@ os:
       codename: resolute
       family: debian
       status: experimental
-      validated: ci
+      validated: none
       kernel: "7.0"
       x86_64_level: v1
       ssh_user: ubuntu
@@ -102,7 +102,7 @@ os:
       codename: bookworm
       family: debian
       status: supported
-      validated: ci
+      validated: none
       kernel: "6.1"
       x86_64_level: v1
       ssh_user: debian
@@ -115,7 +115,7 @@ os:
       codename: trixie
       family: debian
       status: supported
-      validated: ci
+      validated: none
       kernel: "6.12"
       x86_64_level: v1
       ssh_user: debian
@@ -127,7 +127,7 @@ os:
       codename: el9
       family: redhat
       status: supported
-      validated: ci
+      validated: none
       kernel: "5.14"
       x86_64_level: v2
       ssh_user: rocky
@@ -138,7 +138,7 @@ os:
       codename: el10
       family: redhat
       status: experimental
-      validated: ci
+      validated: none
       kernel: "6.12"
       x86_64_level: v3
       ssh_user: rocky

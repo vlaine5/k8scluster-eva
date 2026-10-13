@@ -22,16 +22,16 @@ est seulement supporté en théorie. Le détail des tests : [README.md](../READM
 | [cilium-gateway](addons.md#cilium-gateway) | 🧪<sup>1</sup> | ❌<sup>2</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>3</sup> | ❌<sup>4</sup> | non |
 | [cilium-lb](addons.md#cilium-lb) | 🧪<sup>5</sup> | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌<sup>6</sup> | non |
 | [envoy-gateway](addons.md#envoy-gateway) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>7</sup> | ✅ | non |
-| [gateway-api-crds](addons.md#gateway-api-crds) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>8</sup> | ci-kind |
+| [gateway-api-crds](addons.md#gateway-api-crds) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>8</sup> | non |
 | [metallb](addons.md#metallb) | ⚙️<sup>9</sup> | 🧪<sup>10</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>11</sup> | ⚙️<sup>12</sup> | non |
 | [traefik](addons.md#traefik) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>13</sup> | ✅ | non |
 | [longhorn](addons.md#longhorn) | ❌<sup>14</sup> | ❌<sup>15</sup> | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>16</sup> | ❌<sup>17</sup> | 🧪<sup>18</sup> | non |
 | [nfs-csi](addons.md#nfs-csi) | ⚙️<sup>19</sup> | 🧪<sup>20</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | 🧪<sup>21</sup> | ✅ | non |
 | [snapshot-controller](addons.md#snapshot-controller) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>22</sup> | ✅ | non |
-| [cert-manager](addons.md#cert-manager) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ci-kind |
+| [cert-manager](addons.md#cert-manager) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
 | [external-secrets](addons.md#external-secrets) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
 | [gateway](addons.md#gateway) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
-| [metrics-server](addons.md#metrics-server) | ✅ | ⚙️<sup>23</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>24</sup> | ci-kind |
+| [metrics-server](addons.md#metrics-server) | ✅ | ⚙️<sup>23</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>24</sup> | non |
 | [reloader](addons.md#reloader) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
 | [argo-cd](addons.md#argo-cd) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
 | [descheduler](addons.md#descheduler) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
@@ -96,12 +96,12 @@ Notes :
 <!-- BEGIN GENERATED: os -->
 | Distribution | Version | Statut | Noyau | CPU x86-64 minimal | Testé en CI | Image épinglée |
 | --- | --- | --- | --- | --- | --- | --- |
-| ubuntu | 24.04 | supported | 6.8 | v1 | oui (kubeadm-in-docker) | `ubuntu-24.04-server-cloudimg-amd64.img` |
-| ubuntu | 26.04 | experimental | 7.0 | v1 | oui (kubeadm-in-docker) | `ubuntu-26.04-server-cloudimg-amd64.img` |
-| debian | 12 | supported | 6.1 | v1 | oui (kubeadm-in-docker) | `debian-12-generic-amd64-20261006-2623.qcow2` |
-| debian | 13 | supported | 6.12 | v1 | oui (kubeadm-in-docker) | `debian-13-generic-amd64-20261001-2618.qcow2` |
-| rocky | 9 | supported | 5.14 | v2 | oui (kubeadm-in-docker) | `Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2` |
-| rocky | 10 | experimental | 6.12 | v3 | oui (kubeadm-in-docker) | `Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2` |
+| ubuntu | 24.04 | supported | 6.8 | v1 | non | `ubuntu-24.04-server-cloudimg-amd64.img` |
+| ubuntu | 26.04 | experimental | 7.0 | v1 | non | `ubuntu-26.04-server-cloudimg-amd64.img` |
+| debian | 12 | supported | 6.1 | v1 | non | `debian-12-generic-amd64-20261006-2623.qcow2` |
+| debian | 13 | supported | 6.12 | v1 | non | `debian-13-generic-amd64-20261001-2618.qcow2` |
+| rocky | 9 | supported | 5.14 | v2 | non | `Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2` |
+| rocky | 10 | experimental | 6.12 | v3 | non | `Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2` |
 <!-- END GENERATED: os -->
 
 ## Kubernetes et composants

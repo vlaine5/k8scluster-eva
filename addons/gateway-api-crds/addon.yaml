@@ -12,7 +12,7 @@ stateful: false
 support:
   default: supported
   attach: {status: configured, note: "Si les CRD existent déjà, leur version (bundle-version) doit être compatible ; sinon refus."}
-validated: [ci-kind]
+validated: []
 install:
   tasks: tasks/install.yml
 health:
