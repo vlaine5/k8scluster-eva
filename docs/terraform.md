@@ -66,7 +66,8 @@ Pour proxmox, vsphere et libvirt (EKS a ses propres outputs : `cluster_name`,
 
 | Output | Contenu |
 | --- | --- |
-| `control_plane_ip` | IP du control-plane |
+| `control_plane_ip` | IP du premier control-plane |
+| `control_plane_ips` | IP de tous les control-planes (1, 3 ou 5) |
 | `worker_ips` | IP des workers |
 | `nodes` | nom → rôle, IP (et ID de VM) |
 | `ssh_commands` | commande SSH prête à l'emploi pour chaque nœud |
@@ -95,7 +96,10 @@ l'utilise automatiquement (ou forcez-le avec `TERRAFORM_BIN=tofu`).
    `outputs.tf`, `terraform.tfvars.example`) en copiant la structure d'un provider existant.
 2. Appelez `module "nodes"` (`../../modules/k8s-nodes`) : il fournit noms, IP et cloud-init.
 3. Créez une VM par élément de `module.nodes.nodes` (`for_each`), en passant
-   `module.nodes.cloud_init[each.key].user_data` à la plateforme.
+   `module.nodes.cloud_init[each.key].user_data` à la plateforme, et un disque supplémentaire
+   (numéro de série `module.nodes.longhorn_disk_serial`) pour les nœuds où
+   `longhorn_disk` est vrai. Les images et disques d'une VM existante ne doivent jamais être
+   remplacés par une nouvelle image (`lifecycle.ignore_changes`).
 4. Appelez `module "inventory"` (`../../modules/ansible-inventory`).
 5. Ajoutez `<nom>` dans `scripts/lib/mode_terraform.sh` (`tf_check_provider`,
    `terraform_status`) et les vérifications d'accès dans `scripts/lib/doctor.sh`.

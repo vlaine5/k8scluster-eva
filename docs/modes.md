@@ -11,6 +11,10 @@ Niveau 2   Vagrant + Ansible + kubeadm            → comprendre comment Kuberne
 Niveau 3   Terraform (Proxmox, vSphere, libvirt)  → Infrastructure as Code
              + Ansible + kubeadm                     + installation de Kubernetes
 Niveau 4   Terraform + AWS EKS                    → Kubernetes managé dans le cloud
+
+Et pour l'existant :
+  existing  vos machines Linux + Ansible + kubeadm → bare metal, VMs créées à la main
+  attach    un cluster qui existe déjà             → seulement les addons
 ```
 
 ## En résumé
@@ -22,7 +26,8 @@ Niveau 4   Terraform + AWS EKS                    → Kubernetes managé dans le
 | Coût | gratuit (votre poste) | gratuit (votre poste) | vos VMs | **facturé par AWS** |
 | Multi-nœuds | oui (défaut du lab : 1 + 2) | possible (défaut du lab : 1) | oui (défaut du lab : 1 + 2) | oui (défaut du lab : 2 workers) |
 | Control-plane | caché (image toute prête) | caché | **installé par vous** : kubeadm init | **fourni par AWS** |
-| Réseau des Pods | kindnet (fourni) | fourni par minikube | **Flannel, installé par vous** | addon `vpc-cni` d'AWS |
+| Réseau des Pods | kindnet (défaut), Calico ou Cilium | CNI de minikube (Calico, Cilium possibles) | **Flannel, Calico ou Cilium, installé par vous** | addon `vpc-cni` d'AWS |
+| Haute disponibilité | — | expérimental (`--ha`) | 1, 3 ou 5 control-planes (VIP kube-vip) | fournie par AWS |
 | Idéal pour | apprendre `kubectl`, tester des manifestes, la CI | découvrir les addons (dashboard, ingress…) | comprendre l'architecture d'un cluster | découvrir Kubernetes dans le cloud |
 
 ## Kind et Minikube : l'environnement local rapide
@@ -46,7 +51,7 @@ Il répond à la question **« comment fonctionne un cluster ? »**. Vous voyez 
 3. **Les paquets** : `kubelet`, `kubeadm`, `kubectl` depuis le dépôt officiel `pkgs.k8s.io`.
 4. **`kubeadm init`** sur le control-plane : certificats, etcd, API server, scheduler,
    controller-manager (des Pods « statiques » lancés par le kubelet).
-5. **Le CNI** (Flannel) : sans lui, les nœuds restent `NotReady`.
+5. **Le CNI** (Flannel, Calico ou Cilium) : sans lui, les nœuds restent `NotReady`.
 6. **`kubeadm join`** sur chaque worker, avec un jeton temporaire.
 
 Ces étapes sont écrites en Ansible et commentées : [ansible-kubeadm.md](ansible-kubeadm.md).
@@ -56,6 +61,21 @@ Ensuite, deux façons de créer les VMs :
 - **Vagrant** (niveau 2) : des VMs locales, décrites dans un seul `Vagrantfile`.
 - **Terraform** (niveau 3) : l'Infrastructure as Code, sur Proxmox, vSphere ou KVM. Le même
   code Ansible installe Kubernetes, quel que soit le provider.
+
+## existing : « j'ai déjà mes machines »
+
+Même installation kubeadm que sur des VMs, mais sur des machines que vous fournissez (bare
+metal, VMs créées à la main) et décrivez dans un inventaire Ansible. Contrôles préalables
+en lecture seule, plan affiché, confirmation ; `make destroy` est refusé (les machines ne
+sont jamais supprimées) et `make uninstall` retire seulement Kubernetes :
+[existing-mode.md](existing-mode.md).
+
+## attach : « j'ai déjà un cluster »
+
+Seuls les addons sont installés, sur un cluster existant (k3s, RKE2, kubeadm, cluster
+managé…) désigné par `EXISTING_KUBECONFIG` et `EXISTING_CONTEXT`. Le framework détecte
+d'abord ce qui est présent et refuse de prendre le contrôle d'un composant installé par un
+autre outil (Helm, Argo CD, k3s) : [attach-mode.md](attach-mode.md).
 
 ## AWS EKS : « le cloud me fournit le control-plane »
 
@@ -95,7 +115,9 @@ Kind ──> Minikube ──> Vagrant + kubeadm ──> Terraform + kubeadm ─�
 - `CNI=none` puis installez vous-même Calico ou Cilium : que deviennent les nœuds avant/après ?
 - `make deploy MODE=vagrant WORKERS=3`, puis relancez avec `WORKERS=4` : un seul worker est
   ajouté, le cluster existant est conservé.
-- Mettez à jour un cluster kubeadm d'une version mineure avec `kubeadm upgrade`
-  (<https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/>).
+- Mettez à jour un cluster kubeadm d'une version mineure : `make upgrade-plan`, puis
+  `make upgrade` (kubeadm, nœud par nœud : [upgrades.md](upgrades.md)).
+- Passez à 3 control-planes (`CONTROL_PLANE_COUNT=3`, `CONTROL_PLANE_VIP`), arrêtez-en un
+  et observez etcd et l'API ([high-availability.md](high-availability.md)).
 - Sur EKS, passez de 2 à 3 workers (`make deploy MODE=terraform PROVIDER=eks WORKERS=3`) et
   observez le plan : seul le Managed Node Group change.

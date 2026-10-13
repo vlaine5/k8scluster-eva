@@ -77,7 +77,7 @@ Notes :
 21. **nfs-csi / EKS** : Préférez EFS ou EBS ; le serveur NFS doit être joignable depuis le VPC.
 22. **snapshot-controller / EKS** : Avec le pilote CSI EBS (non installé par le framework).
 23. **metrics-server / Minikube** : Installé par l'addon natif de minikube (minikube addons enable metrics-server).
-24. **metrics-server / Attach** : Refusé si l'API metrics.k8s.io est déjà fournie (k3s, AKS...).
+24. **metrics-server / Attach** : Refusé si l'API metrics.k8s.io est déjà fournie (k3s, AKS...). Les certificats de service des kubelets doivent être signés par la CA du cluster, sinon KUBELET_SERVING_CERTS=self-signed.
 25. **external-dns / Kind** : Nécessite un serveur DNS joignable depuis le cluster.
 26. **falco / Kind** : Utilise le noyau de l'hôte Docker.
 27. **falco / Attach** : Le noyau des nœuds (BTF) est vérifié au démarrage de Falco.

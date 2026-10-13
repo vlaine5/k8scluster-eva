@@ -17,7 +17,8 @@ Terraform → VMs vSphere → Ansible → kubeadm → Kubernetes
 - 1 control-plane : la VM `k8s-cp-1`
 - 2 workers : les VMs `k8s-worker-1` et `k8s-worker-2`
 - des VMs Ubuntu 24.04 avec des IP fixes sur votre réseau
-- Kubernetes 1.37 installé avec kubeadm, runtime containerd, réseau des Pods Flannel
+- Kubernetes 1.36 (version verrouillée : [versions.md](versions.md)) installé avec kubeadm,
+  runtime containerd, réseau des Pods Flannel (ou Calico, Cilium : [cni.md](cni.md))
 
 ## Prérequis
 
@@ -136,3 +137,13 @@ Plus de cas : [troubleshooting.md](troubleshooting.md).
 **Statut : VALIDÉ STATIQUEMENT — TEST SUR VCENTER RÉEL À FAIRE.**
 Le code est vérifié en CI (`terraform validate`, TFLint, `terraform test` des modules communs) ;
 le déploiement sur un vCenter réel n'a pas encore été testé.
+
+## Autres possibilités du framework
+
+- Système des nœuds : `NODE_OS` / `NODE_OS_VERSION` (Ubuntu, Debian, Rocky) : [os.md](os.md)
+- Haute disponibilité : `CONTROL_PLANE_COUNT=3` et `CONTROL_PLANE_VIP` : [high-availability.md](high-availability.md)
+- Réseau : `CNI=calico` ou `cilium`, Gateway API, LoadBalancer : [cni.md](cni.md),
+  [gateway-api.md](gateway-api.md), [loadbalancer.md](loadbalancer.md)
+- Addons : `ADDON_PROFILE=homelab` (ou un profil d'[exemple](../examples/profiles/README.md)) : [addons.md](addons.md)
+- Stockage : NFS ou Longhorn sur disque dédié (`LONGHORN_DEDICATED_DISK=true`) : [storage.md](storage.md)
+- Exploitation (mises à niveau, sauvegardes, santé) : [day2.md](day2.md)
