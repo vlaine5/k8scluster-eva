@@ -126,6 +126,8 @@ Mode existing : `make uninstall MODE=existing` (même effet, confirmation par le
 | --- | --- |
 | `belongs to another cluster` | la machine porte déjà un cluster : [existing-mode.md](existing-mode.md#reutiliser-une-machine) |
 | `Kubernetes ports already in use` / paquets en conflit | le preflight liste le programme ou le paquet ; rien n'est désinstallé pour vous |
+| `Au moins une machine ne répond pas en SSH`, et dans le journal de la machine `Access denied … by PAM account configuration` | `/run/nologin` ou `/etc/nologin` existe (machine encore en démarrage, arrêt programmé) : attendez la fin du démarrage ou supprimez le fichier si vous savez pourquoi il est là |
+| `ss is not available (package iproute2)` | le contrôle des ports n'a pas pu être fait ; installez `iproute2` ou vérifiez les ports à la main |
 | attach : `déjà installé par un autre outil` | retirer l'addon d'`ADDONS`, ou `EXISTING_ADDON_POLICY=skip` |
 | attach : `géré par Argo CD` | jamais repris : gérez ce composant dans Git |
 
