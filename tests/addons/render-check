@@ -161,6 +161,33 @@ def check_pod_security(text: str, origin: str, namespace: str, level: str, probl
                             f"« {level} » (namespace {namespace}) : {', '.join(violations)}")
 
 
+def render_core(data: dict, vars_file: Path, workdir: Path, render_dir: Path, env: dict) -> list[str]:
+    """Rend les modèles des rôles kubeadm sur un inventaire fictif (N control-planes du
+    scénario + 2 workers, tous locaux) : tout YAML invalide fait échouer le rendu."""
+    cps = max(int(data.get("control_plane_count") or 1), 1)
+    lines = ["[control_plane]"]
+    lines += [f"k8s-cp-{i} node_ip=192.0.2.{9 + i}" for i in range(1, cps + 1)]
+    lines += ["", "[workers]"] + [f"k8s-worker-{i} node_ip=192.0.2.{19 + i}" for i in (1, 2)]
+    lines += ["", "[k8s_cluster:children]", "control_plane", "workers", "",
+              "[k8s_cluster:vars]", "ansible_python_interpreter=auto_silent", ""]
+    # group_vars à côté de l'inventaire, comme en réel : visibles dans hostvars des autres nœuds.
+    (workdir / "core-inventory" / "group_vars").mkdir(parents=True, exist_ok=True)
+    shutil.copy(ROOT / "ansible" / "group_vars" / "all.yml", workdir / "core-inventory" / "group_vars" / "all.yml")
+    inventory = workdir / "core-inventory" / "hosts.ini"
+    inventory.write_text("\n".join(lines))
+    lock = workdir / "lock.json"
+    lock.write_text(json.dumps({"lab_lock": yaml.safe_load((ROOT / "config" / "versions.yaml").read_text())}))
+    result = run(["ansible-playbook", "-i", str(inventory), str(ROOT / "tests" / "addons" / "render_core.yml"),
+                  "-e", f"@{vars_file}", "-e", f"@{lock}", "-e", f"render_dir={render_dir}",
+                  "-e", "cluster_name=render-check"], env={**env, "ANSIBLE_STDOUT_CALLBACK": "default"})
+    if result.returncode != 0:
+        tail = "\n".join((result.stdout + result.stderr).splitlines()[-30:])
+        return [f"rendu des rôles kubeadm en échec :\n{tail}"]
+    count = len(list((render_dir / "core").rglob("*")))
+    print(f"  rôles kubeadm : {count} fichiers rendus ({cps} control-plane(s) + 2 workers)")
+    return []
+
+
 def scenario(path: Path, workdir: Path) -> list[str]:
     problems: list[str] = []
     env = {**os.environ, **DUMMY_SECRETS, "LAB_ENV_FILE": str(path), "NO_COLOR": "1"}
@@ -217,6 +244,9 @@ def scenario(path: Path, workdir: Path) -> list[str]:
             if install.get("namespace"):
                 check_pod_security(manifest.read_text(), f"{addon['id']}/manifests/{manifest.name}",
                                    install["namespace"], install.get("pod_security", "baseline"), problems)
+    # Modèles des rôles kubeadm (kubeadm, CNI, kube-vip...) pour les plateformes kubeadm.
+    if data.get("lab_platform") in ("vagrant", "terraform", "existing"):
+        problems += render_core(data, vars_file, workdir, render_dir, env)
     # Aucun secret ne doit se retrouver dans les variables ou les fichiers rendus.
     for file in [vars_file, *render_dir.rglob("*")]:
         if file.is_file():
