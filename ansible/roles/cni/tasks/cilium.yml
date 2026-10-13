@@ -38,8 +38,33 @@
     wait: false
     timeout: 10m0s
 
-- name: Wait for the Cilium agents and operator
-  ansible.builtin.command:
-    argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", -n, kube-system, rollout, status, "{{ item }}", --timeout=600s]
-  loop: "{{ ['daemonset/cilium', 'deployment/cilium-operator'] + (['deployment/hubble-relay'] if hubble.enabled | default(false) else []) }}"
-  changed_when: false
+- name: Wait for Cilium, with a diagnosis when it does not start
+  block:
+    - name: Wait for the Cilium agents and operator
+      ansible.builtin.command:
+        argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", -n, kube-system, rollout, status, "{{ item }}", --timeout=600s]
+      loop: "{{ ['daemonset/cilium', 'deployment/cilium-operator'] + (['deployment/hubble-relay'] if hubble.enabled | default(false) else []) }}"
+      changed_when: false
+  rescue:
+    - name: Collect the state of the Cilium Pods (diagnosis)
+      ansible.builtin.command:
+        argv: "{{ [kubectl, '--kubeconfig=' ~ cni_kubeconfig, '-n', 'kube-system'] + item }}"
+      loop:
+        - [get, pods, -o, wide, -l, "k8s-app in (cilium, cilium-operator)"]
+        - [describe, pods, -l, k8s-app=cilium]
+        - [logs, -l, k8s-app=cilium, --all-containers, --tail=40, --prefix]
+        - [logs, -l, io.cilium/app=operator, --tail=40, --prefix]
+      register: cni_cilium_diag
+      changed_when: false
+      failed_when: false
+
+    - name: Show the diagnosis
+      ansible.builtin.debug:
+        msg: "{{ cni_cilium_diag.results | map(attribute='stdout_lines') | flatten | select | list | to_nice_yaml }}"
+
+    - name: Fail after the diagnosis
+      ansible.builtin.fail:
+        msg: >-
+          Cilium did not become ready (see the diagnosis above: Pod events and agent logs). Common causes: the API
+          endpoint {{ cni_api_host }}:{{ cni_api_port }} unreachable from the nodes (kube-proxy replacement), a kernel
+          without the required eBPF features, or the bpffs/cgroup2 mounts. docs/cni.md#depannage

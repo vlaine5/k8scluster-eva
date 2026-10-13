@@ -82,6 +82,30 @@ lab() {
   env "${unset_args[@]}" LAB_ENV_FILE="${ENV_FILE}" LAB_ANSIBLE_EXTRA_VARS="${HERE}/vars.yml" "${ROOT}/k8s-lab" "$@"
 }
 
+# État du cluster en cas d'échec (avant le nettoyage) : Pods, Pods non prêts, événements.
+cluster_diagnostics() {
+  local cp="k8s-cp-1"
+  docker inspect "${cp}" >/dev/null 2>&1 || return 0
+  step "Diagnostic du cluster (échec)"
+  docker exec "${cp}" sh -c '
+    k="kubectl --kubeconfig=/etc/kubernetes/admin.conf --request-timeout=20s"
+    $k get nodes -o wide 2>&1
+    $k get pods -A -o wide 2>&1
+    for p in $($k get pods -A --no-headers 2>/dev/null | awk "\$4 != \"Running\" && \$4 != \"Completed\" {print \$1\"/\"\$2}"); do
+      echo "--- $p"; $k -n "${p%%/*}" describe pod "${p#*/}" 2>&1 | tail -n 25
+      $k -n "${p%%/*}" logs "${p#*/}" --all-containers --tail=30 2>&1
+    done
+    $k get events -A --sort-by=.lastTimestamp 2>&1 | tail -n 40
+    ip -br addr 2>&1
+  ' || :
+}
+
+on_exit() {
+  local status=$?
+  ((status == 0)) || cluster_diagnostics
+  destroy
+}
+
 destroy() {
   step "Nettoyage du test kubeadm-in-docker"
   local names
@@ -277,7 +301,7 @@ main() {
   have ansible-playbook || die "Ansible est requis pour ce test." "make venv"
   load_config
   ensure_state_dirs
-  [[ "${KEEP:-0}" == "1" ]] || trap destroy EXIT
+  [[ "${KEEP:-0}" == "1" ]] || trap on_exit EXIT
 
   start_nodes
   write_configuration

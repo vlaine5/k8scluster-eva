@@ -71,3 +71,16 @@ cluster avec le nouveau CNI (`RECREATE=1`), restaurer les applications.
 Les versions sont verrouillées dans `config/versions.yaml` ([versions.md](versions.md)).
 `CNI_VERSION` permet d'en forcer une autre (avertissement : combinaison non validée) ; pour
 Flannel, une empreinte SHA-256 connue du manifeste est exigée.
+
+## Dépannage
+
+<a id="depannage"></a>Si le CNI ne démarre pas, le déploiement s'arrête après avoir affiché
+l'état des Pods, leurs événements et les journaux des agents.
+
+| Symptôme | Piste |
+| --- | --- |
+| Nœuds `NotReady`, Pods système `Pending` | aucun CNI prêt : regardez les Pods du CNI (`kubectl -n kube-system get pods -o wide`) |
+| Cilium : agent qui redémarre, `unable to reach the API server` | sans kube-proxy, Cilium joint l'API par `CONTROL_PLANE_VIP`/`CONTROL_PLANE_ENDPOINT` : cette adresse doit répondre depuis chaque nœud |
+| Cilium : erreurs eBPF au démarrage | noyau trop ancien ou sans les options eBPF nécessaires ([os.md](os.md)) |
+| Calico : `ensure CRDs are installed first` | CRD Calico absentes : elles sont installées par le framework depuis leur chart dédié ; relancez `make deploy` |
+| Pods de deux nœuds qui ne se joignent pas | flux VXLAN (UDP 8472 Flannel/Cilium, 4789 Calico) bloqués par un pare-feu entre les nœuds |
