@@ -158,8 +158,13 @@ start_nodes() {
       && chmod 600 /home/${NODE_USER}/.ssh/authorized_keys \
       && printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv-kubelet.conf"
     if [[ -n "${NODE_EXTRA_CA:-}" ]]; then
-      docker cp "${NODE_EXTRA_CA}" "${name}:/usr/local/share/ca-certificates/extra-ca.crt"
-      docker exec "${name}" sh -c 'update-ca-certificates >/dev/null 2>&1 || update-ca-trust'
+      if [[ "${FAMILY}" == rocky ]]; then
+        docker cp "${NODE_EXTRA_CA}" "${name}:/etc/pki/ca-trust/source/anchors/extra-ca.crt"
+        docker exec "${name}" update-ca-trust
+      else
+        docker cp "${NODE_EXTRA_CA}" "${name}:/usr/local/share/ca-certificates/extra-ca.crt"
+        docker exec "${name}" update-ca-certificates
+      fi
     fi
   done < <(node_names)
   wait_nodes
