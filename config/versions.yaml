@@ -288,6 +288,10 @@ components:
     chart: argo-cd
     version: "10.10.3"
     app_version: "v3.5.5"
+    # Même image officielle que le chart (tag identique), mais depuis Docker Hub :
+    # ecr-public.aws.com (défaut du chart) refuse souvent les téléchargements anonymes (429).
+    redis_image: "docker.io/library/redis"
+    redis_tag: "8.6.4-alpine"
     kube_min: "1.25"
   prometheus-operator-crds:
     type: helm

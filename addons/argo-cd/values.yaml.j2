@@ -49,5 +49,8 @@ applicationSet:
     serviceMonitor:
       enabled: {{ monitored }}
 redis:
+  image:
+    repository: "{{ addon_item.components['argo-cd'].redis_image }}"
+    tag: "{{ addon_item.components['argo-cd'].redis_tag }}"
   resources:
     requests: {cpu: 10m, memory: 32Mi}
