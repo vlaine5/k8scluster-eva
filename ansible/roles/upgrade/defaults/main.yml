@@ -3,3 +3,11 @@
 upgrade_target_version: "{{ kubernetes_version }}"
 upgrade_target_minor: "{{ upgrade_target_version.split('.')[0:2] | join('.') }}"
 upgrade_drain_timeout: 10m
+# Contrôles préalables de kubeadm à ignorer : les mêmes qu'à l'installation (vides par
+# défaut ; seul le test sur nœuds conteneurs en déclare).
+upgrade_ignore_preflight_errors: >-
+  {{ (control_plane_ignore_preflight_errors | default([])) if inventory_hostname in groups['control_plane']
+     else (worker_ignore_preflight_errors | default([])) }}
+upgrade_preflight_args: >-
+  {{ ['--ignore-preflight-errors=' ~ (upgrade_ignore_preflight_errors | join(','))]
+     if upgrade_ignore_preflight_errors | length > 0 else [] }}

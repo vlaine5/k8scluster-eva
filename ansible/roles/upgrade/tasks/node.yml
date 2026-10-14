@@ -42,13 +42,13 @@
 
     - name: Upgrade the control-plane components (kubeadm upgrade apply)
       ansible.builtin.command:
-        argv: [kubeadm, upgrade, apply, "v{{ upgrade_target_version }}", --yes]
+        argv: "{{ ['kubeadm', 'upgrade', 'apply', 'v' ~ upgrade_target_version, '--yes'] + upgrade_preflight_args }}"
       changed_when: true
       when: inventory_hostname == k8s_control_plane_host
 
     - name: Upgrade the local kubelet configuration (kubeadm upgrade node)
       ansible.builtin.command:
-        argv: [kubeadm, upgrade, node]
+        argv: "{{ ['kubeadm', 'upgrade', 'node'] + upgrade_preflight_args }}"
       changed_when: true
       when: inventory_hostname != k8s_control_plane_host
 
