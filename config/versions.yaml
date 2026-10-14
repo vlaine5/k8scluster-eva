@@ -127,7 +127,7 @@ os:
       codename: el9
       family: redhat
       status: supported
-      validated: none
+      validated: ci
       kernel: "5.14"
       x86_64_level: v2
       ssh_user: rocky
@@ -138,7 +138,7 @@ os:
       codename: el10
       family: redhat
       status: experimental
-      validated: none
+      validated: ci
       kernel: "6.12"
       x86_64_level: v3
       ssh_user: rocky
