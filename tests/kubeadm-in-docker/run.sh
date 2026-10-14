@@ -277,6 +277,9 @@ check_upgrade() {
   local version
   step "Mise à niveau kubeadm vers ${UPGRADE_TO} (make upgrade-plan, puis make upgrade)"
   sed -i "s/^KUBERNETES_VERSION=.*/KUBERNETES_VERSION=${UPGRADE_TO}/" "${ENV_FILE}"
+  # Changement de mineure (1.36 -> 1.37) : refusé avec la politique par défaut (patch).
+  sed -i '/^UPGRADE_POLICY=/d' "${ENV_FILE}"
+  echo "UPGRADE_POLICY=minor" >>"${ENV_FILE}"
   lab upgrade-plan existing
   UPGRADE_CONFIRM="${CONTEXT}" lab upgrade existing --yes
   version="$(kubectl --context "${CONTEXT}" get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' | sort -u)"
