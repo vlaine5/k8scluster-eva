@@ -69,6 +69,23 @@
         name: upgrade
         tasks_from: node.yml
 
+# Après kubeadm upgrade apply, l'API peut encore redémarrer pendant que les
+# contrôleurs, kubelet et etcd convergent. Attendre /readyz avant les workers
+# au lieu de supposer que le premier "node Ready" suffit.
+- name: Wait for the API to recover after upgrading the control-planes
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait until the Kubernetes API reports Ready
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, --request-timeout=10s, get, --raw=/readyz]
+      register: upgrade_api_ready
+      until: upgrade_api_ready.rc == 0 and (upgrade_api_ready.stdout | trim) == 'ok'
+      retries: 60
+      delay: 5
+      changed_when: false
+
 - name: Upgrade the workers, one at a time
   hosts: workers
   become: true
