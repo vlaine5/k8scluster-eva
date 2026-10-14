@@ -19,9 +19,16 @@ runs:
 
     - name: Python et collections Ansible (versions épinglées)
       shell: bash
+      # Galaxy coupe parfois la connexion (« Connection reset by peer ») : 3 tentatives au
+      # plus, l'installation étant idempotente ; la 3e erreur fait échouer le job.
       run: |
         pip install -r requirements-dev.txt
-        ansible-galaxy collection install -r ansible/requirements.yml
+        for attempt in 1 2 3; do
+          ansible-galaxy collection install -r ansible/requirements.yml && break
+          [[ "${attempt}" -lt 3 ]] || exit 1
+          echo "::warning::Téléchargement des collections interrompu (tentative ${attempt}/3), nouvel essai dans $((attempt * 15)) s"
+          sleep $((attempt * 15))
+        done
 
     - name: Outils CLI
       if: inputs.tools != ''
