@@ -1,6 +1,6 @@
 # Propositions automatiques de mises à jour (une PR par mise à jour, à tester avant fusion).
-# Les versions de config/lab.env (Kubernetes, kind, Flannel...) se mettent à jour à la main :
-# voir docs/maintenance.md.
+# Les versions Kubernetes, CNI et addons sont verrouillées dans
+# config/versions.yaml : voir docs/versions.md et docs/maintenance.md.
 version: 2
 updates:
   - package-ecosystem: github-actions
