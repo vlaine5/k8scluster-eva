@@ -5,7 +5,7 @@ terraform {
     # Provider Proxmox maintenu activement : https://registry.terraform.io/providers/bpg/proxmox
     proxmox = {
       source  = "bpg/proxmox"
-      version = "~> 0.114.0"
+      version = "~> 0.116.0"
     }
     local = {
       source  = "hashicorp/local"
