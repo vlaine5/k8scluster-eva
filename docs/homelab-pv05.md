@@ -66,10 +66,14 @@ configure jamais le NAS ni le pare-feu.
 
 1. DSM → *Panneau de configuration → Services de fichiers → NFS* : activez NFS, protocole
    maximal **NFSv4.1**.
-2. Dossier partagé `kubernetes` (chemin `/volume1/kubernetes`) → *Autorisations NFS* : une
-   règle par nœud (`10.20.0.100` à `10.20.0.103`) ou le plus petit sous-réseau qui les
-   contient, lecture/écriture, **sans mappage** (`no_root_squash` : le pilote CSI crée un
-   sous-dossier par volume en root), sécurité `sys`, ports non privilégiés autorisés.
+2. Dossier partagé dédié `kubernetes` (chemin à confirmer sur le NAS) → *Autorisations NFS* :
+   créer des règles **pour les seules IP des nœuds** `10.20.0.100-103`, en lecture/écriture,
+   et vérifier les options d'export proposées par DSM. **Conserver le root squashing si
+   possible.** Le NFS CSI doit pouvoir créer ses sous-dossiers ; tester une création de PVC
+   et corriger les permissions sur cet export dédié si nécessaire. Le mode sans squash
+   (`no_root_squash`) est un compromis de sécurité : ne l'activer qu'en connaissance de cause,
+   exclusivement pour cet export et pour les clients nécessaires. Ne pas ouvrir l'export
+   à tout `10.20.0.0/16` ni exposer NFS à Internet.
 3. Stormshield : autorisez **TCP 2049** de `10.20.0.100-103` vers `10.70.0.30` (NFSv4 :
    aucun autre port nécessaire).
 4. Vérifiez après la création des VMs (étape 6) : test de montage depuis un worker,
