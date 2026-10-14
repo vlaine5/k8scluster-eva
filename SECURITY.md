@@ -25,12 +25,12 @@ l'auteur du signalement dans la mesure du possible.
 - Le framework s'exécute avec des accès élevés **uniquement sur les machines et
   clusters explicitement ciblés**. Vérifiez toujours le mode, le provider, le
   kubeconfig, le contexte Kubernetes et le plan Terraform avant une action.
-- **Les fichiers \`.env\`, \`.lab/\`, \`.kube/\` et \`*.tfstate\` sont sensibles.**
+- **Les fichiers `.env`, `.lab/`, `.kube/` et `*.tfstate` sont sensibles.**
   Ils sont ignorés par Git, mais cette protection ne remplace pas des permissions
   locales restrictives, le chiffrement du disque et des sauvegardes.
 - Une sauvegarde etcd peut contenir tous les Secrets Kubernetes. Les sauvegardes
   des volumes applicatifs doivent être gérées séparément.
-- L'option \`PROXMOX_VE_INSECURE=true\` désactive la vérification TLS. Réservez-la
+- L'option `PROXMOX_VE_INSECURE=true` désactive la vérification TLS. Réservez-la
   aux environnements de test avec certificat autosigné ; préférez une autorité
   de certification de confiance.
 - Les rôles et tokens API Proxmox doivent être dédiés et limités aux ressources
@@ -45,7 +45,7 @@ l'auteur du signalement dans la mesure du possible.
 
 Expurgez vos journaux et captures : noms de domaine internes, adresses publiques,
 tokens, URL portant un mot de passe, certificats, clés, informations de connexion,
-contenu des sauvegardes et sortie brute de \`terraform show -json\`.
+contenu des sauvegardes et sortie brute de `terraform show -json`.
 
 En cas de fuite, **révoquez et renouvelez immédiatement** les secrets concernés.
 
