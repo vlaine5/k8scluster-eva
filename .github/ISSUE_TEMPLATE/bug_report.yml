@@ -1,0 +1,67 @@
+name: Signaler un bug
+description: Signaler un défaut reproductible du framework sans divulguer de secrets
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de vérifier la documentation et les issues existantes.
+        **Ne publiez jamais vos tokens, mots de passe, kubeconfigs, états Terraform ou sauvegardes.**
+        Pour une vulnérabilité, suivez SECURITY.md plutôt que cette issue.
+  - type: input
+    id: version
+    attributes:
+      label: Version du framework
+      description: Tag ou commit Git
+      placeholder: "v1.0.0-rc.1 ou SHA"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode de déploiement
+      options:
+        - kind
+        - minikube
+        - vagrant
+        - terraform / proxmox
+        - terraform / vsphere
+        - terraform / libvirt
+        - terraform / eks
+        - existing
+        - attach
+        - autre
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS et versions concernés
+      placeholder: "Ex. : Ubuntu 24.04, Kubernetes 1.36.5, Cilium 1.20.2"
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction minimale
+      description: Commandes et configuration réduite, sans identifiants
+      placeholder: "make doctor ... ; make config ... ; étapes ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Résultat attendu
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Résultat observé et extrait de logs expurgé
+    validations:
+      required: true
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Protection des données
+      options:
+        - label: Je confirme avoir retiré tous les secrets et informations sensibles.
+          required: true
