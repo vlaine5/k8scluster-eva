@@ -7,12 +7,12 @@ Décrire le problème traité, la solution et les limites du changement.
 - Mode(s) : kind / minikube / vagrant / terraform (provider à préciser) / existing / attach.
 - OS : Ubuntu / Debian / Rocky / non concerné.
 - Composants : réseau / stockage / addons / kubeadm / CI / documentation / autre.
-- Variables du \`.env\` ajoutées ou modifiées (sans valeurs secrètes).
+- Variables du `.env` ajoutées ou modifiées (sans valeurs secrètes).
 
 ## Validations
 
-- [ ] \`make validate\`, \`make schema-check\`, \`make catalog-check\`.
-- [ ] \`make lint\` (ou justification des contrôles non exécutables).
+- [ ] `make validate`, `make schema-check`, `make catalog-check`.
+- [ ] `make lint` (ou justification des contrôles non exécutables).
 - [ ] Tests unitaires et tests d'intégration pertinents.
 - [ ] Documentation et exemples mis à jour.
 - [ ] Matrice de compatibilité fidèle aux **tests réellement effectués**.
@@ -30,6 +30,6 @@ les tests de CI en conteneurs des déploiements réels sur hyperviseur.
 
 ## Publication
 
-- [ ] \`CHANGELOG.md\` mis à jour si le comportement utilisateur change.
+- [ ] `CHANGELOG.md` mis à jour si le comportement utilisateur change.
 - [ ] Guide de migration ajouté si une configuration existante est impactée.
 - [ ] Aucune dépendance imposée inutilement aux profils légers.
