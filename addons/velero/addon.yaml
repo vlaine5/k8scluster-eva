@@ -17,7 +17,7 @@ support:
   default: supported
   kind: {status: experimental, note: "Nécessite un stockage S3 joignable."}
   minikube: experimental
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 300, memory_mb: 512}
 install:
   namespace: velero

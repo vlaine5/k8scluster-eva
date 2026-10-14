@@ -18,7 +18,7 @@ support:
   kind: {status: configured, note: "Le serveur NFS doit être joignable depuis les conteneurs kind (CI : serveur NFS de test dans le cluster)."}
   minikube: {status: experimental, note: "Selon le driver et le réseau de minikube."}
   eks: {status: experimental, note: "Préférez EFS ou EBS ; le serveur NFS doit être joignable depuis le VPC."}
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 50, memory_mb: 128}
 node_prereqs:
   packages: {debian: [nfs-common], redhat: [nfs-utils]}

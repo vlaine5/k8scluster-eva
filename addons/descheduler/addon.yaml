@@ -11,7 +11,7 @@ requires:
   min_workers: 2
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 50, memory_mb: 64}
 install:
   namespace: kube-system

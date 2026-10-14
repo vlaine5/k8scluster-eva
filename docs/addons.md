@@ -257,7 +257,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Activé par | `GATEWAY_CONTROLLER=traefik` |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 | Désinstallation | Les routes (HTTPRoute) des applications restent en place mais ne sont plus servies. |
 
 ### longhorn
@@ -294,7 +294,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Réglages (.env) | `NFS_SERVER`, `NFS_SHARE`, `NFS_VERSION`, `NFS_STORAGE_CLASS`, `NFS_RECLAIM_POLICY`, `NFS_MOUNT_OPTIONS`, `NFS_SUBDIR` |
 | Données | oui : jamais supprimées automatiquement |
 | Test fonctionnel | `addons/nfs-csi/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 | Désinstallation | helm uninstall du pilote uniquement. La StorageClass, les PV et les DONNÉES sur le NAS sont conservés. Les PVC existants ne pourront plus être montés tant que le pilote est absent. |
 
 ### snapshot-controller
@@ -308,7 +308,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Exige | any_addon : nfs-csi, longhorn |
 | Données | non |
 | Test fonctionnel | via les addons qui l'utilisent |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 | Désinstallation | Les CRD (et donc les instantanés) sont conservées. |
 
 ### cert-manager
@@ -398,7 +398,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Secrets (.env uniquement) | `ARGOCD_REPO_USERNAME`, `ARGOCD_REPO_PASSWORD` |
 | Données | non |
 | Test fonctionnel | `addons/argo-cd/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 | Désinstallation | Désinstaller Argo CD ne supprime PAS les applications qu'il a déployées (les ressources restent). Les CRD Application/ApplicationSet sont conservées. |
 
 ### descheduler
@@ -413,7 +413,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Exige | min_workers : 2 |
 | Données | non |
 | Test fonctionnel | `addons/descheduler/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 
 ### external-dns
 
@@ -491,7 +491,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/keda/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 
 ### kyverno
 
@@ -556,7 +556,7 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | S'intègre avec | prometheus-operator-crds |
 | Données | non |
 | Test fonctionnel | `addons/node-feature-discovery/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 
 ### opentelemetry-collector
 
@@ -630,6 +630,6 @@ Compatibilité par plateforme : [compatibility.md](compatibility.md).
 | Secrets (.env uniquement) | `VELERO_S3_ACCESS_KEY`, `VELERO_S3_SECRET_KEY` |
 | Données | non |
 | Test fonctionnel | `addons/velero/tests/test.yml` |
-| Testé en CI | non (validé statiquement : rendu et helm template) |
+| Testé en CI | kind |
 | Désinstallation | Les sauvegardes dans le bucket S3 ne sont JAMAIS supprimées par le framework. |
 <!-- END GENERATED: details -->

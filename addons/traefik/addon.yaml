@@ -18,7 +18,7 @@ gateway:
 support:
   default: supported
   eks: {status: configured, note: "Le Service LoadBalancer crée un load balancer AWS payant."}
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 100, memory_mb: 128}
 install:
   namespace: traefik

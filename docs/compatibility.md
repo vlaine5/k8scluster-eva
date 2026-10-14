@@ -24,31 +24,31 @@ est seulement supporté en théorie. Le détail des tests : [README.md](../READM
 | [envoy-gateway](addons.md#envoy-gateway) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>7</sup> | ✅ | kind |
 | [gateway-api-crds](addons.md#gateway-api-crds) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>8</sup> | kind |
 | [metallb](addons.md#metallb) | ⚙️<sup>9</sup> | 🧪<sup>10</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>11</sup> | ⚙️<sup>12</sup> | kind |
-| [traefik](addons.md#traefik) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>13</sup> | ✅ | non |
+| [traefik](addons.md#traefik) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>13</sup> | ✅ | kind |
 | [longhorn](addons.md#longhorn) | ❌<sup>14</sup> | ❌<sup>15</sup> | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>16</sup> | ❌<sup>17</sup> | 🧪<sup>18</sup> | non |
-| [nfs-csi](addons.md#nfs-csi) | ⚙️<sup>19</sup> | 🧪<sup>20</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | 🧪<sup>21</sup> | ✅ | non |
-| [snapshot-controller](addons.md#snapshot-controller) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>22</sup> | ✅ | non |
+| [nfs-csi](addons.md#nfs-csi) | ⚙️<sup>19</sup> | 🧪<sup>20</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | 🧪<sup>21</sup> | ✅ | kind |
+| [snapshot-controller](addons.md#snapshot-controller) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>22</sup> | ✅ | kind |
 | [cert-manager](addons.md#cert-manager) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | attach, kind |
 | [external-secrets](addons.md#external-secrets) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [gateway](addons.md#gateway) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [metrics-server](addons.md#metrics-server) | ✅ | ⚙️<sup>23</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>24</sup> | kind |
 | [reloader](addons.md#reloader) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
-| [argo-cd](addons.md#argo-cd) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
-| [descheduler](addons.md#descheduler) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
+| [argo-cd](addons.md#argo-cd) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
+| [descheduler](addons.md#descheduler) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [external-dns](addons.md#external-dns) | 🧪<sup>25</sup> | 🧪 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
 | [falco](addons.md#falco) | 🧪<sup>26</sup> | 🧪 | ✅ | ✅ | ✅ | ✅ | ✅ | 🧪 | ⚙️<sup>27</sup> | kind |
 | [hubble](addons.md#hubble) | 🧪 | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌<sup>28</sup> | kind |
 | [istio](addons.md#istio) | 🧪 | 🧪 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>29</sup> | kind |
-| [keda](addons.md#keda) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
+| [keda](addons.md#keda) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [kyverno](addons.md#kyverno) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [logging](addons.md#logging) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [monitoring](addons.md#monitoring) | ⚙️<sup>30</sup> | ⚙️<sup>31</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ⚙️<sup>32</sup> | ✅ | kind |
-| [node-feature-discovery](addons.md#node-feature-discovery) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
+| [node-feature-discovery](addons.md#node-feature-discovery) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [opentelemetry-collector](addons.md#opentelemetry-collector) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [tempo](addons.md#tempo) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 | [tetragon](addons.md#tetragon) | 🧪<sup>33</sup> | 🧪 | ✅ | ✅ | ✅ | ✅ | ✅ | 🧪 | ✅ | kind |
 | [trivy-operator](addons.md#trivy-operator) | 🧪<sup>34</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
-| [velero](addons.md#velero) | 🧪<sup>35</sup> | 🧪 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | non |
+| [velero](addons.md#velero) | 🧪<sup>35</sup> | 🧪 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | kind |
 
 Légende : ✅ supporté · ⚙️ supporté avec configuration particulière · 🧪 expérimental · ❌ non supporté. « Testé en CI » indique les environnements où l'addon est réellement installé et testé par la CI ; une case ✅ sans test signifie « supporté en théorie, non validé en conditions réelles ».
 

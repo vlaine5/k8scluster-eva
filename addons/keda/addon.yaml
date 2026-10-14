@@ -10,7 +10,7 @@ integrates_with: [prometheus-operator-crds]
 conflicts_with: []
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 200, memory_mb: 384}
 install:
   namespace: keda

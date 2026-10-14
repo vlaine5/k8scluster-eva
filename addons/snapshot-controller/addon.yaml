@@ -12,7 +12,7 @@ requires:
 support:
   default: supported
   eks: {status: configured, note: "Avec le pilote CSI EBS (non installé par le framework)."}
-validated: []
+validated: [ci-kind]
 install:
   tasks: tasks/install.yml
 health:

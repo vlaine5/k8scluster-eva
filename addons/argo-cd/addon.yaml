@@ -12,7 +12,7 @@ settings: [ARGOCD_REPO_URL, ARGOCD_REPO_PATH, ARGOCD_REPO_REVISION, ARGOCD_AUTO_
 secrets: [ARGOCD_REPO_USERNAME, ARGOCD_REPO_PASSWORD]
 support:
   default: supported
-validated: []
+validated: [ci-kind]
 resources: {cpu_m: 300, memory_mb: 768}
 install:
   namespace: argocd
