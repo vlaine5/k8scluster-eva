@@ -15,6 +15,22 @@
   become: true
   when: etcd_restore_step == 'stop'
 
+# Fait conservé pour l'étape « restore » : le résultat enregistré ci-dessus serait
+# remplacé par celui de la tâche ignorée lors de l'étape suivante.
+- name: Remember the etcd image for the restore step
+  ansible.builtin.set_fact:
+    etcd_restore_image: "{{ etcd_image.stdout | trim }}"
+  when: etcd_restore_step == 'stop'
+
+- name: Check that the etcd image was found
+  ansible.builtin.assert:
+    that: etcd_restore_image | length > 0
+    fail_msg: >-
+      No etcd image in /etc/kubernetes/manifests/etcd.yaml on {{ inventory_hostname }}: nothing was stopped
+      on this node. Check the manifest, then retry (docs/backup-dr.md#restauration).
+    quiet: true
+  when: etcd_restore_step == 'stop'
+
 - name: Stop the API server and etcd (static Pod manifests moved aside)
   ansible.builtin.command:
     argv: [mv, "/etc/kubernetes/manifests/{{ item }}.yaml", "{{ etcd_restore_parking }}/{{ item }}.yaml"]
@@ -60,7 +76,7 @@
       - --rm
       - --net-host
       - --mount=type=bind,src=/var/lib,dst=/var/lib,options=rbind:rw
-      - "{{ hostvars[inventory_hostname]['etcd_image']['stdout'] | trim }}"
+      - "{{ etcd_restore_image }}"
       - k8s-lab-etcd-restore
       - etcdutl
       - snapshot
