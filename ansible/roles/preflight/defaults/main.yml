@@ -37,3 +37,7 @@ preflight_conflicting_packages:
   - rke2-server
   - rke2-agent
   - podman-docker
+# Parmi eux, ceux que le lab installe lui-même (kubernetes-cni : dépendance de kubelet
+# sur pkgs.k8s.io) : tolérés sur un nœud déjà membre du cluster du lab.
+preflight_lab_installed_packages:
+  - kubernetes-cni

@@ -59,9 +59,13 @@
 
 - name: Detect conflicting software
   ansible.builtin.set_fact:
-    preflight_conflicts: "{{ preflight_conflicting_packages | select('in', preflight_installed) | list }}"
+    preflight_conflicts: >-
+      {{ preflight_conflicting_packages | select('in', preflight_installed)
+         | reject('in', preflight_lab_installed_packages if preflight_lab_member | bool else []) | list }}
     preflight_docker: "{{ 'docker-ce' in preflight_installed or 'docker.io' in preflight_installed }}"
   vars:
+    # Nœud déjà installé par le lab pour ce cluster (2e déploiement, ajout de nœuds...).
+    preflight_lab_member: "{{ preflight_in_cluster and preflight_marker_cluster == k8s_cluster_name }}"
     # Debian : seules les lignes « ii » (paquet installé) comptent.
     preflight_installed: >-
       {{ (preflight_packages_list.stdout_lines | select('match', '^ii ') | map('regex_replace', '^ii +', '') | list)
