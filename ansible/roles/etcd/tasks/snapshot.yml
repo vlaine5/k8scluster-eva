@@ -22,7 +22,7 @@
 
 - name: Verify the snapshot (etcdutl snapshot status)
   ansible.builtin.command:
-    argv: [crictl, exec, "{{ etcd_container.stdout | trim }}", etcdutl, snapshot, status, "/var/lib/etcd/{{ etcd_snapshot_name }}", --write-out=json]
+    argv: [sh, -c, "{{ etcd_in_container }}", etcd, etcdutl, snapshot, status, "/var/lib/etcd/{{ etcd_snapshot_name }}", --write-out=json]
   register: etcd_snapshot_status
   changed_when: false
   become: true

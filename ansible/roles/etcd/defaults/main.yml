@@ -1,9 +1,16 @@
 ---
 # etcdctl exécuté dans le conteneur etcd (certificats kubeadm montés dans le Pod).
+# Le conteneur est retrouvé à CHAQUE appel : kubelet le recrée (mise à niveau,
+# redémarrage), et un identifiant relevé plus tôt ne désigne plus rien.
+etcd_in_container: >-
+  id=$(crictl ps --name '^etcd$' --state Running --quiet | head -n 1);
+  if [ -z "$id" ]; then echo "no running etcd container" >&2; exit 3; fi;
+  exec crictl exec "$id" "$@"
 etcd_ctl:
-  - crictl
-  - exec
-  - "{{ etcd_container.stdout | trim }}"
+  - sh
+  - -c
+  - "{{ etcd_in_container }}"
+  - etcd
   - etcdctl
   - --endpoints=https://127.0.0.1:2379
   - --cacert=/etc/kubernetes/pki/etcd/ca.crt

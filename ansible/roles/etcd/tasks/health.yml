@@ -52,7 +52,8 @@
       - etcd_unhealthy | length == 0
       - etcd_members | selectattr('isLearner', 'defined') | selectattr('isLearner') | list | length == 0
     fail_msg: >-
-      etcd is not healthy: {{ etcd_members | length }} member(s), unhealthy endpoint(s): {{ etcd_unhealthy | join(', ') or 'n/a' }}.
+      etcd is not healthy: {{ etcd_members | length }} member(s), unhealthy endpoint(s): {{ etcd_unhealthy | join(', ') or 'n/a' }}
+      ({{ etcd_health_raw.stderr | default('') | trim | truncate(400) or 'no error output' }}).
       Quorum requires {{ (etcd_members | length // 2) + 1 }} healthy member(s). Do not add or remove control-planes
       until this is fixed (docs/high-availability.md#etcd).
     quiet: true
