@@ -41,6 +41,15 @@
     group: root
     mode: "0755"
 
+# Conteneur kube-vip en cours avant l'écriture du manifeste : sert à détecter son
+# remplacement par kubelet (voir plus bas).
+- name: Find the running kube-vip container
+  ansible.builtin.command:
+    argv: [crictl, ps, --name, kube-vip, --state, running, --quiet]
+  register: api_endpoint_old_container
+  changed_when: false
+  failed_when: false
+
 - name: Write the kube-vip static Pod
   ansible.builtin.template:
     src: kube-vip.yaml.j2
@@ -50,10 +59,26 @@
     mode: "0600"
   register: api_endpoint_manifest
 
-# Quand le manifeste change, kubelet arrête kube-vip puis le relance (une dizaine de
-# secondes) : la VIP disparaît entre-temps. kube-vip joint l'API locale (alias
-# « kubernetes » -> 127.0.0.1), il reprend donc la VIP seul ; on l'attend ici pour que
-# les tâches suivantes, qui passent par la VIP, ne tombent pas dans cet intervalle.
+# Quand le manifeste change, kubelet relit le dossier quelques secondes plus tard, arrête
+# kube-vip puis le relance : la VIP disparaît entre-temps. On attend donc d'abord que le
+# conteneur ait été REMPLACÉ (attendre seulement la VIP passait avant même l'arrêt), puis
+# que l'API réponde par la VIP. kube-vip joint l'API locale (alias « kubernetes » ->
+# 127.0.0.1) : il reprend la VIP seul.
+- name: Wait until kubelet runs kube-vip with the new manifest
+  ansible.builtin.command:
+    argv: [crictl, ps, --name, kube-vip, --state, running, --quiet]
+  register: api_endpoint_new_container
+  changed_when: false
+  failed_when: false
+  until:
+    - api_endpoint_new_container.stdout | trim | length > 0
+    - api_endpoint_new_container.stdout | trim != api_endpoint_old_container.stdout | default('') | trim
+  retries: 24
+  delay: 5
+  when:
+    - api_endpoint_manifest is changed
+    - api_endpoint_phase == 'after-init'
+
 - name: Wait until the API answers on the VIP again
   ansible.builtin.command:
     argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, --raw=/readyz]
@@ -67,12 +92,15 @@
     - api_endpoint_manifest is changed
     - api_endpoint_phase == 'after-init'
 
-- name: Check that the VIP answers
+- name: Check that kube-vip was restarted and that the VIP answers
   ansible.builtin.assert:
-    that: api_endpoint_readyz is skipped or api_endpoint_readyz.rc == 0
+    that: >-
+      api_endpoint_readyz is skipped
+      or (api_endpoint_readyz.rc == 0
+          and api_endpoint_new_container.stdout | trim != api_endpoint_old_container.stdout | default('') | trim)
     fail_msg: >-
-      The API does not answer on {{ k8s_api_endpoint }} 3 minutes after kube-vip was restarted on
-      {{ inventory_hostname }}: {{ api_endpoint_readyz.stderr | default('') | trim | truncate(500) }}.
+      kube-vip was not restarted with its new manifest on {{ inventory_hostname }}, or the API does not answer on
+      {{ k8s_api_endpoint }}: {{ api_endpoint_readyz.stderr | default('') | trim | truncate(500) }}.
       Check kube-vip: sudo crictl ps -a --name kube-vip, then sudo crictl logs <id>
       (docs/high-availability.md). Nothing was reset.
     quiet: true
