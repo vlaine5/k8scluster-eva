@@ -1,0 +1,17 @@
+---
+# Ubuntu / Debian : mise à jour APT (les paquets Kubernetes sont "held").
+- name: Upgrade the packages (APT)
+  ansible.builtin.apt:
+    upgrade: safe
+    update_cache: true
+  register: os_update_apt
+
+- name: Check whether a reboot is required
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: os_update_reboot_flag
+
+- name: Reboot the node when the update requires it
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+  when: os_update_reboot_flag.stat.exists

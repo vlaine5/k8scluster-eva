@@ -1,0 +1,56 @@
+# Argo CD (version verrouillée). Accès : kubectl -n argocd port-forward svc/argo-cd-argocd-server 8080:443
+# ou https://argocd.{{ cfg.GATEWAY_DOMAIN }} si ARGOCD_EXPOSE=true (TLS terminé par la Gateway).
+{% set monitored = 'prometheus-operator-crds' in lab_addon_ids %}
+crds:
+  install: true
+  keep: true
+global:
+  domain: argocd.{{ cfg.GATEWAY_DOMAIN }}
+configs:
+  params:
+    # Derrière la Gateway HTTPS, argocd-server parle HTTP (pas de double TLS).
+    server.insecure: {{ cfg.ARGOCD_EXPOSE | bool }}
+  cm:
+    # Ressources ignorées : celles créées par Cilium/Calico pour chaque endpoint.
+    resource.exclusions: |
+      - apiGroups: [cilium.io]
+        kinds: [CiliumIdentity, CiliumEndpoint, CiliumEndpointSlice]
+        clusters: ["*"]
+dex:
+  enabled: false
+notifications:
+  enabled: false
+controller:
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+  metrics:
+    enabled: {{ monitored }}
+    serviceMonitor:
+      enabled: {{ monitored }}
+server:
+  service:
+    type: ClusterIP
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+  metrics:
+    enabled: {{ monitored }}
+    serviceMonitor:
+      enabled: {{ monitored }}
+repoServer:
+  resources:
+    requests: {cpu: 20m, memory: 128Mi}
+  metrics:
+    enabled: {{ monitored }}
+    serviceMonitor:
+      enabled: {{ monitored }}
+applicationSet:
+  metrics:
+    enabled: {{ monitored }}
+    serviceMonitor:
+      enabled: {{ monitored }}
+redis:
+  image:
+    repository: "{{ addon_item.components['argo-cd'].redis_image }}"
+    tag: "{{ addon_item.components['argo-cd'].redis_tag }}"
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}

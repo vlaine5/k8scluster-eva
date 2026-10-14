@@ -1,0 +1,39 @@
+id: external-dns
+name: ExternalDNS
+description: >-
+  Crée les enregistrements DNS des Services LoadBalancer et des HTTPRoute dans un DNS supporté
+  (RFC2136 : BIND, Windows DNS... ; Cloudflare ; Pi-hole). Politique upsert-only : aucun
+  enregistrement n'est jamais supprimé automatiquement.
+category: network
+phase: 8
+components: [external-dns]
+integrates_with: [gateway-api-crds, prometheus-operator-crds]
+requires:
+  settings: [EXTERNAL_DNS_PROVIDER, EXTERNAL_DNS_DOMAIN_FILTER]
+settings: [EXTERNAL_DNS_PROVIDER, EXTERNAL_DNS_DOMAIN_FILTER, RFC2136_NAMESERVER, RFC2136_TSIG_KEY_NAME, PIHOLE_SERVER]
+secrets: [RFC2136_TSIG_SECRET, CLOUDFLARE_API_TOKEN, PIHOLE_PASSWORD]
+support:
+  default: supported
+  kind: {status: experimental, note: "Nécessite un serveur DNS joignable depuis le cluster."}
+  minikube: experimental
+validated: []
+resources: {cpu_m: 50, memory_mb: 64}
+install:
+  namespace: external-dns
+  pod_security: restricted
+  secrets:
+    - name: external-dns-credentials
+      namespace: external-dns
+      only_if_any_env: [RFC2136_TSIG_SECRET, CLOUDFLARE_API_TOKEN, PIHOLE_PASSWORD]
+      data:
+        rfc2136-tsig-secret: env:RFC2136_TSIG_SECRET
+        cloudflare-api-token: env:CLOUDFLARE_API_TOKEN
+        pihole-password: env:PIHOLE_PASSWORD
+  releases:
+    - {name: external-dns, component: external-dns, namespace: external-dns, values: values.yaml.j2, timeout: 5m}
+health:
+  - {kind: Deployment, namespace: external-dns, name: external-dns}
+tests: tests/test.yml
+remove:
+  notes: "Les enregistrements DNS déjà créés sont conservés (upsert-only)."
+docs: docs/addons.md#external-dns

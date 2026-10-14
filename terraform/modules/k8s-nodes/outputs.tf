@@ -1,11 +1,16 @@
 output "nodes" {
-  description = "Map of node name => { name, role, index, ip, address (ip/prefix) }."
+  description = "Map of node name => { name, role, index, ip_offset, ip, address (ip/prefix), longhorn_disk }."
   value       = local.nodes
 }
 
+output "control_planes" {
+  description = "List of the control-plane nodes, in order (the first one runs kubeadm init)."
+  value       = [for n in local.control_planes : local.nodes[n.name]]
+}
+
 output "control_plane" {
-  description = "The control-plane node."
-  value       = local.nodes[local.control_plane[0].name]
+  description = "The first control-plane node."
+  value       = local.nodes[local.control_planes[0].name]
 }
 
 output "workers" {
@@ -36,4 +41,9 @@ output "prefix_length" {
 output "ssh_user" {
   description = "User Ansible connects with."
   value       = var.ssh_user
+}
+
+output "longhorn_disk_serial" {
+  description = "Serial number given to the dedicated Longhorn disks (the storage_disk Ansible role looks for it)."
+  value       = "k8slab-longhorn"
 }

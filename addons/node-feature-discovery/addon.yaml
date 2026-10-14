@@ -1,0 +1,23 @@
+id: node-feature-discovery
+name: Node Feature Discovery
+description: >-
+  Détecte les caractéristiques matérielles et logicielles des nœuds (CPU, noyau, PCI...) et les
+  publie en labels feature.node.kubernetes.io/* utilisables pour le placement des Pods.
+category: operations
+phase: 8
+components: [node-feature-discovery]
+integrates_with: [prometheus-operator-crds]
+support:
+  default: supported
+validated: [ci-kind]
+resources: {cpu_m: 100, memory_mb: 128}
+install:
+  namespace: node-feature-discovery
+  pod_security: privileged
+  releases:
+    - {name: node-feature-discovery, component: node-feature-discovery, namespace: node-feature-discovery, values: values.yaml.j2, timeout: 10m}
+health:
+  - {kind: Deployment, namespace: node-feature-discovery, name: node-feature-discovery-master}
+  - {kind: DaemonSet, namespace: node-feature-discovery, name: node-feature-discovery-worker}
+tests: tests/test.yml
+docs: docs/addons.md#node-feature-discovery

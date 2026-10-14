@@ -1,0 +1,64 @@
+---
+# =============================================================================
+#  Rendu hors cluster des modèles des rôles d'installation kubeadm (kubeadm,
+#  jonction, CNI, approbation des certificats, kube-vip, containerd, etcd),
+#  sur un inventaire fictif (control-planes du scénario et 2 workers, tous locaux,
+#  avec une copie de ansible/group_vars/all.yml à côté) :
+#  chaque fichier YAML rendu doit être valide. Utilisé par tests/addons/render-check.
+#    ansible-playbook -i <inventaire fictif> tests/addons/render_core.yml \
+#      -e @vars.json -e @lock.json -e render_dir=/tmp/out
+# =============================================================================
+- name: Render the templates of the kubeadm roles
+  hosts: k8s_cluster
+  connection: local
+  # Faits réels de la machine qui exécute le test (architecture, distribution, IP).
+  gather_facts: true
+  vars:
+    render_roles: "{{ playbook_dir }}/../../ansible/roles"
+    # Valeurs normalement obtenues sur le control-plane pendant l'installation.
+    control_plane_join_token: abcdef.0123456789abcdef
+    control_plane_join_ca_hash: "sha256:{{ '0' * 64 }}"
+    control_plane_certificate_key: "{{ '0' * 64 }}"
+    worker_join_token: abcdef.0123456789abcdef
+    worker_join_ca_hash: "sha256:{{ '0' * 64 }}"
+    api_endpoint_interface: eth0
+    api_endpoint_kubeconfig: /etc/kubernetes/admin.conf
+    render_core_templates:
+      - {file: control_plane/templates/kubeadm-config.yaml.j2, yaml: true, roles: [first]}
+      - {file: control_plane/templates/kubeadm-join-control-plane.yaml.j2, yaml: true, roles: [control_plane]}
+      - {file: worker/templates/kubeadm-join.yaml.j2, yaml: true, roles: [worker]}
+      - {file: cni/templates/calico-values.yaml.j2, yaml: true, roles: [first]}
+      - {file: cni/templates/cilium-values.yaml.j2, yaml: true, roles: [first]}
+      - {file: cluster_core/templates/csr-approver-values.yaml.j2, yaml: true, roles: [first]}
+      - {file: api_endpoint/templates/kube-vip.yaml.j2, yaml: true, roles: [first, control_plane]}
+      - {file: container_runtime/templates/crictl.yaml.j2, yaml: true, roles: [first, control_plane, worker]}
+      - {file: container_runtime/templates/config.toml.j2, yaml: false, roles: [first, control_plane, worker]}
+      - {file: etcd/templates/k8s-lab-etcd-snapshot.sh.j2, yaml: false, roles: [first, control_plane]}
+      - {file: etcd/templates/k8s-lab-etcd-snapshot.service.j2, yaml: false, roles: [first, control_plane]}
+      - {file: etcd/templates/k8s-lab-etcd-snapshot.timer.j2, yaml: false, roles: [first, control_plane]}
+    render_core_role: >-
+      {{ 'first' if inventory_hostname == groups['control_plane'][0]
+         else ('control_plane' if inventory_hostname in groups['control_plane'] else 'worker') }}
+  tasks:
+    - name: Load the role defaults
+      ansible.builtin.include_vars:
+        file: "{{ render_roles }}/{{ item }}/defaults/main.yml"
+      loop: [cni, api_endpoint, control_plane, worker, container_runtime, etcd]
+
+    - name: Create the output directory
+      ansible.builtin.file:
+        path: "{{ render_dir }}/core/{{ inventory_hostname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Render the templates and check the YAML ones
+      ansible.builtin.copy:
+        # from_yaml_all échoue (et fait échouer la tâche) si le YAML rendu est invalide.
+        content: "{{ render_core_text if (render_core_text | from_yaml_all | list if item.yaml else []) is not none else '' }}"
+        dest: "{{ render_dir }}/core/{{ inventory_hostname }}/{{ item.file | basename | regex_replace('\\.j2$', '') }}"
+        mode: "0644"
+      vars:
+        render_core_text: "{{ lookup('ansible.builtin.template', render_roles ~ '/' ~ item.file) }}"
+      loop: "{{ render_core_templates | selectattr('roles', 'contains', render_core_role) | list }}"
+      loop_control:
+        label: "{{ item.file }}"

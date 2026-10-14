@@ -1,0 +1,52 @@
+---
+# =============================================================================
+#  Test d'External Secrets : un SecretStore « fake » (fourni par l'opérateur,
+#  aucun coffre réel) et une ExternalSecret doivent produire un Secret Kubernetes,
+#  puis le mettre à jour quand la source change.
+# =============================================================================
+
+- name: Create a fake store and an ExternalSecret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      - apiVersion: external-secrets.io/v1
+        kind: SecretStore
+        metadata: {name: fake, namespace: "{{ addon_test_ns }}"}
+        spec:
+          provider:
+            fake:
+              data:
+                - {key: /lab/test, value: "{{ eso_test_value }}"}
+      - apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata: {name: test, namespace: "{{ addon_test_ns }}"}
+        spec:
+          refreshInterval: 10s
+          secretStoreRef: {name: fake, kind: SecretStore}
+          target: {name: test-synced}
+          data:
+            - secretKey: password
+              remoteRef: {key: /lab/test}
+  loop: [first-value, second-value]
+  loop_control:
+    loop_var: eso_test_value
+    pause: 1
+
+- name: Wait until the Secret holds the last value of the store
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'secret', 'test-synced', '-o', 'jsonpath={.data.password}'] }}"
+  register: eso_test_secret
+  changed_when: false
+  failed_when: false
+  until: eso_test_secret.rc == 0 and (eso_test_secret.stdout | b64decode) == 'second-value'
+  retries: 18
+  delay: 5
+  no_log: true
+
+- name: Check the synchronised Secret
+  ansible.builtin.assert:
+    that: eso_test_secret.rc == 0 and (eso_test_secret.stdout | b64decode) == 'second-value'
+    fail_msg: "The ExternalSecret was not synchronised (kubectl -n {{ addon_test_ns }} describe externalsecret test)."
+    quiet: true

@@ -1,0 +1,30 @@
+{% if cfg.KYVERNO_POLICY_MODE in ['audit', 'enforce'] %}
+# Politique pédagogique (toujours en audit) : images sans étiquette explicite ou en « latest ».
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: k8s-lab-disallow-latest-tag
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+  annotations:
+    policies.kyverno.io/title: Disallow latest tag
+    policies.kyverno.io/description: >-
+      Une image doit avoir une étiquette (ou un condensé) explicite autre que « latest »,
+      pour que les déploiements soient reproductibles.
+spec:
+  validationActions: [Audit]
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: exclude-system-namespaces
+      expression: >-
+        !(object.metadata.namespace in {{ lab_privileged_namespaces | to_json }})
+  validations:
+    - expression: >-
+        object.spec.containers.all(c, (c.image.contains('@') || c.image.split('/')[c.image.split('/').size() - 1].contains(':'))
+        && !c.image.endsWith(':latest'))
+      message: "Use an explicit image tag or digest (not latest)."
+{% endif %}

@@ -1,0 +1,195 @@
+---
+# =============================================================================
+#  Test de bout en bout de la Gateway partagée :
+#    1. application « echo » publiée par une HTTPRoute (nom echo.<domaine>)
+#    2. HTTP (et redirection 301 vers HTTPS si TLS), HTTPS vérifié par la CA
+#    3. backend dans un AUTRE namespace autorisé par une ReferenceGrant
+#    4. accès depuis votre poste (réseau local) si la Gateway a une IP de LoadBalancer
+# =============================================================================
+
+- name: Name the test resources
+  ansible.builtin.set_fact:
+    gateway_test_host: "echo.{{ cfg.GATEWAY_DOMAIN }}"
+    gateway_test_backend_ns: "{{ addon_test_ns }}-backend"
+    gateway_test_listener: "{{ 'https' if lab.gateway_tls else 'http' }}"
+
+- name: Deploy the echo application in two namespaces
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    wait: true
+    wait_timeout: 300
+    definition:
+      - apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: "{{ gateway_test_backend_ns }}"
+          labels: {app.kubernetes.io/managed-by: k8s-lab, pod-security.kubernetes.io/enforce: baseline}
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: echo, namespace: "{{ item }}"}
+        spec:
+          replicas: 1
+          selector: {matchLabels: {app: echo}}
+          template:
+            metadata: {labels: {app: echo}}
+            spec:
+              containers:
+                - name: echo
+                  image: "{{ lab_test_images.echo }}"
+                  args: [netexec, --http-port=8080]
+                  ports: [{containerPort: 8080}]
+                  readinessProbe: {httpGet: {path: /hostname, port: 8080}}
+      - apiVersion: v1
+        kind: Service
+        metadata: {name: echo, namespace: "{{ item }}"}
+        spec:
+          selector: {app: echo}
+          ports: [{port: 80, targetPort: 8080}]
+  loop: ["{{ addon_test_ns }}", "{{ gateway_test_backend_ns }}"]
+
+- name: Publish the application and a cross-namespace backend
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      - apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata: {name: echo, namespace: "{{ addon_test_ns }}"}
+        spec:
+          parentRefs: [{name: lab-gateway, namespace: gateway-system, sectionName: "{{ gateway_test_listener }}"}]
+          hostnames: ["{{ gateway_test_host }}"]
+          rules:
+            - matches: [{path: {type: PathPrefix, value: /backend}}]
+              filters: [{type: URLRewrite, urlRewrite: {path: {type: ReplacePrefixMatch, replacePrefixMatch: /}}}]
+              backendRefs: [{name: echo, namespace: "{{ gateway_test_backend_ns }}", port: 80}]
+            - backendRefs: [{name: echo, port: 80}]
+      # Sans cette ReferenceGrant, la route n'aurait pas le droit de viser le Service de l'autre namespace.
+      - apiVersion: gateway.networking.k8s.io/v1beta1
+        kind: ReferenceGrant
+        metadata: {name: allow-routes-from-test, namespace: "{{ gateway_test_backend_ns }}"}
+        spec:
+          from: [{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: "{{ addon_test_ns }}"}]
+          to: [{group: "", kind: Service}]
+
+- name: Wait until the route is accepted and its references resolved
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--timeout=180s',
+           '--for=jsonpath={.status.parents[0].conditions[?(@.type==\"' ~ item ~ '\")].status}=True', 'httproute/echo'] }}"
+  loop: [Accepted, ResolvedRefs]
+  changed_when: false
+
+- name: Read the Gateway addresses
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'gateway-system', 'get', 'gateway', 'lab-gateway', '-o', 'jsonpath={.status.addresses[*].value}'] }}"
+  register: gateway_test_addresses
+  changed_when: false
+
+- name: Find the Service of the Gateway
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'service', '-A', '-l', gateway_test_selector, '-o', 'jsonpath={.items[0].spec.clusterIP}'] }}"
+  register: gateway_test_service_ip
+  changed_when: false
+  vars:
+    gateway_test_selector: >-
+      {{ {'traefik': 'app.kubernetes.io/name=traefik',
+          'envoy-gateway': 'gateway.envoyproxy.io/owning-gateway-name=lab-gateway',
+          'cilium': 'gateway.networking.k8s.io/gateway-name=lab-gateway'}[lab.gateway_controller] }}
+
+- name: Choose the in-cluster address of the Gateway
+  ansible.builtin.set_fact:
+    gateway_test_ip: "{{ gateway_test_service_ip.stdout | trim }}"
+    gateway_test_lb_ip: >-
+      {{ gateway_test_addresses.stdout.split() | select('match', '^[0-9.]+$')
+         | reject('equalto', gateway_test_service_ip.stdout | trim) | first | default('') }}
+
+- name: HTTPS through the Gateway, certificate verified with the cluster CA
+  when: lab.gateway_tls | bool
+  block:
+    - name: Read the CA of the Gateway certificate
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', 'gateway-system', 'get', 'secret', 'lab-gateway-tls', '-o', 'jsonpath={.data.ca\\.crt}'] }}"
+      register: gateway_test_ca
+      changed_when: false
+
+    - name: Call over HTTPS (TLS terminated by the Gateway) the host {{ gateway_test_host }}
+      ansible.builtin.include_tasks: "{{ addon_helpers }}/curl.yml"
+      vars:
+        addon_curl_label: HTTPS
+        addon_curl_args: ["-k", "--resolve", "{{ gateway_test_host }}:443:{{ gateway_test_ip }}", "https://{{ gateway_test_host }}/hostname"]
+        addon_curl_expect: echo-
+
+    - name: Check that plain HTTP is redirected to HTTPS
+      ansible.builtin.include_tasks: "{{ addon_helpers }}/curl.yml"
+      vars:
+        addon_curl_label: HTTP to HTTPS redirect
+        addon_curl_args: ["-o", "/dev/null", "-w", "%{http_code} %{redirect_url}", "--resolve", "{{ gateway_test_host }}:80:{{ gateway_test_ip }}",
+                          "http://{{ gateway_test_host }}/hostname"]
+        addon_curl_expect: "301 https://{{ gateway_test_host }}"
+
+    - name: Check that the certificate is signed by the expected CA
+      ansible.builtin.command:
+        argv: "{{ addon_kubectl + ['-n', 'gateway-system', 'get', 'certificate', 'lab-gateway-tls', '-o',
+               'jsonpath={.status.conditions[?(@.type==\"Ready\")].status}'] }}"
+      register: gateway_test_cert
+      changed_when: false
+      failed_when: gateway_test_cert.stdout != 'True' or gateway_test_ca.stdout | length == 0
+
+- name: Call over HTTP the host {{ gateway_test_host }}
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/curl.yml"
+  vars:
+    addon_curl_label: HTTP
+    addon_curl_args: ["--resolve", "{{ gateway_test_host }}:80:{{ gateway_test_ip }}", "http://{{ gateway_test_host }}/hostname"]
+    addon_curl_expect: echo-
+  when: not lab.gateway_tls | bool
+
+- name: Call the cross-namespace backend (ReferenceGrant)
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/curl.yml"
+  vars:
+    addon_curl_label: ReferenceGrant backend
+    addon_curl_args: >-
+      {{ (['-k', '--resolve', gateway_test_host ~ ':443:' ~ gateway_test_ip, 'https://' ~ gateway_test_host ~ '/backend/hostname'])
+         if lab.gateway_tls else
+         (['--resolve', gateway_test_host ~ ':80:' ~ gateway_test_ip, 'http://' ~ gateway_test_host ~ '/backend/hostname']) }}
+    addon_curl_expect: echo-
+
+# curl --resolve : le nom est envoyé en SNI. Un appel HTTPS sur l'IP seule (sans SNI) est
+# refusé par Envoy (Cilium, Envoy Gateway), qui choisit l'écouteur TLS d'après le SNI.
+# -k : la chaîne de certificats est déjà vérifiée plus haut, depuis le cluster.
+- name: Call the Gateway from this workstation through its LoadBalancer IP (local network)
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --silent
+      - --show-error
+      - --fail
+      - --insecure
+      - --max-time
+      - "10"
+      - --resolve
+      - "{{ gateway_test_host }}:{{ 443 if gateway_test_listener == 'https' else 80 }}:{{ gateway_test_lb_ip }}"
+      - "{{ gateway_test_listener }}://{{ gateway_test_host }}/hostname"
+  register: gateway_test_lan
+  until: gateway_test_lan.rc == 0 and gateway_test_lan.stdout is search('echo-')
+  retries: 12
+  delay: 5
+  changed_when: false
+  when: gateway_test_lb_ip | length > 0
+
+- name: Report the LAN access
+  ansible.builtin.debug:
+    msg: >-
+      {{ ('Gateway reachable from this workstation at ' ~ gateway_test_lb_ip ~ ' (add "' ~ gateway_test_lb_ip ~ ' ' ~ gateway_test_host
+          ~ '" to your DNS or /etc/hosts).') if gateway_test_lb_ip | length > 0
+         else 'No LoadBalancer IP on the Gateway (GATEWAY_SERVICE_TYPE=' ~ lab.gateway_service_type ~ '): tested from inside the cluster only.' }}
+
+- name: Delete the backend namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    kind: Namespace
+    name: "{{ gateway_test_backend_ns }}"
+  when: not addon_keep_test_resources | bool

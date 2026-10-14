@@ -1,0 +1,37 @@
+id: kyverno
+name: Kyverno
+description: >-
+  Politiques de sécurité en tant que code : validation, mutation, génération et audit des
+  ressources. Politiques Pod Security « baseline » et politiques pédagogiques en mode audit par
+  défaut (KYVERNO_POLICY_MODE), namespaces système exclus.
+category: security
+phase: 8
+components: [kyverno, kyverno-policies]
+integrates_with: [prometheus-operator-crds]
+settings: [KYVERNO_POLICY_MODE]
+support:
+  default: supported
+validated: [ci-kind]
+resources: {cpu_m: 300, memory_mb: 768}
+install:
+  namespace: kyverno
+  pod_security: baseline
+  releases:
+    - {name: kyverno, component: kyverno, namespace: kyverno, values: values.yaml.j2, timeout: 15m}
+    - name: kyverno-policies
+      component: kyverno-policies
+      namespace: kyverno
+      values: values-policies.yaml.j2
+      timeout: 5m
+      only_if: {KYVERNO_POLICY_MODE: [audit, enforce]}
+  manifests: [policies.yaml.j2]
+health:
+  - {kind: Deployment, namespace: kyverno, name: kyverno-admission-controller}
+  - {kind: Deployment, namespace: kyverno, name: kyverno-background-controller}
+  - {kind: Deployment, namespace: kyverno, name: kyverno-reports-controller}
+tests: tests/test.yml
+# Le test crée un Pod hostNetwork : le namespace de test autorise les Pods privilégiés.
+test_pod_security: privileged
+remove:
+  notes: "Désinstaller supprime les webhooks d'admission : les politiques cessent de s'appliquer."
+docs: docs/security.md#kyverno

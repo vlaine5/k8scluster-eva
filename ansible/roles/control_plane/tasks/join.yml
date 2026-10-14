@@ -1,0 +1,116 @@
+---
+# =============================================================================
+#  Ajout d'un control-plane (kubeadm join --control-plane), un nœud à la fois.
+#
+#  Les certificats partagés (CA, etcd, front-proxy, comptes de service) sont
+#  transmis par le Secret chiffré "kubeadm-certs" : kubeadm le recrée ici avec
+#  une clé neuve (valable 2 h), utilisée en mémoire puis jamais écrite sur votre
+#  poste. Le jeton de join expire au bout de 15 minutes.
+# =============================================================================
+
+- name: Check whether this control-plane already joined the cluster
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: control_plane_kubelet_conf
+
+- name: Join the control-plane
+  when: not control_plane_kubelet_conf.stat.exists
+  block:
+    - name: Check that the cluster has a stable endpoint for additional control-planes
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-system, get, configmap, kubeadm-config,
+               -o, "jsonpath={.data.ClusterConfiguration}"]
+      delegate_to: "{{ k8s_control_plane_host }}"
+      register: control_plane_existing_config
+      changed_when: false
+
+    - name: Refuse to add a control-plane to a cluster without stable endpoint
+      ansible.builtin.assert:
+        that: (control_plane_existing_config.stdout | from_yaml).controlPlaneEndpoint | default('') == k8s_api_endpoint
+        fail_msg: >-
+          The cluster endpoint is "{{ (control_plane_existing_config.stdout | from_yaml).controlPlaneEndpoint | default('') }}",
+          the configuration expects "{{ k8s_api_endpoint }}". A control-plane cannot be added safely:
+          see docs/high-availability.md#passer-de-1-a-3-control-planes. Nothing was changed.
+        quiet: true
+
+    - name: Check the etcd quorum before adding a member
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: health.yml
+        apply:
+          delegate_to: "{{ k8s_control_plane_host }}"
+
+    - name: Upload the control-plane certificates with a fresh encryption key (valid 2 hours)
+      ansible.builtin.command:
+        argv: [kubeadm, init, phase, upload-certs, --upload-certs, "--config={{ control_plane_kubeadm_config }}"]
+      delegate_to: "{{ k8s_control_plane_host }}"
+      register: control_plane_upload_certs
+      changed_when: true
+      no_log: true
+
+    - name: Create a short-lived join token
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - token
+          - create
+          - --ttl={{ control_plane_join_token_ttl }}
+          - --description=k8s-lab join of {{ inventory_hostname }}
+          - --print-join-command
+      delegate_to: "{{ k8s_control_plane_host }}"
+      register: control_plane_join_command
+      changed_when: true
+      no_log: true
+
+    - name: Extract the token, the CA hash and the certificate key
+      ansible.builtin.set_fact:
+        control_plane_join_token: "{{ control_plane_join_command.stdout | regex_search('--token\\s+(\\S+)', '\\1') | first }}"
+        control_plane_join_ca_hash: "{{ control_plane_join_command.stdout | regex_search('--discovery-token-ca-cert-hash\\s+(\\S+)', '\\1') | first }}"
+        control_plane_certificate_key: "{{ control_plane_upload_certs.stdout_lines | select('match', '^[0-9a-f]{64}$') | last }}"
+      no_log: true
+
+    - name: Write the kubeadm join configuration (control-plane)
+      ansible.builtin.template:
+        src: kubeadm-join-control-plane.yaml.j2
+        dest: /etc/kubernetes/kubeadm-join.yaml
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Run kubeadm join --control-plane (etcd member added, certificates downloaded)
+      ansible.builtin.command:
+        argv: [kubeadm, join, --config=/etc/kubernetes/kubeadm-join.yaml]
+        creates: /etc/kubernetes/kubelet.conf
+      register: control_plane_kubeadm_join
+
+  rescue:
+    - name: Explain how to investigate a failed control-plane join
+      ansible.builtin.fail:
+        msg: |
+          "kubeadm join --control-plane" failed on {{ inventory_hostname }}.
+          Error: {{ control_plane_kubeadm_join.stderr | default(ansible_failed_result.msg | default('')) | trim | truncate(1500) }}
+
+          Check that {{ inventory_hostname }} reaches {{ k8s_api_endpoint }} and the other control-planes on
+          TCP 2379-2380 (etcd), then: sudo journalctl -u kubelet --no-pager | tail -50
+          If the etcd member was partially added, list it before retrying:
+            make health (etcd section)   |   docs/high-availability.md#reprise
+          Nothing was reset automatically.
+
+  always:
+    - name: Remove the join configuration (it contains a token and a certificate key)
+      ansible.builtin.file:
+        path: /etc/kubernetes/kubeadm-join.yaml
+        state: absent
+
+- name: Start kube-vip on this control-plane (takes over the VIP if the leader fails)
+  ansible.builtin.include_role:
+    name: api_endpoint
+  when: api_lb_provider == 'kube-vip'
+
+- name: Wait for this etcd member to be healthy
+  ansible.builtin.include_role:
+    name: etcd
+    tasks_from: health.yml
+    apply:
+      delegate_to: "{{ k8s_control_plane_host }}"

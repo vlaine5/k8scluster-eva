@@ -1,0 +1,40 @@
+---
+# =============================================================================
+#  Composants de base du cluster, installés depuis le 1er control-plane :
+#    - kubelet-csr-approver : approuve les certificats de service des kubelets
+#      (serverTLSBootstrap) après vérification du nom et de l'IP du nœud.
+#      Sans lui, kubectl logs/exec et metrics-server ne fonctionneraient pas
+#      (ou exigeraient --kubelet-insecure-tls, que ce lab refuse) ;
+#    - cluster mono-nœud : le control-plane accepte les Pods applicatifs.
+# =============================================================================
+
+- name: Install the kubelet serving certificate approver
+  when: kubelet_serving_certs == 'signed'
+  block:
+    - name: Install Helm on the control-plane
+      ansible.builtin.include_role:
+        name: cni
+        tasks_from: helm.yml
+
+    - name: Install kubelet-csr-approver {{ lab_lock.components['kubelet-csr-approver'].version }}
+      kubernetes.core.helm:
+        name: kubelet-csr-approver
+        chart_ref: "{{ lab_lock.components['kubelet-csr-approver'].chart }}"
+        chart_repo_url: "{{ lab_lock.components['kubelet-csr-approver'].repo }}"
+        chart_version: "{{ lab_lock.components['kubelet-csr-approver'].version }}"
+        release_namespace: kube-system
+        values: "{{ lookup('ansible.builtin.template', 'csr-approver-values.yaml.j2') | from_yaml }}"
+        binary_path: /usr/local/bin/helm
+        kubeconfig: /etc/kubernetes/admin.conf
+        wait: true
+        timeout: 5m0s
+
+- name: Allow application Pods on the control-plane of a single-node cluster
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, taint, nodes, "{{ item }}",
+           "node-role.kubernetes.io/control-plane:NoSchedule-"]
+  loop: "{{ groups['control_plane'] }}"
+  register: cluster_core_untaint
+  changed_when: "'untainted' in cluster_core_untaint.stdout"
+  failed_when: cluster_core_untaint.rc != 0 and 'not found' not in cluster_core_untaint.stderr
+  when: groups['workers'] | default([]) | length == 0

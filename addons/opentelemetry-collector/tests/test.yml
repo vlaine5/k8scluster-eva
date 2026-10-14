@@ -1,0 +1,38 @@
+---
+# =============================================================================
+#  Test du collecteur OpenTelemetry : une trace OTLP/HTTP est acceptée, visible
+#  dans le journal du collecteur, et retrouvée dans Tempo si Tempo est installé.
+# =============================================================================
+
+- name: Choose the trace identifier
+  ansible.builtin.set_fact:
+    addon_trace_id: "{{ '%032x' | format(340282366920938463463374607431768211455 | random) }}"
+
+- name: Send a trace to the collector (OTLP/HTTP)
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/curl.yml"
+  vars:
+    addon_curl_label: OTLP trace to the collector
+    addon_curl_args: >-
+      {{ ['-X', 'POST', '-H', 'Content-Type: application/json', '-o', '/dev/null', '-w', '%{http_code}',
+          'http://otel-collector-opentelemetry-collector.opentelemetry:4318/v1/traces',
+          '-d', lookup('ansible.builtin.template', addon_helpers ~ '/otlp-trace.json.j2') | from_json | to_json] }}
+    addon_curl_expect: "200"
+
+- name: Check that the collector received the span
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'opentelemetry', 'logs', 'deploy/otel-collector-opentelemetry-collector', '--since=5m'] }}"
+  register: otel_test_logs
+  changed_when: false
+  until: "'Traces' in otel_test_logs.stdout or 'spans' in otel_test_logs.stdout"
+  retries: 12
+  delay: 5
+
+- name: Find the trace in Tempo
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', '--raw', '/api/v1/namespaces/tracing/services/http:tempo:3200/proxy/api/v2/traces/' ~ addon_trace_id] }}"
+  register: otel_test_tempo
+  changed_when: false
+  until: otel_test_tempo.rc == 0 and 'k8s-lab-test' in otel_test_tempo.stdout
+  retries: 18
+  delay: 10
+  when: "'tempo' in lab_addon_ids"

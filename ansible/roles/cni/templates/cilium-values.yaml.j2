@@ -1,0 +1,75 @@
+# {{ ansible_managed }}
+# Valeurs du chart Cilium {{ k8s_cni_version }} (référence : helm show values cilium/cilium).
+{% set lb = loadbalancer.provider | default('none') %}
+{% set kpr = kube_proxy_mode == 'cilium' %}
+cluster:
+  name: "{{ k8s_cluster_name }}"
+ipam:
+  mode: cluster-pool
+  operator:
+    clusterPoolIPv4PodCIDRList: ["{{ pod_cidr }}"]
+    clusterPoolIPv4MaskSize: 24
+{% if k8s_cni_mode == 'native' %}
+# Routage direct : tous les nœuds sur le même réseau L2.
+routingMode: native
+autoDirectNodeRoutes: true
+ipv4NativeRoutingCIDR: "{{ pod_cidr }}"
+{% else %}
+routingMode: tunnel
+tunnelProtocol: "{{ k8s_cni_mode }}"
+{% endif %}
+kubeProxyReplacement: {{ kpr | lower }}
+{% if kpr %}
+k8sServiceHost: "{{ cni_api_host }}"
+k8sServicePort: {{ cni_api_port }}
+{% endif %}
+operator:
+  replicas: {{ 2 if groups['k8s_cluster'] | default(['x']) | length > 1 else 1 }}
+  prometheus:
+    enabled: true
+prometheus:
+  enabled: true
+hubble:
+  enabled: {{ hubble.enabled | default(false) | lower }}
+{% if hubble.enabled | default(false) %}
+  relay:
+    enabled: true
+  ui:
+    enabled: {{ hubble.ui | default(false) | lower }}
+  metrics:
+    enabled:
+      - dns
+      - drop
+      - tcp
+      - flow
+      - port-distribution
+      - icmp
+      - "httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction"
+{% endif %}
+gatewayAPI:
+  enabled: {{ (gateway_api_crds.install_with_cni | default(false)) | lower }}
+# Gestion des Services LoadBalancer : un seul propriétaire par Service.
+{% if lb == 'metallb' %}
+# MetalLB attribue les IP : le LB IPAM de Cilium est désactivé par défaut.
+defaultLBServiceIPAM: none
+{% endif %}
+l2announcements:
+  enabled: {{ (lb == 'cilium-l2') | lower }}
+externalIPs:
+  enabled: {{ lb.startswith('cilium') | lower }}
+{% if lb == 'cilium-l2' %}
+# Les annonces L2 utilisent des baux Kubernetes : limite de requêtes relevée (doc Cilium).
+k8sClientRateLimit:
+  qps: 50
+  burst: 100
+{% endif %}
+bgpControlPlane:
+  enabled: {{ (lb == 'cilium-bgp') | lower }}
+{% if istio_selected | default(false) %}
+# Istio (sidecars) : le load balancing par socket ne s'applique qu'au réseau de l'hôte.
+socketLB:
+  hostNamespaceOnly: true
+# L'agent CNI d'Istio s'enchaîne après Cilium : Cilium ne doit pas retirer les autres configurations CNI.
+cni:
+  exclusive: false
+{% endif %}

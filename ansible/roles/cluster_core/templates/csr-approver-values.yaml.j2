@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+# kubelet-csr-approver : n'approuve QUE les certificats de service des nœuds du
+# lab (nom exact et adresse IP exacte), refuse les autres.
+# Guillemets simples : YAML n'y interprète pas les « \ » produits par regex_escape.
+providerRegex: '^({{ groups['k8s_cluster'] | map('regex_escape') | join('|') }})$'
+providerIpPrefixes:
+{% for host in groups['k8s_cluster'] %}
+  - "{{ hostvars[host]['k8s_node_ip'] }}/32"
+{% endfor %}
+# Les nœuds d'un homelab n'ont souvent pas d'enregistrement DNS : la vérification
+# porte sur le nom (regex ci-dessus) et l'adresse IP.
+bypassDnsResolution: true
+maxExpirationSeconds: "31622400"
+replicas: {{ 2 if groups['k8s_cluster'] | length > 1 else 1 }}
+tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/control-plane
+    operator: Exists

@@ -1,0 +1,108 @@
+---
+# =============================================================================
+#  Test d'Istio : dans un namespace avec injection, les Pods reçoivent le sidecar,
+#  communiquent à travers lui, et le mTLS STRICT est appliqué (un client hors
+#  maillage est refusé).
+# =============================================================================
+
+- name: Deploy a meshed server
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    wait: true
+    wait_timeout: 300
+    definition:
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: echo, namespace: "{{ addon_test_ns }}"}
+        spec:
+          replicas: 1
+          selector: {matchLabels: {app: echo}}
+          template:
+            metadata: {labels: {app: echo}}
+            spec:
+              containers:
+                - name: echo
+                  image: "{{ lab_test_images.echo }}"
+                  args: [netexec, --http-port=8080]
+                  ports: [{containerPort: 8080, name: http}]
+                  readinessProbe: {httpGet: {path: /hostname, port: 8080}}
+      - apiVersion: v1
+        kind: Service
+        metadata: {name: echo, namespace: "{{ addon_test_ns }}"}
+        spec:
+          selector: {app: echo}
+          ports: [{port: 80, targetPort: 8080, name: http}]
+      - apiVersion: security.istio.io/v1
+        kind: PeerAuthentication
+        metadata: {name: default, namespace: "{{ addon_test_ns }}"}
+        spec:
+          mtls: {mode: STRICT}
+
+- name: Check that the sidecar was injected
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'pods', '-l', 'app=echo', '-o',
+           'jsonpath={.items[0].spec.containers[*].name} {.items[0].spec.initContainers[*].name}'] }}"
+  register: istio_test_containers
+  changed_when: false
+  failed_when: "'istio-proxy' not in istio_test_containers.stdout"
+
+- name: Deploy a meshed client
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    wait: true
+    wait_timeout: 300
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: client, namespace: "{{ addon_test_ns }}"}
+      spec:
+        replicas: 1
+        selector: {matchLabels: {app: client}}
+        template:
+          metadata: {labels: {app: client}}
+          spec:
+            containers:
+              - {name: client, image: "{{ lab_test_images.curl }}", command: [sleep, "3600"]}
+
+- name: Call the server from the meshed client (mTLS through the sidecars)
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'exec', 'deploy/client', '-c', 'client', '--', 'curl', '-sS', '--max-time', '10',
+           'http://echo/hostname'] }}"
+  register: istio_test_meshed
+  changed_when: false
+  until: istio_test_meshed.rc == 0 and 'echo-' in istio_test_meshed.stdout
+  retries: 12
+  delay: 5
+
+- name: Create a namespace outside the mesh
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ addon_test_ns }}-outside"
+        labels: {app.kubernetes.io/managed-by: k8s-lab, pod-security.kubernetes.io/enforce: baseline}
+
+- name: Check that a client outside the mesh is refused (mTLS STRICT)
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns ~ '-outside', 'run', 'outside', '--rm', '-i', '--restart=Never', '--quiet',
+           '--image=' ~ lab_test_images.curl, '--pod-running-timeout=3m', '--command', '--', 'curl', '-sS', '--max-time', '10',
+           'http://echo.' ~ addon_test_ns ~ '/hostname'] }}"
+  register: istio_test_outside
+  changed_when: false
+  failed_when: istio_test_outside.rc == 0 and 'echo-' in istio_test_outside.stdout
+
+- name: Delete the namespace outside the mesh
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    kind: Namespace
+    name: "{{ addon_test_ns }}-outside"

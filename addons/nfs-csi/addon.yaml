@@ -1,0 +1,39 @@
+id: nfs-csi
+name: NFS CSI Driver
+description: >-
+  Pilote CSI officiel nfs.csi.k8s.io : provisionnement dynamique de volumes (RWO et RWX) dans un
+  sous-dossier d'un export NFS existant (NAS Synology...). Politique Retain par défaut.
+category: storage
+phase: 6
+components: [csi-driver-nfs]
+integrates_with: [snapshot-controller, prometheus-operator-crds]
+selected_by:
+  STORAGE_BACKENDS: [nfs-csi]
+requires:
+  settings: [NFS_SERVER, NFS_SHARE]
+settings: [NFS_SERVER, NFS_SHARE, NFS_VERSION, NFS_STORAGE_CLASS, NFS_RECLAIM_POLICY, NFS_MOUNT_OPTIONS, NFS_SUBDIR]
+stateful: true
+support:
+  default: supported
+  kind: {status: configured, note: "Le serveur NFS doit être joignable depuis les conteneurs kind (CI : serveur NFS de test dans le cluster)."}
+  minikube: {status: experimental, note: "Selon le driver et le réseau de minikube."}
+  eks: {status: experimental, note: "Préférez EFS ou EBS ; le serveur NFS doit être joignable depuis le VPC."}
+validated: [ci-kind]
+resources: {cpu_m: 50, memory_mb: 128}
+node_prereqs:
+  packages: {debian: [nfs-common], redhat: [nfs-utils]}
+install:
+  namespace: kube-system
+  releases:
+    - {name: csi-driver-nfs, component: csi-driver-nfs, namespace: kube-system, values: values.yaml.j2, timeout: 10m}
+  manifests: [storageclass.yaml.j2]
+health:
+  - {kind: Deployment, namespace: kube-system, name: csi-nfs-controller}
+  - {kind: DaemonSet, namespace: kube-system, name: csi-nfs-node}
+  - {kind: CSIDriver, name: nfs.csi.k8s.io}
+tests: tests/test.yml
+remove:
+  notes: >-
+    helm uninstall du pilote uniquement. La StorageClass, les PV et les DONNÉES sur le NAS sont
+    conservés. Les PVC existants ne pourront plus être montés tant que le pilote est absent.
+docs: docs/storage-nfs.md

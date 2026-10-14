@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Vérifie que les valeurs par défaut recopiées hors de config/lab.env
-#  (variables Terraform, group_vars Ansible, config kind versionnée) sont
-#  identiques à celles de config/lab.env. Lancé par la CI et "make check-config".
+#  Vérifie que les valeurs par défaut recopiées hors de config/lab.env et de
+#  config/versions.yaml (variables Terraform, group_vars Ansible, boîtes
+#  Vagrant, config kind versionnée) leur sont identiques. Lancé par la CI et
+#  "make check-config".
 #
 #  Pourquoi des copies ? Terraform et Ansible doivent rester utilisables seuls
 #  (sans ./k8s-lab). Ce script empêche qu'elles divergent.
@@ -39,49 +40,82 @@ expect() {
   fi
 }
 
+# Valeur résolue par scripts/labctl avec la configuration PAR DÉFAUT (sans .env).
+resolved() {
+  LAB_ENV_FILE=/dev/null env -i PATH="${PATH}" HOME="${HOME}" LAB_ENV_FILE=/dev/null \
+    python3 "${ROOT}/scripts/labctl" get "$2" --mode "$1" ${3:+--provider "$3"}
+}
+
+# Valeur de config/versions.yaml (chemin pointé : os.ubuntu.24.04.image_url).
+locked() {
+  python3 - "${ROOT}/config/versions.yaml" "$1" <<'PY'
+import sys, yaml
+value = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+key = sys.argv[2]
+if key.startswith("os."):
+    name, rest = key[3:].split(".", 1)
+    version, field = rest.rsplit(".", 1)
+    path = ["os", name, version, field]
+else:
+    path = key.split(".")
+for part in path:
+    value = value[part]
+print(value)
+PY
+}
+
 echo "Terraform (valeurs par défaut des variables) :"
 for provider in proxmox vsphere libvirt; do
   file="${ROOT}/terraform/providers/${provider}/variables.tf"
   expect "${provider}: cluster_name" "$(tf_default "${file}" cluster_name)" "$(lab_value CLUSTER_NAME)"
+  expect "${provider}: control_plane_count" "$(tf_default "${file}" control_plane_count)" "$(lab_value CONTROL_PLANE_COUNT)"
   expect "${provider}: worker_count" "$(tf_default "${file}" worker_count)" "$(lab_value WORKER_COUNT)"
   expect "${provider}: hostname_prefix" "$(tf_default "${file}" hostname_prefix)" "$(lab_value NODE_HOSTNAME_PREFIX)"
   expect "${provider}: node_cpus" "$(tf_default "${file}" node_cpus)" "$(lab_value NODE_CPUS)"
   expect "${provider}: node_memory_mb" "$(tf_default "${file}" node_memory_mb)" "$(lab_value NODE_MEMORY_MB)"
   expect "${provider}: node_disk_gb" "$(tf_default "${file}" node_disk_gb)" "$(lab_value NODE_DISK_GB)"
 done
-expect "proxmox: image_url" "$(tf_default "${ROOT}/terraform/providers/proxmox/variables.tf" image_url)" "$(lab_value VM_IMAGE_URL)"
-expect "proxmox: image_sha256" "$(tf_default "${ROOT}/terraform/providers/proxmox/variables.tf" image_sha256)" "$(lab_value VM_IMAGE_SHA256)"
-expect "libvirt: image_source" "$(tf_default "${ROOT}/terraform/providers/libvirt/variables.tf" image_source)" "$(lab_value VM_IMAGE_URL)"
+default_os="$(lab_value NODE_OS).$(lab_value NODE_OS_VERSION)"
+expect "proxmox: image_url" "$(tf_default "${ROOT}/terraform/providers/proxmox/variables.tf" image_url)" "$(locked "os.${default_os}.image_url")"
+expect "proxmox: image_sha256" "$(tf_default "${ROOT}/terraform/providers/proxmox/variables.tf" image_sha256)" "$(locked "os.${default_os}.image_sha256")"
+expect "proxmox: cpu_type" "$(tf_default "${ROOT}/terraform/providers/proxmox/variables.tf" cpu_type)" "$(lab_value NODE_CPU_TYPE)"
+expect "libvirt: image_source" "$(tf_default "${ROOT}/terraform/providers/libvirt/variables.tf" image_source)" "$(locked "os.${default_os}.image_url")"
 expect "module k8s-nodes: worker_count" "$(tf_default "${ROOT}/terraform/modules/k8s-nodes/variables.tf" worker_count)" "$(lab_value WORKER_COUNT)"
+expect "module k8s-nodes: control_plane_count" "$(tf_default "${ROOT}/terraform/modules/k8s-nodes/variables.tf" control_plane_count)" "$(lab_value CONTROL_PLANE_COUNT)"
+expect "module k8s-nodes: hostname_prefix" "$(tf_default "${ROOT}/terraform/modules/k8s-nodes/variables.tf" hostname_prefix)" "$(lab_value NODE_HOSTNAME_PREFIX)"
 eks="${ROOT}/terraform/providers/eks/variables.tf"
 expect "eks: cluster_name" "$(tf_default "${eks}" cluster_name)" "$(lab_value CLUSTER_NAME)"
 expect "eks: worker_count" "$(tf_default "${eks}" worker_count)" "$(lab_value WORKER_COUNT)"
 expect "eks: kubernetes_version" "$(tf_default "${eks}" kubernetes_version)" "$(lab_value EKS_KUBERNETES_VERSION)"
 expect "eks: aws_target" "$(tf_default "${eks}" aws_target)" "$(lab_value AWS_TARGET)"
 expect "eks: localstack_endpoint" "$(tf_default "${eks}" localstack_endpoint)" "$(lab_value LOCALSTACK_ENDPOINT)"
-expect "module k8s-nodes: hostname_prefix" "$(tf_default "${ROOT}/terraform/modules/k8s-nodes/variables.tf" hostname_prefix)" "$(lab_value NODE_HOSTNAME_PREFIX)"
 
-echo "Ansible (ansible/group_vars/all.yml) :"
+echo "Ansible (ansible/group_vars/all.yml, utilisé seul sans ./k8s-lab) :"
 vars="${ROOT}/ansible/group_vars/all.yml"
 expect "kubernetes_version" "$(yaml_value "${vars}" kubernetes_version)" "$(lab_value KUBERNETES_VERSION)"
 expect "pod_cidr" "$(yaml_value "${vars}" pod_cidr)" "$(lab_value POD_CIDR)"
 expect "service_cidr" "$(yaml_value "${vars}" service_cidr)" "$(lab_value SERVICE_CIDR)"
-expect "cni" "$(yaml_value "${vars}" cni)" "$(lab_value CNI)"
-expect "flannel_version" "$(yaml_value "${vars}" flannel_version)" "$(lab_value FLANNEL_VERSION)"
-expect "container_runtime" "$(yaml_value "${vars}" container_runtime)" "$(lab_value CONTAINER_RUNTIME)"
-expect "containerd_version" "$(yaml_value "${vars}" containerd_version)" "$(lab_value CONTAINERD_VERSION)"
-if grep -q "^  $(lab_value FLANNEL_VERSION): \"sha256:[0-9a-f]\{64\}\"$" "${ROOT}/ansible/roles/cni/defaults/main.yml"; then
-  printf '  ok     checksum du manifeste Flannel %s connu\n' "$(lab_value FLANNEL_VERSION)"
-else
-  printf '  DRIFT  aucun checksum pour Flannel %s dans roles/cni/defaults/main.yml\n' "$(lab_value FLANNEL_VERSION)"
-  ERRORS=$((ERRORS + 1))
-fi
+expect "cni (CNI=auto en kubeadm)" "$(yaml_value "${vars}" cni)" "$(resolved vagrant cni)"
+expect "flannel_version" "$(yaml_value "${vars}" flannel_version)" "$(locked components.flannel.version)"
+expect "containerd_version" "$(yaml_value "${vars}" containerd_version)" "$(locked containerd.version)"
+
+echo "Vagrant (boîtes par OS de vagrant/Vagrantfile) :"
+for entry in ubuntu.24.04 ubuntu.26.04 debian.12 debian.13 rocky.9 rocky.10; do
+  key="${entry%%.*}-${entry#*.}"
+  box="$(sed -n -E "s/.*\"${key}\" => \"([^\"]+)\".*/\\1/p" "${ROOT}/vagrant/Vagrantfile" | head -n1)"
+  expect "box ${key}" "${box}" "$(locked "os.${entry}.vagrant_box")"
+done
 
 echo "Kind (local/kind/kind-config.yaml) :"
-if diff -u "${ROOT}/local/kind/kind-config.yaml" <(env -i PATH="${PATH}" HOME="${HOME}" NO_COLOR=1 "${ROOT}/k8s-lab" config kind); then
+generated="$(env -i PATH="${PATH}" HOME="${HOME}" NO_COLOR=1 LAB_ENV_FILE=/dev/null "${ROOT}/k8s-lab" config kind-config)" ||
+  generated=""
+if [[ -z "${generated}" ]]; then
+  printf '  DRIFT  ./k8s-lab config kind-config a échoué\n'
+  ERRORS=$((ERRORS + 1))
+elif diff -u "${ROOT}/local/kind/kind-config.yaml" <(printf '%s\n' "${generated}"); then
   printf '  ok     identique à la configuration générée par défaut\n'
 else
-  printf '  DRIFT  régénérez-la : ./k8s-lab config kind > local/kind/kind-config.yaml\n'
+  printf '  DRIFT  régénérez-la : LAB_ENV_FILE=/dev/null ./k8s-lab config kind-config > local/kind/kind-config.yaml\n'
   ERRORS=$((ERRORS + 1))
 fi
 

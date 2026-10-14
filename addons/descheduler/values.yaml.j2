@@ -1,0 +1,37 @@
+# Descheduler (CronJob toutes les 30 minutes) : rééquilibre les Pods entre les nœuds
+# (doublons, nœuds sous/sur-utilisés, règles d'affinité violées). Jamais évincés : les
+# Pods des namespaces système, avec un volume persistant ou du stockage local, des
+# DaemonSets, ou de priorité système.
+kind: CronJob
+schedule: "*/30 * * * *"
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+deschedulerPolicy:
+  profiles:
+    - name: default
+      pluginConfig:
+        - name: DefaultEvictor
+          args:
+            namespaceLabelSelector:
+              matchExpressions:
+                - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, kube-public, kube-node-lease]}
+            # PodsWithLocalStorage, DaemonSetPods, SystemCriticalPods et FailedBarePods sont
+            # protégés par défaut : les citer dans extraEnabled rend la politique invalide.
+            podProtections:
+              extraEnabled: [PodsWithPVC]
+        - name: RemoveDuplicates
+        - name: RemovePodsViolatingNodeAffinity
+          args:
+            nodeAffinityType: [requiredDuringSchedulingIgnoredDuringExecution]
+        - name: RemovePodsViolatingNodeTaints
+        - name: RemovePodsViolatingInterPodAntiAffinity
+        - name: RemovePodsViolatingTopologySpreadConstraint
+        - name: LowNodeUtilization
+          args:
+            thresholds: {cpu: 20, memory: 20, pods: 20}
+            targetThresholds: {cpu: 60, memory: 60, pods: 60}
+      plugins:
+        balance:
+          enabled: [RemoveDuplicates, RemovePodsViolatingTopologySpreadConstraint, LowNodeUtilization]
+        deschedule:
+          enabled: [RemovePodsViolatingNodeTaints, RemovePodsViolatingNodeAffinity, RemovePodsViolatingInterPodAntiAffinity]

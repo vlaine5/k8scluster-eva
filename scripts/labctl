@@ -1,0 +1,411 @@
+#!/usr/bin/env python3
+"""labctl : moteur de configuration du lab (appelé par ./k8s-lab, la CI et les tests).
+
+    scripts/labctl validate  --mode terraform --provider proxmox
+    scripts/labctl show      --mode kind          # configuration effective (secrets masqués)
+    scripts/labctl plan      --mode kind          # addons, dépendances, ordre
+    scripts/labctl ansible-vars --mode vagrant --output .lab/ansible/cluster-vars.json
+    scripts/labctl manifest  --mode kind          # manifeste de déploiement (sans secret)
+    scripts/labctl catalog | catalog-check | schema-check | matrix | versions | versions-check
+    scripts/labctl detect --kubeconfig FILE --context NAME     # mode attach
+
+Ne modifie jamais rien : lecture et validation uniquement.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+try:
+    import yaml  # noqa: F401
+except ImportError:  # pragma: no cover - message pour l'utilisateur
+    sys.stderr.write(
+        "[erreur] Le module Python PyYAML est requis par ./k8s-lab (validation de la configuration).\n"
+        "  Installation : make venv   (environnement Python du lab, versions épinglées)\n"
+        "  ou : python3 -m pip install --user pyyaml   (Ubuntu/Debian : sudo apt install python3-yaml)\n")
+    sys.exit(3)
+
+from labcore import render  # noqa: E402
+from labcore.catalog import Catalog, CatalogError  # noqa: E402
+from labcore.config import Config  # noqa: E402
+from labcore.resolve import Resolver  # noqa: E402
+
+
+def load(args):
+    # LAB_ENV_FILE : autre fichier que .env (profils d'exemple, scénarios de test).
+    env_file = os.environ.get("LAB_ENV_FILE")
+    cfg = Config.load(ROOT, dotenv=Path(env_file).resolve() if env_file else None)
+    try:
+        catalog = Catalog.load(ROOT)
+    except CatalogError as exc:
+        sys.stderr.write(f"[erreur] Catalogue d'addons invalide : {exc}\n")
+        sys.exit(2)
+    mode = getattr(args, "mode", None) or cfg.get("DEPLOYMENT_MODE")
+    provider = getattr(args, "provider", None) or (cfg.get("DEPLOYMENT_PROVIDER") if mode == "terraform" else "")
+    return cfg, catalog, mode, provider
+
+
+def resolve(args):
+    cfg, catalog, mode, provider = load(args)
+    if not mode:
+        sys.stderr.write("[erreur] Mode non précisé : MODE=... (make) ou DEPLOYMENT_MODE dans .env.\n")
+        sys.exit(2)
+    plan = Resolver(cfg, catalog, mode, provider or "", getattr(args, "cluster_version", "") or "").run()
+    return cfg, catalog, plan
+
+
+def color_enabled() -> bool:
+    return sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+def write_output(text: str, path: str | None) -> None:
+    if not path:
+        sys.stdout.write(text if text.endswith("\n") else text + "\n")
+        return
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    tmp.replace(target)
+
+
+def cmd_validate(args) -> int:
+    _, _, plan = resolve(args)
+    text = render.issues_text(plan, color=color_enabled(), show_info=not args.quiet)
+    if text:
+        print(text, file=sys.stderr if plan.errors else sys.stdout)
+    if plan.errors:
+        print(f"\n{len(plan.errors)} erreur(s) de configuration : rien n'a été modifié.", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_show(args) -> int:
+    cfg, _, plan = resolve(args)
+    color = color_enabled()
+    print(render.config_text(cfg, color))
+    print()
+    print(render.summary_text(plan, color))
+    if plan.addons:
+        print()
+        print(render.plan_text(plan, color))
+    issues = render.issues_text(plan, color)
+    if issues:
+        print()
+        print(issues)
+    return 1 if plan.errors else 0
+
+
+def cmd_plan(args) -> int:
+    _, _, plan = resolve(args)
+    color = color_enabled()
+    print(render.summary_text(plan, color))
+    print()
+    print(render.plan_text(plan, color))
+    issues = render.issues_text(plan, color)
+    if issues:
+        print()
+        print(issues)
+    return 1 if plan.errors else 0
+
+
+def cmd_ansible_vars(args) -> int:
+    cfg, catalog, plan = resolve(args)
+    if plan.errors:
+        print(render.issues_text(plan, show_info=False), file=sys.stderr)
+        return 1
+    write_output(render.to_json(render.ansible_vars(plan, cfg, catalog)), args.output)
+    return 0
+
+
+def cmd_manifest(args) -> int:
+    cfg, catalog, plan = resolve(args)
+    data = render.deployment_manifest(plan, cfg, catalog)
+    text = render.to_json(data) if args.format == "json" else render.to_yaml(data)
+    write_output(text, args.output)
+    return 0
+
+
+def cmd_shell(args) -> int:
+    cfg, _, plan = resolve(args)
+    sys.stdout.write(render.shell_exports(plan, cfg))
+    return 0
+
+
+def cmd_catalog(args) -> int:
+    _, catalog, _, _ = load(args)
+    for addon in sorted(catalog.addons.values(), key=lambda a: (a.phase, a.id)):
+        flag = " (interne)" if addon.internal else ""
+        print(f"{addon.id:<26} {addon.category:<15} {addon.name}{flag}")
+    print("\nDétails : docs/addons.md   Compatibilité : docs/compatibility.md")
+    return 0
+
+
+def cmd_catalog_check(args) -> int:
+    cfg, catalog, _, _ = load(args)
+    problems = catalog.check_files()
+    # Tout le catalogue sélectionné d'un coup doit pouvoir s'ordonner (pas de cycle).
+    from labcore.resolve import Resolver as _R
+    resolver = _R(cfg, catalog, "existing")
+    resolver.selected = {a: ["test"] for a in catalog.addons if a not in ("falco",)}
+    resolver._order_addons()  # noqa: SLF001 - contrôle interne
+    problems += [i.message for i in resolver.plan.errors]
+    for message in problems:
+        print(f"  {message}")
+    print("Catalogue d'addons : " + ("OK" if not problems else f"{len(problems)} problème(s)"))
+    return 1 if problems else 0
+
+
+def cmd_schema_check(args) -> int:
+    cfg, _, _, _ = load(args)
+    problems = []
+    for key in cfg.lab_keys:
+        if key not in cfg.schema.variables:
+            problems.append(f"config/lab.env : {key} n'est pas décrit dans config/schema.yaml")
+    for key, spec in cfg.schema.variables.items():
+        if spec.lab_env and key not in cfg.lab_keys:
+            problems.append(f"config/schema.yaml : {key} est absent de config/lab.env (ou lab_env: false)")
+        if spec.secret and key in cfg.lab_keys:
+            problems.append(f"config/lab.env : {key} est un secret, il ne doit pas y figurer")
+    for message in problems:
+        print(f"  {message}")
+    print("Schéma de configuration : " + ("OK" if not problems else f"{len(problems)} problème(s)"))
+    return 1 if problems else 0
+
+
+def cmd_matrix(args) -> int:
+    _, catalog, _, _ = load(args)
+    text = ("<!-- BEGIN GENERATED: addons -->\n" + render.matrix_markdown(catalog) + "<!-- END GENERATED: addons -->\n"
+            "\n" + "<!-- BEGIN GENERATED: os -->\n" + render.os_matrix_markdown(catalog) + "<!-- END GENERATED: os -->\n")
+    if args.check:
+        doc = Path(args.check).read_text(encoding="utf-8")
+        for marker in ("addons", "os"):
+            begin, end = f"<!-- BEGIN GENERATED: {marker} -->", f"<!-- END GENERATED: {marker} -->"
+            generated = text[text.index(begin):text.index(end) + len(end)]
+            if generated not in doc:
+                print(f"{args.check} : la section générée « {marker} » n'est pas à jour.\n"
+                      f"  Régénérez-la : make docs-generate", file=sys.stderr)
+                return 1
+        print(f"{args.check} : matrices de compatibilité à jour.")
+        return 0
+    if args.write:
+        doc_path = Path(args.write)
+        doc = doc_path.read_text(encoding="utf-8")
+        for marker in ("addons", "os"):
+            begin, end = f"<!-- BEGIN GENERATED: {marker} -->", f"<!-- END GENERATED: {marker} -->"
+            generated = text[text.index(begin):text.index(end) + len(end)]
+            if begin not in doc or end not in doc:
+                print(f"{doc_path} : marqueurs {begin} / {end} absents.", file=sys.stderr)
+                return 1
+            doc = doc[:doc.index(begin)] + generated + doc[doc.index(end) + len(end):]
+        doc_path.write_text(doc, encoding="utf-8")
+        print(f"{doc_path} : matrices régénérées.")
+        return 0
+    sys.stdout.write(text)
+    return 0
+
+
+def cmd_docs(args) -> int:
+    """Sections générées de la documentation (<!-- BEGIN GENERATED: x --> ... <!-- END GENERATED: x -->)."""
+    cfg, catalog, _, _ = load(args)
+    stale = 0
+    for relative, sections in render.generated_sections(cfg, catalog).items():
+        path = ROOT / relative
+        if not path.is_file():
+            print(f"{relative} : fichier absent.", file=sys.stderr)
+            stale += 1
+            continue
+        doc = original = path.read_text(encoding="utf-8")
+        for marker, content in sections.items():
+            begin, end = f"<!-- BEGIN GENERATED: {marker} -->", f"<!-- END GENERATED: {marker} -->"
+            if begin not in doc or end not in doc:
+                print(f"{relative} : marqueurs {begin} / {end} absents.", file=sys.stderr)
+                stale += 1
+                continue
+            doc = doc[:doc.index(begin) + len(begin)] + "\n" + content.rstrip("\n") + "\n" + doc[doc.index(end):]
+        if doc != original:
+            if args.write:
+                path.write_text(doc, encoding="utf-8")
+                print(f"{relative} : sections générées mises à jour.")
+            else:
+                print(f"{relative} : sections générées obsolètes. Régénérez-les : make docs-generate", file=sys.stderr)
+                stale += 1
+    if not args.write and not stale:
+        print("Documentation générée à jour (variables, catalogue, versions, compatibilité).")
+    return 1 if stale else 0
+
+
+def cmd_versions(args) -> int:
+    from labcore import versions
+    _, catalog, _, _ = load(args)
+    print(versions.locked_table(catalog))
+    return 0
+
+
+def cmd_versions_check(args) -> int:
+    from labcore import versions
+    cfg, catalog, _, _ = load(args)
+    return versions.check_upstream(catalog, policy=cfg.get("UPGRADE_POLICY", "patch"), only=args.only)
+
+
+def cmd_detect(args) -> int:
+    from labcore import detect
+    cfg, catalog, _, _ = load(args)
+    kubeconfig = args.kubeconfig or cfg.get("EXISTING_KUBECONFIG")
+    context = args.context or cfg.get("EXISTING_CONTEXT")
+    report = detect.detect(kubeconfig, context)
+    if args.format == "json":
+        print(render.to_json(report))
+        return 0 if report.get("reachable") else 1
+    wanted = args.addons.split() if args.addons else []
+    policy = cfg.get("EXISTING_ADDON_POLICY", "fail")
+    print(detect.report_text(report, catalog, wanted, policy))
+    conflicts = detect.conflicts(report, catalog, wanted, policy)
+    failed = not report.get("reachable") or any(c["level"] == "error" for c in conflicts)
+    if args.vars_output and not failed:
+        # Pour ./k8s-lab (mode attach) : version détectée et addons existants utilisés tels quels.
+        write_output(render.to_json({
+            "addon_skip": sorted({c["addon"] for c in conflicts if c["level"] == "info"}),
+            "attach_server_version": report.get("server_version", ""),
+            "attach_distribution": report.get("distribution", ""),
+        }), args.vars_output)
+    return 1 if failed else 0
+
+
+def _version_key(version: str) -> tuple:
+    parts = []
+    for part in str(version).lstrip("v").replace("-", ".").split("."):
+        parts.append((0, int(part)) if part.isdigit() else (1, part))
+    return tuple(parts)
+
+
+def cmd_addons_diff(args) -> int:
+    """Versions installées (ConfigMap d'état) comparées au plan : 0 = rien à faire,
+    10 = mises à jour à appliquer, 1 = erreur (configuration, rétrogradation)."""
+    import json
+    cfg, catalog, plan = resolve(args)
+    if plan.errors:
+        print(render.issues_text(plan, show_info=False), file=sys.stderr)
+        return 1
+    state = {}
+    if args.state and Path(args.state).is_file() and Path(args.state).stat().st_size:
+        state = (json.loads(Path(args.state).read_text(encoding="utf-8")) or {}).get("data", {}) or {}
+    planned = {a["id"]: a["versions"] for a in render.ansible_vars(plan, cfg, catalog)["lab_addons"]}
+    changes, downgrades = 0, 0
+    print(f"{'Addon':<26} {'Installé':<34} {'Plan (config/versions.yaml)':<34} Action")
+    for addon_id, versions in planned.items():
+        installed = json.loads(state[addon_id]).get("versions", {}) if addon_id in state else None
+        want = ", ".join(f"{k} {v}" for k, v in versions.items() if v) or "-"
+        if installed is None:
+            have, action = "-", "installation"
+            changes += 1
+        else:
+            have = ", ".join(f"{k} {v}" for k, v in installed.items() if v) or "-"
+            older = [k for k, v in versions.items() if installed.get(k) and v and _version_key(v) < _version_key(installed[k])]
+            if older:
+                action = "RÉTROGRADATION refusée"
+                downgrades += 1
+            elif installed != versions:
+                action = "mise à jour"
+                changes += 1
+            else:
+                action = "à jour"
+        print(f"{addon_id:<26} {have[:33]:<34} {want[:33]:<34} {action}")
+    for addon_id in sorted(set(state) - set(planned)):
+        print(f"{addon_id:<26} {'(installé)':<34} {'(hors du plan)':<34} conservé (make addons-remove ADDON={addon_id})")
+    if downgrades:
+        print("\nUne version plus ancienne que celle installée est demandée : une rétrogradation (CRD, schémas de "
+              "données) n'est jamais faite automatiquement. Voir docs/upgrades.md#addons.", file=sys.stderr)
+        return 1
+    return 10 if changes else 0
+
+
+def cmd_upgrade_plan(args) -> int:
+    import json
+    from labcore import upgrade
+    cfg, catalog, plan = resolve(args)
+    nodes = []
+    if args.nodes:
+        nodes = json.loads(Path(args.nodes).read_text(encoding="utf-8")).get("items", [])
+    up = upgrade.build(plan, catalog, cfg.get("UPGRADE_POLICY", "patch"), args.server_version, nodes)
+    print(upgrade.text(up))
+    return up.code
+
+
+def cmd_get(args) -> int:
+    _, _, plan = resolve(args)
+    value = plan.resolved
+    for part in args.key.split("."):
+        value = value.get(part, "") if isinstance(value, dict) else ""
+    print(value if not isinstance(value, (dict, list)) else render.to_json(value))
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="labctl", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def with_mode(p):
+        p.add_argument("--mode", default=None)
+        p.add_argument("--provider", default=None)
+        p.add_argument("--cluster-version", default="", help="mode attach : version détectée")
+        return p
+
+    p = with_mode(sub.add_parser("validate", help="valider la configuration"))
+    p.add_argument("--quiet", action="store_true", help="ne pas afficher les notes [info]")
+    p.set_defaults(func=cmd_validate)
+    with_mode(sub.add_parser("show", help="configuration effective")).set_defaults(func=cmd_show)
+    with_mode(sub.add_parser("plan", help="plan des addons")).set_defaults(func=cmd_plan)
+    p = with_mode(sub.add_parser("ansible-vars", help="variables pour Ansible (JSON)"))
+    p.add_argument("--output")
+    p.set_defaults(func=cmd_ansible_vars)
+    p = with_mode(sub.add_parser("manifest", help="manifeste de déploiement (sans secret)"))
+    p.add_argument("--output")
+    p.add_argument("--format", choices=["yaml", "json"], default="yaml")
+    p.set_defaults(func=cmd_manifest)
+    with_mode(sub.add_parser("shell", help="variables résolues pour Bash")).set_defaults(func=cmd_shell)
+    p = with_mode(sub.add_parser("addons-diff", help="versions installées comparées au plan"))
+    p.add_argument("--state", help="ConfigMap d'état k8s-lab-addons (JSON de kubectl get -o json)")
+    p.set_defaults(func=cmd_addons_diff)
+    p = with_mode(sub.add_parser("upgrade-plan", help="plan de mise à niveau de Kubernetes (lecture seule)"))
+    p.add_argument("--server-version", required=True, help="version actuelle de l'API (kubectl version)")
+    p.add_argument("--nodes", help="nœuds du cluster (JSON de kubectl get nodes -o json)")
+    p.set_defaults(func=cmd_upgrade_plan)
+    p = with_mode(sub.add_parser("get", help="valeur résolue (clé.sous-clé)"))
+    p.add_argument("key")
+    p.set_defaults(func=cmd_get)
+    sub.add_parser("catalog", help="liste des addons").set_defaults(func=cmd_catalog)
+    sub.add_parser("catalog-check", help="cohérence du catalogue (CI)").set_defaults(func=cmd_catalog_check)
+    sub.add_parser("schema-check", help="cohérence lab.env / schéma (CI)").set_defaults(func=cmd_schema_check)
+    p = sub.add_parser("matrix", help="matrices de compatibilité (Markdown)")
+    p.add_argument("--check", help="vérifier qu'un document contient les matrices à jour")
+    p.add_argument("--write", help="réécrire les sections générées d'un document")
+    p.set_defaults(func=cmd_matrix)
+    p = sub.add_parser("docs", help="sections générées de la documentation")
+    p.add_argument("--write", action="store_true", help="réécrire les sections (sinon : vérifier)")
+    p.set_defaults(func=cmd_docs)
+    sub.add_parser("versions", help="versions verrouillées").set_defaults(func=cmd_versions)
+    p = sub.add_parser("versions-check", help="versions plus récentes disponibles (sans rien installer)")
+    p.add_argument("--only", default="", help="composants à vérifier (virgules)")
+    p.set_defaults(func=cmd_versions_check)
+    p = sub.add_parser("detect", help="mode attach : inventaire d'un cluster existant")
+    p.add_argument("--kubeconfig")
+    p.add_argument("--context")
+    p.add_argument("--addons", default="", help="addons prévus (séparés par des espaces)")
+    p.add_argument("--format", choices=["text", "json"], default="text")
+    p.add_argument("--vars-output", help="écrire addon_skip et la version détectée (JSON) pour Ansible")
+    p.set_defaults(func=cmd_detect)
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

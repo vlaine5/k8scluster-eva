@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: preflight
+  author: k8s-lab
+  description: Read-only checks before installing Kubernetes (OS matrix, resources, identity, existing cluster, ports)
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [noble]
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

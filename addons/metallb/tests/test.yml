@@ -1,0 +1,4 @@
+---
+# Un Service LoadBalancer reçoit une IP du pool et répond (cluster + poste).
+- name: Test a LoadBalancer Service
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/loadbalancer_test.yml"

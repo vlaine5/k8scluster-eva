@@ -1,0 +1,23 @@
+---
+# Manifeste d'un addon (addons/<id>/manifests/<fichier>.j2), rendu puis appliqué
+# en server-side apply (gestionnaire de champs "k8s-lab"). Plusieurs essais :
+# les webhooks d'un addon tout juste installé peuvent mettre un peu à répondre.
+- name: Render the manifest {{ addon_manifest }}
+  ansible.builtin.set_fact:
+    addon_manifest_docs: "{{ lookup('ansible.builtin.template', addon_dir ~ '/manifests/' ~ addon_manifest) | from_yaml_all | select | list }}"
+
+- name: Apply the manifest {{ addon_manifest }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    apply: true
+    server_side_apply:
+      field_manager: k8s-lab
+      force_conflicts: false
+    definition: "{{ addon_manifest_docs }}"
+  register: addon_manifest_result
+  until: addon_manifest_result is succeeded
+  retries: "{{ addon_manifest_retries }}"
+  delay: 10
+  when: addon_manifest_docs | length > 0

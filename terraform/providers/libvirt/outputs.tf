@@ -3,6 +3,11 @@ output "control_plane_ip" {
   value       = module.nodes.control_plane.ip
 }
 
+output "control_plane_ips" {
+  description = "IP addresses of all the control-planes."
+  value       = [for c in module.nodes.control_planes : c.ip]
+}
+
 output "worker_ips" {
   description = "IP addresses of the workers."
   value       = [for w in module.nodes.workers : w.ip]

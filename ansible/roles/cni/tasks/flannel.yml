@@ -1,16 +1,23 @@
 ---
 # Flannel : https://github.com/flannel-io/flannel
 # Le manifeste officiel est téléchargé (version épinglée + SHA-256 vérifié),
-# puis adapté avec Kustomize (intégré à kubectl) : CIDR des Pods et interface
-# réseau à utiliser. Les fichiers restent lisibles dans {{ cni_addons_dir }}/flannel.
+# puis adapté avec Kustomize (intégré à kubectl) : CIDR des Pods, backend et
+# interface réseau. Les fichiers restent lisibles dans {{ cni_addons_dir }}/flannel.
+# Flannel n'applique AUCUNE NetworkPolicy (docs/cni.md).
 
 - name: Check that the checksum of the requested Flannel version is known
   ansible.builtin.assert:
-    that: flannel_version in cni_flannel_manifest_checksums
+    that: k8s_cni_version in lab_lock.components.flannel.sha256
     fail_msg: >-
-      No known SHA-256 checksum for Flannel {{ flannel_version }}. Add it to
-      cni_flannel_manifest_checksums (roles/cni/defaults/main.yml) after verifying it:
+      No known SHA-256 checksum for Flannel {{ k8s_cni_version }}. Add it to
+      components.flannel.sha256 (config/versions.yaml) after verifying it:
       curl -sSL {{ cni_flannel_manifest_url }} | sha256sum
+    quiet: true
+
+- name: Check the Flannel backend
+  ansible.builtin.assert:
+    that: k8s_cni_mode in ['vxlan', 'host-gw']
+    fail_msg: "CNI_MODE={{ k8s_cni_mode }} is not a Flannel backend (vxlan, host-gw)."
     quiet: true
 
 - name: Create the Flannel addon directory
@@ -24,13 +31,13 @@
 - name: Download the official Flannel manifest (checksum verified)
   ansible.builtin.get_url:
     url: "{{ cni_flannel_manifest_url }}"
-    dest: "{{ cni_addons_dir }}/flannel/kube-flannel-{{ flannel_version }}.yml"
-    checksum: "{{ cni_flannel_manifest_checksums[flannel_version] }}"
+    dest: "{{ cni_addons_dir }}/flannel/kube-flannel-{{ k8s_cni_version }}.yml"
+    checksum: "sha256:{{ lab_lock.components.flannel.sha256[k8s_cni_version] }}"
     owner: root
     group: root
     mode: "0644"
 
-- name: Write the Kustomize overlay (Pod CIDR and network interface)
+- name: Write the Kustomize overlay (Pod CIDR, backend and network interface)
   ansible.builtin.template:
     src: flannel/kustomization.yaml.j2
     dest: "{{ cni_addons_dir }}/flannel/kustomization.yaml"
@@ -42,7 +49,7 @@
   ansible.builtin.command:
     argv:
       - kubectl
-      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --kubeconfig={{ cni_kubeconfig }}
       - apply
       - --kustomize={{ cni_addons_dir }}/flannel
   register: cni_flannel_apply
@@ -52,7 +59,7 @@
   ansible.builtin.command:
     argv:
       - kubectl
-      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --kubeconfig={{ cni_kubeconfig }}
       - --namespace=kube-flannel
       - rollout
       - status

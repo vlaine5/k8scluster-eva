@@ -1,0 +1,29 @@
+id: metrics-server
+name: metrics-server
+description: >-
+  API Metrics (metrics.k8s.io) : kubectl top, Horizontal Pod Autoscaler. Vérifie les certificats
+  des kubelets (signés par la CA du cluster) : pas d'option --kubelet-insecure-tls.
+category: infrastructure
+phase: 7
+components: [metrics-server]
+support:
+  default: supported
+  minikube: {status: configured, note: "Installé par l'addon natif de minikube (minikube addons enable metrics-server)."}
+  attach:
+    status: configured
+    note: >-
+      Refusé si l'API metrics.k8s.io est déjà fournie (k3s, AKS...). Les certificats de service des
+      kubelets doivent être signés par la CA du cluster, sinon KUBELET_SERVING_CERTS=self-signed.
+validated: [ci-kind]
+resources: {cpu_m: 100, memory_mb: 200}
+install:
+  namespace: kube-system
+  releases:
+    - {name: metrics-server, component: metrics-server, namespace: kube-system, values: values.yaml.j2, timeout: 5m}
+  platform_overrides:
+    minikube: {minikube_addon: metrics-server}
+health:
+  - {kind: Deployment, namespace: kube-system, name: metrics-server}
+  - {kind: APIService, name: v1beta1.metrics.k8s.io}
+tests: tests/test.yml
+docs: docs/addons.md#metrics-server

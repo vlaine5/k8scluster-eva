@@ -20,7 +20,8 @@ Une seule commande enchaîne toutes ces étapes, et chacune est affichée pendan
 
 - 1 control-plane : la VM `k8s-cp-1` (192.168.56.10)
 - 2 workers : les VMs `k8s-worker-1` et `k8s-worker-2` (192.168.56.11 et .12)
-- Kubernetes 1.37 installé avec kubeadm, runtime containerd
+- Kubernetes 1.36 (version verrouillée : [versions.md](versions.md)) installé avec kubeadm,
+  runtime containerd, réseau des Pods Flannel (ou Calico, Cilium : [cni.md](cni.md))
 - un réseau des Pods Flannel
 
 ## Prérequis
@@ -168,3 +169,13 @@ vagrant snapshot restore avant-tp
 Vagrantfile : syntaxe et `vagrant validate` vérifiés en CI (configuration par défaut).
 Déploiement réel : à tester sur VirtualBox, libvirt ou VMware. L'installation de Kubernetes
 par Ansible est, elle, testée en CI sur des nœuds conteneurs.
+
+## Autres possibilités du framework
+
+- Système des nœuds : `NODE_OS` / `NODE_OS_VERSION` (Ubuntu, Debian, Rocky) : [os.md](os.md)
+- Haute disponibilité : `CONTROL_PLANE_COUNT=3` et `CONTROL_PLANE_VIP` : [high-availability.md](high-availability.md)
+- Réseau : `CNI=calico` ou `cilium`, Gateway API, LoadBalancer : [cni.md](cni.md),
+  [gateway-api.md](gateway-api.md), [loadbalancer.md](loadbalancer.md)
+- Addons : `ADDON_PROFILE=homelab` (ou un profil d'[exemple](../examples/profiles/README.md)) : [addons.md](addons.md)
+- Stockage : NFS ou Longhorn sur disque dédié (`LONGHORN_DEDICATED_DISK=true`, provider libvirt) : [storage.md](storage.md)
+- Exploitation (mises à niveau, sauvegardes, santé) : [day2.md](day2.md)

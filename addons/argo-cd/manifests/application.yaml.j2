@@ -1,0 +1,30 @@
+{% if cfg.ARGOCD_REPO_URL %}
+# Application d'exemple : synchronise {{ cfg.ARGOCD_REPO_PATH }} de {{ cfg.ARGOCD_REPO_URL }}.
+# Les composants du lab (CNI, stockage, cert-manager...) ne sont JAMAIS gérés par Argo CD.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lab-apps
+  namespace: argocd
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+spec:
+  project: default
+  source:
+    repoURL: "{{ cfg.ARGOCD_REPO_URL }}"
+    targetRevision: "{{ cfg.ARGOCD_REPO_REVISION }}"
+    path: "{{ cfg.ARGOCD_REPO_PATH }}"
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+{% if cfg.ARGOCD_AUTO_SYNC | bool %}
+    automated:
+      # prune=false : une ressource retirée de Git n'est pas supprimée automatiquement.
+      prune: false
+      selfHeal: true
+{% endif %}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+{% endif %}

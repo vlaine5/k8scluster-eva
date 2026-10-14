@@ -1,0 +1,37 @@
+id: metallb
+name: MetalLB
+description: >-
+  Services de type LoadBalancer sur réseau local (bare metal) : attribue une IP de
+  LOADBALANCER_IP_POOL et l'annonce en L2 (ARP) ou en BGP.
+category: network
+phase: 5
+components: [metallb]
+integrates_with: [prometheus-operator-crds]
+conflicts_with: [cilium-lb]
+selected_by:
+  LOADBALANCER_PROVIDER: [metallb]
+requires:
+  settings: [LOADBALANCER_IP_POOL]
+support:
+  default: supported
+  kind: {status: configured, note: "Le pool doit être dans le réseau Docker « kind » (docker network inspect kind)."}
+  minikube: {status: experimental, note: "Préférez « minikube tunnel »."}
+  eks: {status: unsupported, note: "AWS fournit les load balancers."}
+  attach: {status: configured, note: "Refusé si un autre fournisseur LoadBalancer (ServiceLB de k3s...) est détecté."}
+validated: [ci-kind]
+resources: {cpu_m: 100, memory_mb: 128}
+node_prereqs:
+  firewall_ports: [{port: 7946, proto: tcp}, {port: 7946, proto: udp}]
+install:
+  namespace: metallb-system
+  pod_security: privileged
+  releases:
+    - {name: metallb, component: metallb, namespace: metallb-system, values: values.yaml.j2, timeout: 10m}
+  manifests: [pool.yaml.j2]
+health:
+  - {kind: Deployment, namespace: metallb-system, name: metallb-controller}
+  - {kind: DaemonSet, namespace: metallb-system, name: metallb-speaker}
+tests: tests/test.yml
+remove:
+  notes: "Les Services LoadBalancer existants perdent leur IP externe."
+docs: docs/loadbalancer.md

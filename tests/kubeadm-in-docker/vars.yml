@@ -5,6 +5,12 @@
 # /etc/hosts est un point de montage géré par Docker.
 common_manage_etc_hosts: false
 
+# Les conteneurs partagent le product_uuid de l'hôte (des VMs clonées, elles, doivent
+# en avoir un distinct : ce contrôle reste actif partout ailleurs).
+preflight_check_product_uuid: false
+# Disque partagé avec l'hôte (runner CI) : moins d'espace libre que sur une VM.
+preflight_min_var_free_gb: 4
+
 # Le swap éventuel est celui de l'HÔTE : impossible de le désactiver depuis un
 # conteneur. Le kubelet est donc autorisé à démarrer avec (comme dans kind).
 common_disable_swap: false

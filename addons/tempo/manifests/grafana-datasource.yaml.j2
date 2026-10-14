@@ -1,0 +1,27 @@
+{% if 'monitoring' in lab_addon_ids %}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource-tempo
+  namespace: tracing
+  labels:
+    app.kubernetes.io/managed-by: k8s-lab
+    grafana_datasource: "1"
+data:
+  tempo.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Tempo
+        uid: tempo
+        type: tempo
+        access: proxy
+        url: http://tempo.tracing.svc:3200
+        jsonData:
+          serviceMap:
+            datasourceUid: prometheus
+{% if 'logging' in lab_addon_ids %}
+          tracesToLogsV2:
+            datasourceUid: loki
+            filterByTraceID: true
+{% endif %}
+{% endif %}

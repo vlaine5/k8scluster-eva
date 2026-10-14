@@ -1,0 +1,60 @@
+---
+# =============================================================================
+#  Test de Hubble : du trafic est généré dans le namespace de test, puis les flux
+#  correspondants sont lus par Hubble Relay (vue de TOUS les nœuds).
+# =============================================================================
+
+- name: Deploy a small server
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    wait: true
+    definition:
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata: {name: echo, namespace: "{{ addon_test_ns }}"}
+        spec:
+          replicas: 1
+          selector: {matchLabels: {app: echo}}
+          template:
+            metadata: {labels: {app: echo}}
+            spec:
+              containers:
+                - name: echo
+                  image: "{{ lab_test_images.echo }}"
+                  args: [netexec, --http-port=8080]
+                  readinessProbe: {httpGet: {path: /hostname, port: 8080}}
+      - apiVersion: v1
+        kind: Service
+        metadata: {name: echo, namespace: "{{ addon_test_ns }}"}
+        spec:
+          selector: {app: echo}
+          ports: [{port: 80, targetPort: 8080}]
+
+- name: Generate traffic
+  ansible.builtin.include_tasks: "{{ addon_helpers }}/curl.yml"
+  vars:
+    addon_curl_label: traffic for Hubble
+    addon_curl_args: ["http://echo/hostname"]
+    addon_curl_expect: echo-
+
+- name: Find Hubble Relay
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'kube-system', 'get', 'service', 'hubble-relay', '-o', 'jsonpath={.spec.clusterIP}:{.spec.ports[0].port}'] }}"
+  register: hubble_test_relay
+  changed_when: false
+
+- name: Read the flows of the test namespace through Hubble Relay
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'kube-system', 'exec', 'ds/cilium', '-c', 'cilium-agent', '--', 'hubble', 'observe',
+           '--server', hubble_test_relay.stdout, '--namespace', addon_test_ns, '--last', '200', '-o', 'compact'] }}"
+  register: hubble_test_flows
+  changed_when: false
+  until: hubble_test_flows.rc == 0 and 'echo' in hubble_test_flows.stdout
+  retries: 12
+  delay: 5
+
+- name: Report the Hubble test
+  ansible.builtin.debug:
+    msg: "Hubble OK — {{ hubble_test_flows.stdout_lines | length }} flow(s) seen through Hubble Relay for {{ addon_test_ns }}."

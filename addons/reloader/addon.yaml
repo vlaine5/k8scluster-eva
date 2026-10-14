@@ -1,0 +1,21 @@
+id: reloader
+name: Reloader
+description: >-
+  Redémarre (rolling update) les workloads annotés quand une ConfigMap ou un Secret qu'ils
+  utilisent change.
+category: operations
+phase: 7
+components: [reloader]
+support:
+  default: supported
+validated: [ci-kind]
+resources: {cpu_m: 20, memory_mb: 64}
+install:
+  namespace: reloader
+  pod_security: restricted
+  releases:
+    - {name: reloader, component: reloader, namespace: reloader, values: values.yaml.j2, timeout: 5m}
+health:
+  - {kind: Deployment, namespace: reloader, name: reloader-reloader}
+tests: tests/test.yml
+docs: docs/addons.md#reloader

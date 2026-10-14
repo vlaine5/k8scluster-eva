@@ -1,0 +1,43 @@
+id: argo-cd
+name: Argo CD
+description: >-
+  GitOps : synchronise des applications depuis Git (Application, ApplicationSet). Les composants
+  critiques (CNI, stockage, cert-manager...) restent installés par le framework pour éviter les
+  dépendances circulaires ; Argo CD gère les applications.
+category: gitops
+phase: 8
+components: [argo-cd]
+integrates_with: [prometheus-operator-crds, gateway]
+settings: [ARGOCD_REPO_URL, ARGOCD_REPO_PATH, ARGOCD_REPO_REVISION, ARGOCD_AUTO_SYNC, ARGOCD_EXPOSE]
+secrets: [ARGOCD_REPO_USERNAME, ARGOCD_REPO_PASSWORD]
+support:
+  default: supported
+validated: [ci-kind]
+resources: {cpu_m: 300, memory_mb: 768}
+install:
+  namespace: argocd
+  expose_setting: ARGOCD_EXPOSE
+  pod_security: baseline
+  secrets:
+    - name: argocd-repo-credentials
+      namespace: argocd
+      only_if_env: [ARGOCD_REPO_PASSWORD]
+      labels: {argocd.argoproj.io/secret-type: repository}
+      data:
+        type: git
+        url: cfg:ARGOCD_REPO_URL
+        username: env:ARGOCD_REPO_USERNAME
+        password: env:ARGOCD_REPO_PASSWORD
+  releases:
+    - {name: argo-cd, component: argo-cd, namespace: argocd, values: values.yaml.j2, timeout: 15m}
+  manifests: [application.yaml.j2, httproute.yaml.j2]
+health:
+  - {kind: Deployment, namespace: argocd, name: argo-cd-argocd-server}
+  - {kind: Deployment, namespace: argocd, name: argo-cd-argocd-repo-server}
+  - {kind: StatefulSet, namespace: argocd, name: argo-cd-argocd-application-controller}
+tests: tests/test.yml
+remove:
+  notes: >-
+    Désinstaller Argo CD ne supprime PAS les applications qu'il a déployées (les ressources restent).
+    Les CRD Application/ApplicationSet sont conservées.
+docs: docs/gitops.md

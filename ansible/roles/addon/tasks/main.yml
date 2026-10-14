@@ -1,0 +1,19 @@
+---
+# =============================================================================
+#  Moteur générique des addons : un seul code pour tous les addons et toutes
+#  les plateformes (kind, minikube, kubeadm, existing, EKS, attach).
+#  Chaque addon est décrit par addons/<id>/addon.yaml (+ valeurs Helm,
+#  manifestes et tests) : docs/addon-development.md
+#
+#  addon_item : un élément de lab_addons (fourni par ./k8s-lab, déjà ordonné).
+# =============================================================================
+
+- name: Describe the addon {{ addon_item.id }}
+  ansible.builtin.set_fact:
+    addon_spec: "{{ addon_item.spec }}"
+    addon_dir: "{{ addon_item.path }}"
+    addon_install: "{{ addon_item.spec.install | default({}) }}"
+    addon_override: "{{ (addon_item.spec.install.platform_overrides | default({}))[lab.platform] | default({}) }}"
+
+- name: Run the action on {{ addon_item.id }}
+  ansible.builtin.include_tasks: "{{ addon_action }}.yml"

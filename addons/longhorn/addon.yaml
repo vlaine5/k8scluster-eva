@@ -1,0 +1,68 @@
+id: longhorn
+name: Longhorn
+description: >-
+  Stockage bloc distribué sur les disques des workers : volumes répliqués sur des nœuds distincts,
+  instantanés, sauvegardes vers NFS/S3, extension de volume, interface web.
+category: storage
+phase: 6
+components: [longhorn]
+integrates_with: [snapshot-controller, prometheus-operator-crds, gateway]
+selected_by:
+  STORAGE_BACKENDS: [longhorn]
+requires:
+  min_workers: 1
+settings:
+  - LONGHORN_VERSION
+  - LONGHORN_REPLICA_COUNT
+  - LONGHORN_DATA_PATH
+  - LONGHORN_STORAGE_CLASS
+  - LONGHORN_RECLAIM_POLICY
+  - LONGHORN_UI_ENABLED
+  - LONGHORN_UI_EXPOSE
+  - LONGHORN_BACKUP_ENABLED
+  - LONGHORN_BACKUP_TARGET
+  - LONGHORN_DEDICATED_DISK
+  - LONGHORN_DISK_SIZE_GB
+secrets: [LONGHORN_BACKUP_S3_ACCESS_KEY, LONGHORN_BACKUP_S3_SECRET_KEY]
+stateful: true
+support:
+  default: supported
+  existing: {status: configured, note: "Prérequis installés par Ansible ; disque dédié seulement si LONGHORN_DISK_DEVICE est fourni."}
+  kind: {status: unsupported, note: "open-iscsi et disques réels requis."}
+  minikube: {status: unsupported, note: "open-iscsi et disques réels requis."}
+  eks: {status: unsupported, note: "Utilisez les volumes EBS (pilote CSI AWS)."}
+  attach: {status: experimental, note: "Les prérequis des nœuds ne peuvent pas être installés par le framework."}
+validated: []
+resources: {cpu_m: 500, memory_mb: 1024}
+node_prereqs:
+  packages:
+    debian: [open-iscsi, nfs-common, cryptsetup, dmsetup]
+    redhat: [iscsi-initiator-utils, nfs-utils, cryptsetup, device-mapper]
+  kernel_modules: [iscsi_tcp, dm_crypt]
+  services: [iscsid]
+install:
+  namespace: longhorn-system
+  expose_setting: LONGHORN_UI_EXPOSE
+  pod_security: privileged
+  secrets:
+    - name: longhorn-backup-credentials
+      namespace: longhorn-system
+      only_if_env: [LONGHORN_BACKUP_S3_ACCESS_KEY]
+      data:
+        AWS_ACCESS_KEY_ID: env:LONGHORN_BACKUP_S3_ACCESS_KEY
+        AWS_SECRET_ACCESS_KEY: env:LONGHORN_BACKUP_S3_SECRET_KEY
+        AWS_ENDPOINTS: env:LONGHORN_BACKUP_S3_ENDPOINT
+  releases:
+    - {name: longhorn, component: longhorn, namespace: longhorn-system, values: values.yaml.j2, timeout: 20m}
+  manifests: [storageclass.yaml.j2]
+health:
+  - {kind: DaemonSet, namespace: longhorn-system, name: longhorn-manager}
+  - {kind: Deployment, namespace: longhorn-system, name: longhorn-driver-deployer}
+  - {kind: CSIDriver, name: driver.longhorn.io}
+tests: tests/test.yml
+remove:
+  notes: >-
+    Longhorn exige un drapeau de confirmation (deleting-confirmation-flag) pour se désinstaller :
+    le framework ne le positionne JAMAIS. Les volumes et leurs données restent sur les disques.
+    Procédure manuelle : docs/storage-longhorn.md#desinstallation
+docs: docs/storage-longhorn.md

@@ -1,0 +1,34 @@
+---
+# Une seule StorageClass par défaut (DEFAULT_STORAGE_CLASS). Les autres
+# StorageClasses perdent l'annotation « is-default-class » : aucune n'est supprimée.
+- name: List the StorageClasses
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'storageclass', '-o', 'json'] }}"
+  register: addon_storage_classes
+  changed_when: false
+
+- name: Unset the default flag on the other StorageClasses
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['annotate', 'storageclass', item.metadata.name, '--overwrite',
+           'storageclass.kubernetes.io/is-default-class=false'] }}"
+  loop: "{{ (addon_storage_classes.stdout | from_json)['items'] | rejectattr('metadata.name', 'equalto', lab.default_storage_class.name) | list }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  when: >-
+    item.metadata.annotations | default({}) | dict2items
+    | selectattr('key', 'equalto', 'storageclass.kubernetes.io/is-default-class')
+    | selectattr('value', 'equalto', 'true') | list | length > 0
+  changed_when: true
+
+- name: Mark as the default StorageClass {{ lab.default_storage_class.name }}
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['annotate', 'storageclass', lab.default_storage_class.name, '--overwrite',
+           'storageclass.kubernetes.io/is-default-class=true'] }}"
+  # kubectl annotate répond « annotated » même sans changement : n'agir que si nécessaire.
+  when: >-
+    (addon_storage_classes.stdout | from_json)['items']
+    | selectattr('metadata.name', 'equalto', lab.default_storage_class.name)
+    | map(attribute='metadata.annotations', default={}) | map('dict2items') | flatten
+    | selectattr('key', 'equalto', 'storageclass.kubernetes.io/is-default-class')
+    | selectattr('value', 'equalto', 'true') | list | length == 0
+  changed_when: true

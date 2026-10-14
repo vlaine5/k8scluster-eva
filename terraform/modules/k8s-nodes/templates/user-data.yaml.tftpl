@@ -6,7 +6,7 @@ hostname: ${hostname}
 manage_etc_hosts: localhost
 users:
   - name: ${ssh_user}
-    groups: [sudo]
+    groups: [${admin_group}]
     shell: /bin/bash
     sudo: "ALL=(ALL) NOPASSWD:ALL"
     lock_passwd: true

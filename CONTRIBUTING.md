@@ -1,121 +1,128 @@
-# Contribuer
+# Contribuer à Kubernetes Lab
 
-Ce dépôt est un **laboratoire Kubernetes pédagogique** destiné à des étudiants francophones.
-Il propose trois façons d'obtenir un cluster :
+Ce projet est un framework pédagogique **et** extensible de création et
+d'exploitation de clusters Kubernetes. Les contributions sont bienvenues
+pour les providers, systèmes Linux, CNI, addons, tests et guides.
 
-- **Kubernetes local** : Kind, Minikube ;
-- **Kubernetes construit avec kubeadm** : Vagrant ou Terraform (Proxmox, vSphere, libvirt)
-  créent des VMs, puis Ansible installe Kubernetes avec kubeadm ;
-- **Kubernetes managé dans le cloud** : Terraform crée un cluster AWS EKS (control-plane géré
-  par AWS, Managed Node Group), sans Ansible ni kubeadm.
+**Avant une contribution :** lire [l'architecture](docs/architecture.md),
+[les modes](docs/modes.md), [la matrice de compatibilité](docs/compatibility.md)
+et [la politique de sécurité](SECURITY.md).
 
-Toute contribution doit préserver ces trois voies et leur rôle pédagogique.
+## Architecture et responsabilités
 
-## Architecture
+| Répertoire | Responsabilité |
+| --- | --- |
+| `config/lab.env`, `config/schema.yaml` | Valeurs par défaut et schéma typé |
+| `config/versions.yaml` | Versions verrouillées et empreintes des artefacts |
+| `config/profiles.yaml` | Profils d'addons |
+| `scripts/labctl`, `scripts/labcore/` | Résolution, validation et plan |
+| `k8s-lab`, `scripts/lib/`, `Makefile` | CLI, commandes et orchestration |
+| `terraform/modules/`, `terraform/providers/` | Ressources d'infrastructure, sans installation kubeadm |
+| `ansible/` | Préparation OS, containerd, Kubernetes, HA, opérations |
+| `addons/<id>/` | Déclaration, Helm, manifestes, santé et tests |
+| `tests/`, `.github/workflows/` | Validations statiques et tests d'intégration |
+| `docs/`, `examples/` | Documentation et configurations sans secrets |
 
-```text
-config/lab.env (+ .env) ──> ./k8s-lab (Bash) ──> kind | minikube | vagrant | terraform <provider>
+Chaînes d'exécution :
 
-vagrant, terraform proxmox|vsphere|libvirt
-    → VMs + inventaire Ansible généré → ansible/site.yml (kubeadm, commun)
+- Kind / Minikube : cluster local, puis addons compatibles.
+- Vagrant / Terraform Proxmox, vSphere, libvirt : VM, puis Ansible/kubeadm, puis addons.
+- `existing` : machines Linux préinstallées, puis Ansible/kubeadm, puis addons.
+- `attach` : cluster existant, addons uniquement ; aucune prise de contrôle implicite.
+- Terraform EKS : Kubernetes managé, puis addons compatibles ; aucune installation kubeadm.
 
-terraform eks
-    → VPC + IAM + EKS + Managed Node Group → kubeconfig (aws eks update-kubeconfig)
-```
-
-- `k8s-lab` + `scripts/lib/*.sh` : le CLI. `Makefile` : raccourcis **sans logique**.
-- `config/lab.env` : source unique des réglages. Terraform (`variables.tf`) et Ansible
-  (`group_vars/all.yml`) en gardent des copies des valeurs par défaut pour rester utilisables
-  seuls ; `scripts/check-config-sync.sh` vérifie qu'elles sont identiques.
-- `terraform/modules/k8s-nodes` (nœuds, IP, cloud-init) et `terraform/modules/ansible-inventory`
-  sont communs aux providers « VMs » ; `terraform/providers/<proxmox|vsphere|libvirt>/` ne fait
-  **que** créer les VMs.
-- `terraform/providers/eks/` est autonome : il crée un cluster managé, pas des VMs, et
-  n'utilise donc ni ces modules ni Ansible. Le même code cible AWS ou LocalStack
-  (`aws_target`).
-- `vagrant/Vagrantfile` lit `config/lab.env` + `.env` et écrit `ansible/inventories/vagrant.ini`.
-- `ansible/` : **seul** endroit où Kubernetes est installé pour les modes kubeadm (rôles
-  `common`, `container_runtime`, `kubernetes`, `control_plane`, `cni`, `worker`).
-
-## Règles
-
-1. **Pas de duplication.** Toute logique indépendante de la plateforme va dans
-   `terraform/modules/`. Aucune logique Kubernetes dans Terraform ou Vagrant pour les modes
-   kubeadm. EKS n'a pas d'inventaire Ansible et n'utilise pas kubeadm.
-2. **Pas de secret dans Git.** Identifiants via variables d'environnement (`.env`, ignoré) ou
-   les mécanismes standards (profils AWS). Variables Terraform sensibles : `sensitive = true`.
-   Jamais de mot de passe en dur, jamais de `0777`, jamais de `curl | bash`.
-3. **Rien de destructif implicitement.** `deploy` est idempotent ; seule `destroy` (ou
-   `--recreate`) détruit, après confirmation.
-4. **Rien de payant sans action explicite.** Aucune CI automatique (push, pull request) ne crée
-   de ressource AWS réelle ; le workflow EKS réel est déclenché à la main.
-5. **Versions explicites et vérifiées** : pas de `latest`, pas de branche `master` ; checksum
-   ou digest quand c'est possible. Vérifier les versions actuelles en ligne avant de les
-   changer (voir `docs/maintenance.md`), et mettre à jour toutes les copies.
-6. **Ansible idempotent** : modules dédiés plutôt que `command`/`shell` ; sinon `creates`,
-   `removes` ou `changed_when`. Pas d'`ignore_errors`. FQCN (`ansible.builtin.*`).
-   Variables de rôle préfixées par le nom du rôle.
-7. **Pédagogie** : messages d'erreur « quoi / pourquoi / comment corriger » (fonction `die`),
-   commandes exécutées affichées (fonction `run`), commentaires et documentation en français,
-   noms de variables et de fonctions en anglais. Préférer la simplicité à la généricité.
-8. **Honnêteté sur la validation** : ne jamais présenter comme testé ce qui ne l'a été que
-   statiquement. Vagrant, Proxmox, vSphere, libvirt et EKS nécessitent une infrastructure
-   réelle ; `terraform validate` ne prouve pas qu'un cluster fonctionne.
-9. **Bash compatible 3.2** (macOS) : pas de tableaux associatifs, de `mapfile` ni de `${var,,}`.
-10. **Documentation à deux niveaux.** Guides étudiants courts (`README.md`,
-    `docs/deployment.md`, `docs/deploy-<mode>.md`) : commandes `make` uniquement et structure
-    fixe (Ce que vous allez obtenir, Prérequis, 1. Vérifier votre machine, 2. Configurer,
-    3. Déployer, 4. Vérifier, 5. Tester, 6. Supprimer, En cas de problème, Pour aller plus
-    loin). Le détail technique va dans `docs/architecture.md`, `ansible-kubeadm.md`,
-    `configuration.md`, `security.md`, `troubleshooting.md`, sans duplication.
-
-## Vérifier ses changements
+## Environnement de développement
 
 ```bash
-make lint                 # contrôles statiques de la CI (make help-dev : liste des cibles)
-make vagrant-validate     # vagrant validate sans hyperviseur (lancé aussi en CI ; Vagrant requis)
-make actionlint           # workflows GitHub Actions (lancé aussi en CI ; actionlint requis)
-make shellcheck           # scripts Bash
-make yamllint ansible-lint ansible-syntax
-make terraform-fmt terraform-validate terraform-test tflint
-make markdownlint check-docs   # style + liens, pages et commandes make cités
-make check-config         # cohérence config/lab.env <-> Terraform / Ansible / kind
-make deploy MODE=kind && make test && make destroy MODE=kind YES=1   # e2e (Docker, cgroup v2)
-make test-kubeadm         # site.yml réel sur des nœuds conteneurs systemd + idempotence + nginx
+git clone https://github.com/vlaine5/k8scluster-eva.git
+cd k8scluster-eva
+make venv
+source .venv/bin/activate
+make help-dev
+make test-unit
+make schema-check catalog-check docs-check
 ```
 
-Outils de lint Python : `pip install -r requirements-dev.txt` (ansible-core, ansible-lint,
-yamllint) puis `ansible-galaxy collection install -r ansible/requirements.yml`.
+Les tests nécessitant Docker, Kubernetes, Vagrant, Terraform ou des services
+externes ont leurs propres prérequis. **Aucun test ne doit modifier un Homelab
+ou créer des ressources cloud payantes sans consentement explicite.**
 
-## Tester EKS pour de vrai (workflow manuel)
+## Ajouter une variable
 
-Aucune CI automatique ne crée de ressource AWS. Le workflow `.github/workflows/eks-e2e.yml` se
-lance uniquement à la main (onglet *Actions* → « EKS E2E (manuel) » → *Run workflow*) ; il
-exécute `make doctor`, `make deploy`, `kubectl get nodes`, `make test`, puis `make destroy`,
-même en cas d'échec.
+1. Décrire type, valeurs, valeurs secrètes et dépendances dans `config/schema.yaml`.
+2. Ajouter le défaut documenté dans `config/lab.env`.
+3. Adapter le résolveur Python si une validation ou une transformation est nécessaire.
+4. Propager la valeur à Terraform/Ansible uniquement si le composant la consomme.
+5. Ajouter les tests de priorité, d'erreur et de compatibilité.
+6. Regénérer la documentation : `make docs-generate`, puis `make docs-check`.
+7. Ajouter un exemple non secret et documenter les migrations de variable.
 
-- `target = localstack` : secret de dépôt `LOCALSTACK_AUTH_TOKEN`, d'une licence LocalStack
-  qui inclut EKS (Ultimate, Student ou open source).
-- `target = aws` (**payant**) : variable de dépôt `AWS_ROLE_ARN`, un rôle IAM que GitHub
-  assume par OIDC (aucune clé d'accès stockée) et qui peut créer VPC, IAM, EKS et EC2 ;
-  variable facultative `AWS_REGION` ; case `confirm_aws_costs` à cocher. Guide OIDC :
-  <https://docs.github.com/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services>
+Ne jamais ajouter de variable qui n'a aucun effet réel.
 
-Le cluster de test s'appelle `k8s-lab-ci`. Les journaux d'un dépôt public sont publics :
-l'identifiant du compte AWS y apparaît (dans les ARN).
+## Ajouter un addon
 
-## Ajouter…
+Lire impérativement [le guide dédié](docs/addon-development.md).
 
-- **un provider Terraform « VMs »** : `terraform/providers/<nom>/` appelant les deux modules
-  communs, puis `scripts/lib/mode_terraform.sh`, `scripts/lib/doctor.sh`, `TF_DIRS` du
-  Makefile, un guide `docs/deploy-<nom>.md`, `docs/deployment.md` et le tableau du README.
-- **un CNI** : `ansible/roles/cni/tasks/<nom>.yml` + liste dans `roles/cni/tasks/main.yml`.
-- **un réglage** : `config/lab.env` (commenté) → transmis par le CLI (`TF_VAR_*` ou
-  `ansible_write_vars`) → copie de la valeur par défaut → `scripts/check-config-sync.sh` →
-  `docs/configuration.md`.
+Déclarer `addons/<id>/addon.yaml` (dépendances, plateformes, versions,
+tests, santé, désinstallation), puis les valeurs Helm, les manifestes et le
+test fonctionnel. Ajouter le composant dans `config/versions.yaml` et les
+réglages utiles dans le schéma. Vérifier les combinaisons incompatibles
+et les dépendances conditionnelles.
 
-## Commits et pull requests
+Un addon doit rester optionnel, sécurisé par défaut et idempotent. Les
+opérations stateful doivent préserver les données et documenter leur
+restauration. Ne renseigner `validated` que pour une exécution CI réelle.
 
-- Messages au format Conventional Commits : `feat(terraform): …`, `fix(ansible): …`,
-  `docs: …`, `ci: …`.
-- Une pull request est fusionnée quand toute la CI est verte.
+## Ajouter un OS, un CNI ou un provider
+
+- OS : compléter la matrice `config/versions.yaml`, adapter les tâches
+  Ansible par famille de distribution et ajouter des tests d'installation
+  réels. Ne pas supposer la compatibilité noyau ou CPU.
+- CNI : adapter le rôle `ansible/roles/cni`, les CRD/Helm et les tests
+  réseau ; documenter la migration, la compatibilité et les restrictions.
+- Provider : isoler la création de l'infrastructure dans
+  `terraform/providers/<provider>/` et réutiliser les modules communs
+  lorsque applicable ; ajouter la validation et le guide dédié.
+
+## Exigences de qualité
+
+- **Pas de secrets dans Git** ni dans les logs, exemples ou rapports.
+- Opérations destructives explicitement confirmées ; aucune écriture sur un
+  NAS, pare-feu ou cluster tiers sans une action expressément demandée.
+- Versions figées ; mises à jour via `config/versions.yaml`.
+- Idempotence et diagnostics actionnables pour les échecs.
+- ShellCheck, Ansible-lint, Terraform validate/test, tests du résolveur
+  et documentation cohérente.
+- Distinguer « rendu vérifié », « testé en CI sur conteneurs » et
+  « testé réellement sur VM/hyperviseur ».
+- Documentation et erreurs destinées aux utilisateurs en français.
+- Favoriser les évolutions sans rupture ; décrire les breaking changes
+  dans `CHANGELOG.md` et `docs/migration.md`.
+
+Commandes selon le périmètre :
+
+```bash
+make lint
+make addons-render-check
+make test-unit
+make check-config
+make docs-check
+make deploy MODE=kind
+make test
+make destroy MODE=kind YES=1
+```
+
+Lire les avertissements de [sécurité](docs/security.md) avant les essais.
+
+## Pull requests et releases
+
+Créer une branche, proposer des commits courts (Conventional Commits :
+`feat(scope):`, `fix(scope):`, `docs:`, `test:`, `ci:`) et
+ouvrir une PR. Remplir le modèle : modes affectés, tests effectués,
+risques de migration, état réel de validation. Ne pas fusionner avec des
+tests essentiels rouges.
+
+Une **CI verte** ne certifie pas automatiquement le fonctionnement sur
+Proxmox, vSphere ou une machine physique. Une version stable nécessite des
+tests représentatifs documentés. Mettre à jour `CHANGELOG.md` et
+la documentation de migration avant de publier une release.

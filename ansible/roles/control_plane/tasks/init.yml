@@ -1,0 +1,96 @@
+---
+# =============================================================================
+#  Initialisation du cluster avec "kubeadm init" (1er control-plane).
+#  https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/
+# =============================================================================
+
+- name: Write the kubeadm configuration
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: "{{ control_plane_kubeadm_config }}"
+    owner: root
+    group: root
+    mode: "0600"
+  register: control_plane_config_file
+
+- name: Check whether the control-plane is already initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: control_plane_admin_conf
+
+- name: Warn that a new kubeadm configuration is not applied to an existing cluster
+  ansible.builtin.debug:
+    msg: >-
+      The kubeadm configuration changed but the cluster already exists: the changes are NOT
+      applied. Use the controlled procedures (make upgrade, docs/upgrades.md) or recreate the lab.
+  when:
+    - control_plane_admin_conf.stat.exists
+    - control_plane_config_file.changed
+
+- name: Start kube-vip with super-admin.conf before the cluster exists (HA endpoint)
+  ansible.builtin.include_role:
+    name: api_endpoint
+  vars:
+    api_endpoint_phase: before-init
+  when:
+    - api_lb_provider == 'kube-vip'
+    - not control_plane_admin_conf.stat.exists
+
+- name: Initialize the cluster
+  when: not control_plane_admin_conf.stat.exists
+  block:
+    - name: Run kubeadm init (pulls images and starts the control-plane, may take a few minutes)
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - init
+          - --config={{ control_plane_kubeadm_config }}
+        creates: /etc/kubernetes/admin.conf
+      register: control_plane_kubeadm_init
+
+  rescue:
+    - name: Explain how to investigate a failed kubeadm init
+      ansible.builtin.fail:
+        msg: |
+          "kubeadm init" failed on {{ inventory_hostname }}.
+          Error: {{ control_plane_kubeadm_init.stderr | default('') | trim | truncate(1500) }}
+
+          To investigate (ssh into the node first):
+            sudo journalctl -u kubelet --no-pager | tail -50
+            sudo crictl ps -a
+          {% if api_lb_provider == 'kube-vip' %}
+          The API endpoint is the VIP {{ control_plane_vip }}: check that it is free on the network
+          and that kube-vip runs (sudo crictl logs $(sudo crictl ps -q --name kube-vip)).
+          {% endif %}
+          Nothing was reset automatically. To retry from scratch on these lab nodes:
+            ansible-playbook -i <inventory> reset.yml -e reset_confirm=true
+          See docs/troubleshooting.md.
+
+- name: Switch kube-vip to admin.conf now that the cluster exists
+  ansible.builtin.include_role:
+    name: api_endpoint
+  vars:
+    api_endpoint_phase: after-init
+  when: api_lb_provider == 'kube-vip'
+
+- name: Read the API endpoint recorded in the cluster
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, -n, kube-system, get, configmap, kubeadm-config,
+           -o, "jsonpath={.data.ClusterConfiguration}"]
+  register: control_plane_cluster_config
+  changed_when: false
+  retries: 30
+  delay: 5
+  until: control_plane_cluster_config.rc == 0
+
+- name: Check that the cluster endpoint matches the configuration
+  ansible.builtin.assert:
+    that: >-
+      (control_plane_cluster_config.stdout | from_yaml).controlPlaneEndpoint | default('') == k8s_api_endpoint
+      or groups['control_plane'] | length == 1
+    fail_msg: >-
+      The cluster was created with controlPlaneEndpoint
+      "{{ (control_plane_cluster_config.stdout | from_yaml).controlPlaneEndpoint | default('') }}" but the configuration
+      now expects "{{ k8s_api_endpoint }}". Additional control-planes need the original stable endpoint:
+      kubeadm cannot change it on a running cluster (docs/high-availability.md#passer-de-1-a-3-control-planes).
+    quiet: true

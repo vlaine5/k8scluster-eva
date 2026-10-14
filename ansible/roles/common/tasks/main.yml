@@ -1,37 +1,26 @@
 ---
 # =============================================================================
-#  Préparation du système d'exploitation de chaque nœud.
+#  Préparation du système d'exploitation de chaque nœud (Ubuntu, Debian, Rocky).
+#  Les tâches propres à une famille sont dans packages-<famille>.yml,
+#  firewall-<outil>.yml et security-<famille>.yml ; le reste est commun.
+#  Les contrôles (OS supporté, cgroup v2, ressources...) sont faits avant,
+#  par le rôle preflight.
 # =============================================================================
 
-- name: Check that the operating system is supported
+- name: Check that the operating system family is supported
   ansible.builtin.assert:
     that:
-      - ansible_facts['os_family'] == "Debian"
+      - k8s_os_family in ['debian', 'redhat']
       - ansible_facts['service_mgr'] == "systemd"
     fail_msg: >-
-      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
-      with {{ ansible_facts['service_mgr'] }}. This lab supports Debian-based systems with systemd
-      (tested target: Ubuntu 24.04 LTS).
-    quiet: true
-
-# Kubernetes >= 1.35 refuse par défaut de démarrer sur un hôte en cgroup v1.
-- name: Check that the node uses cgroup v2
-  ansible.builtin.stat:
-    path: /sys/fs/cgroup/cgroup.controllers
-  register: common_cgroup_v2
-
-- name: Fail with an explanation when cgroup v2 is not available
-  ansible.builtin.assert:
-    that: common_cgroup_v2.stat.exists or not (common_require_cgroup_v2 | bool)
-    fail_msg: >-
-      {{ inventory_hostname }} does not use cgroup v2. Recent Kubernetes versions require it.
-      Use a recent distribution (Ubuntu 22.04+ / Debian 12+) or enable the unified cgroup
-      hierarchy (kernel parameter systemd.unified_cgroup_hierarchy=1).
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }} ({{ ansible_facts['os_family'] }}):
+      only Debian-family (Ubuntu, Debian) and RedHat-family (Rocky Linux) systems with systemd are supported.
     quiet: true
 
 - name: Set the hostname
   ansible.builtin.hostname:
     name: "{{ inventory_hostname }}"
+  when: common_manage_hostname | bool
 
 - name: Declare every cluster node in /etc/hosts
   ansible.builtin.blockinfile:
@@ -44,12 +33,8 @@
       {% endfor %}
   when: common_manage_etc_hosts | bool
 
-- name: Install base packages
-  ansible.builtin.apt:
-    name: "{{ common_packages }}"
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
+- name: Install the base packages of the family {{ k8s_os_family }}
+  ansible.builtin.include_tasks: "packages-{{ k8s_os_family }}.yml"
 
 # --- Swap --------------------------------------------------------------------
 # Par défaut, le kubelet refuse de démarrer si le swap est actif.
@@ -58,6 +43,7 @@
     argv: [swapoff, --all]
   when:
     - common_disable_swap | bool
+    - node_swap == 'disable'
     - ansible_facts['swaptotal_mb'] | int > 0
   changed_when: true
 
@@ -66,7 +52,9 @@
     path: /etc/fstab
     regexp: '^(\s*[^#\s]+\s+\S+\s+swap\s+.*)$'
     replace: '# \1  # disabled for Kubernetes'
-  when: common_disable_swap | bool
+  when:
+    - common_disable_swap | bool
+    - node_swap == 'disable'
 
 # --- Modules noyau et sysctl -------------------------------------------------
 # Certains noyaux minimalistes (microVM, noyaux cloud) n'ont pas de modules
@@ -75,6 +63,16 @@
   ansible.builtin.stat:
     path: /proc/modules
   register: common_proc_modules
+
+# Absent de certaines images minimales (Rocky 10) : modprobe persistent y écrit.
+- name: Create the directory of the modules loaded at boot
+  ansible.builtin.file:
+    path: /etc/modules-load.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: common_proc_modules.stat.exists
 
 - name: Load the kernel modules now and at every boot
   community.general.modprobe:
@@ -97,6 +95,15 @@
       Load the module (modprobe br_netfilter) or use a kernel that includes it.
     quiet: true
 
+# Absent de certaines images minimales (Rocky 9/10) : le module sysctl y écrit.
+- name: Create the directory of the kernel parameters
+  ansible.builtin.file:
+    path: /etc/sysctl.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Configure the kernel network parameters required by Kubernetes
   ansible.posix.sysctl:
     name: "{{ item.key }}"
@@ -106,3 +113,53 @@
     reload: true
     state: present
   loop: "{{ common_sysctl_settings | dict2items }}"
+
+# --- Sécurité : SELinux / AppArmor, jamais désactivés -----------------------------
+- name: Configure the mandatory access control of the family {{ k8s_os_family }}
+  ansible.builtin.include_tasks: "security-{{ k8s_os_family }}.yml"
+
+# --- Pare-feu : seuls les ports nécessaires sont ouverts --------------------------
+- name: Detect firewalld
+  ansible.builtin.command:
+    argv: [systemctl, is-active, firewalld]
+  register: common_firewalld
+  changed_when: false
+  failed_when: false
+
+# ufw.service est « active » même quand ufw est désactivé : on lit son vrai état.
+- name: Detect ufw
+  ansible.builtin.command:
+    argv: [ufw, status]
+  register: common_ufw
+  changed_when: false
+  failed_when: false
+  when: k8s_os_family == 'debian'
+
+- name: Record the active firewalls
+  ansible.builtin.set_fact:
+    common_active_firewalls: >-
+      {{ (['firewalld'] if common_firewalld.stdout | default('') == 'active' else [])
+         + (['ufw'] if 'Status: active' in common_ufw.stdout | default('') else []) }}
+
+- name: Open the Kubernetes and CNI ports in the active firewall
+  ansible.builtin.include_tasks: "firewall-{{ item }}.yml"
+  loop: "{{ common_active_firewalls }}"
+  when: node_firewall != 'unmanaged'
+
+- name: Remind that no firewall rule was managed
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: NODE_FIREWALL=unmanaged and a firewall is active: open the Kubernetes ports
+      yourself (docs/security.md#pare-feu), or the cluster will not work.
+  when:
+    - node_firewall == 'unmanaged'
+    - common_active_firewalls | length > 0
+
+# --- Témoin d'appartenance au cluster du lab --------------------------------------
+- name: Create the k8s-lab state directory
+  ansible.builtin.file:
+    path: "{{ k8s_lab_marker | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

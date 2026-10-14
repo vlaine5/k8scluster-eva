@@ -1,5 +1,11 @@
-# Outils de validation (CI et "make lint") — pip install -r requirements-dev.txt
+# Environnement Python du lab (make venv) — versions épinglées.
+#   - exécution : ansible-core, PyYAML (résolveur scripts/labctl), kubernetes (collection
+#     kubernetes.core : addons installés par l'API depuis votre poste)
+#   - qualité et tests : ansible-lint, yamllint, pytest
 # ansible-core 2.20+ nécessite Python >= 3.12.
 ansible-core==2.21.4
+PyYAML==6.0.3
+kubernetes==36.0.3
 ansible-lint==26.9.0
 yamllint==1.38.0
+pytest==9.1.1

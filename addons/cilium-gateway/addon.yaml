@@ -1,0 +1,32 @@
+id: cilium-gateway
+name: Cilium Gateway API
+description: >-
+  Contrôleur Gateway API intégré à Cilium (proxy Envoy de Cilium, GatewayClass « cilium »).
+  Activé dans la configuration de Cilium (gatewayAPI.enabled) : exige CNI=cilium et le
+  remplacement de kube-proxy. Les CRD Gateway API sont installées AVANT Cilium.
+category: network
+phase: 5
+components: [cilium]
+depends_on: [gateway-api-crds]
+selected_by:
+  GATEWAY_CONTROLLER: [cilium]
+requires:
+  cni: [cilium]
+  kube_proxy_replacement: true
+gateway:
+  class: cilium
+  listener_ports: {http: 80, https: 443}
+  routes: [HTTPRoute, GRPCRoute, TLSRoute]
+  experimental_routes: [TCPRoute, UDPRoute]
+support:
+  default: supported
+  kind: {status: experimental, note: "Cilium sur kind (disableDefaultCNI)."}
+  minikube: {status: unsupported, note: "Le CNI de minikube n'est pas configurable finement."}
+  eks: {status: unsupported, note: "EKS utilise AWS VPC CNI."}
+  attach: {status: unsupported, note: "Modifierait la configuration du CNI."}
+validated: [ci-kind]
+health:
+  - {kind: GatewayClass, name: cilium}
+remove:
+  notes: "Désactiver la Gateway Cilium = changer GATEWAY_CONTROLLER puis redéployer (mise à jour de la configuration de Cilium)."
+docs: docs/gateway-api.md

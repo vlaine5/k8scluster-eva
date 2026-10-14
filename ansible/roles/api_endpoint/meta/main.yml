@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: api_endpoint
+  author: k8s-lab
+  description: Stable Kubernetes API endpoint with a kube-vip static Pod (ARP virtual IP on the control-planes)
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [noble]
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

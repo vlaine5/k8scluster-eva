@@ -1,0 +1,17 @@
+# MetalLB {{ addon_item.components.metallb.version }}.
+{% set bgp = lab.loadbalancer.mode == 'bgp' %}
+# frr-k8s (moteur BGP) seulement en mode BGP : en L2, MetalLB n'a pas besoin de FRR.
+frrk8s:
+  enabled: {{ bgp | lower }}
+speaker:
+  tolerateMaster: true
+controller:
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+prometheus:
+  serviceMonitor:
+    enabled: {{ ('monitoring' in lab_addon_ids) | lower }}
+{% if 'monitoring' in lab_addon_ids %}
+  serviceAccount: kube-prometheus-stack-prometheus
+  namespace: monitoring
+{% endif %}

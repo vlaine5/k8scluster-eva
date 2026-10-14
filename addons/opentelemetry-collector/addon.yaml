@@ -1,0 +1,22 @@
+id: opentelemetry-collector
+name: OpenTelemetry Collector
+description: >-
+  Passerelle OTLP pour la télémétrie applicative : traces vers Tempo, journaux vers Loki, métriques
+  exposées à Prometheus (selon les addons présents). Rôle distinct d'Alloy (journaux des nœuds).
+category: observability
+phase: 8
+components: [opentelemetry-collector]
+integrates_with: [tempo, logging, monitoring, prometheus-operator-crds]
+support:
+  default: supported
+validated: [ci-kind]
+resources: {cpu_m: 100, memory_mb: 256}
+install:
+  namespace: opentelemetry
+  pod_security: restricted
+  releases:
+    - {name: otel-collector, component: opentelemetry-collector, namespace: opentelemetry, values: values.yaml.j2, timeout: 10m}
+health:
+  - {kind: Deployment, namespace: opentelemetry, name: otel-collector-opentelemetry-collector}
+tests: tests/test.yml
+docs: docs/observability.md#opentelemetry

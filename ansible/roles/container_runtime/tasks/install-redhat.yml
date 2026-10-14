@@ -1,0 +1,20 @@
+---
+# Rocky Linux : dépôt DNF officiel de Docker (paquet containerd.io, avec la
+# politique container-selinux en dépendance). Signature GPG vérifiée.
+- name: Add the Docker DNF repository (provides containerd.io)
+  ansible.builtin.yum_repository:
+    name: docker-ce-stable
+    description: Docker CE Stable (containerd.io for Kubernetes)
+    baseurl: "https://download.docker.com/linux/centos/{{ ansible_facts['distribution_major_version'] }}/$basearch/stable"
+    gpgkey: https://download.docker.com/linux/centos/gpg
+    gpgcheck: true
+    enabled: true
+    # Exclu des mises à jour (make os-update) : seule une installation explicite le change.
+    exclude: [containerd.io]
+
+- name: Install containerd (DNF)
+  ansible.builtin.dnf:
+    name: "containerd.io-{{ containerd_version }}"
+    state: present
+    disable_excludes: docker-ce-stable
+  notify: Restart containerd

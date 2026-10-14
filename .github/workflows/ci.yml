@@ -1,19 +1,24 @@
 # =============================================================================
-#  CI du lab : validation statique de tout le code, puis tests de bout en
-#  bout réels : Kind, Minikube (avec les commandes make des guides
-#  étudiants), et le playbook Ansible + kubeadm exécuté sur des nœuds
-#  conteneurs systemd (aucune infrastructure externe requise).
-#  Vagrant (vagrant validate), Proxmox, vSphere, libvirt et AWS EKS (fmt,
-#  validate, TFLint, terraform test avec AWS simulé) sont validés statiquement.
-#  Aucun job de ce fichier ne crée de ressource AWS : le test EKS réel est le
-#  workflow manuel eks-e2e.yml. LocalStack (EKS) exige une licence payante ou
-#  Student : il n'est pas lancé ici.
+#  CI du lab : validation statique de tout le code, rendu de tous les addons,
+#  puis tests de bout en bout RÉELS sur les runners GitHub (aucune
+#  infrastructure externe, aucun secret réel) :
+#    - kind : déploiement par les commandes make des guides, puis addons
+#      (scénarios tests/e2e/*.env) avec leurs tests fonctionnels ;
+#    - minikube (driver docker) ;
+#    - kubeadm sur des nœuds conteneurs systemd par le VRAI CLI (mode existing) :
+#      Ubuntu / Debian / Rocky, Flannel / Calico / Cilium, HA 3 control-planes
+#      (kube-vip), mise à niveau 1.36 -> 1.37, restauration etcd.
+#  Vagrant, Proxmox, vSphere, libvirt et EKS sont validés statiquement
+#  (validate, TFLint, terraform test avec API simulées). Le test EKS réel est le
+#  workflow manuel eks-e2e.yml.
 # =============================================================================
 name: CI
 
+# Branche principale à chaque push ; les autres branches par leur pull request (un seul
+# run par commit au lieu de deux) ou à la demande (workflow_dispatch).
 on:
   push:
-    branches: ["**"]
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -76,26 +81,43 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-
-      - name: Installer les outils
-        run: |
-          pip install -r requirements-dev.txt
-          ansible-galaxy collection install -r ansible/requirements.yml
+      - uses: ./.github/actions/setup-lab
 
       - name: yamllint
         run: make yamllint
 
-      - name: ansible-lint (profil production)
+      - name: ansible-lint (profil production, rôles et tâches des addons)
         run: make ansible-lint
 
       - name: ansible-playbook --syntax-check
         run: make ansible-syntax
+
+  python:
+    name: Résolveur (tests unitaires, catalogue, schéma)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-lab
+
+      - name: Tests unitaires (pytest)
+        run: make test-unit
+
+      - name: Catalogue d'addons et schéma de configuration
+        run: |
+          make catalog-check
+          make schema-check
+
+  addons-render:
+    name: Addons (rendu + helm template de chaque release)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-lab
+        with:
+          tools: helm
+
+      - name: Rendu de tous les modèles (3 scénarios) et validation par les charts verrouillés
+        run: make addons-render-check
 
   terraform:
     name: Terraform (fmt, validate, test, TFLint)
@@ -124,7 +146,7 @@ jobs:
       - name: terraform validate (proxmox, vsphere, libvirt, eks)
         run: make terraform-validate
 
-      - name: terraform test (modules communs, provider eks avec AWS simulé)
+      - name: terraform test (modules, providers avec API simulées)
         run: make terraform-test
 
       - name: TFLint
@@ -142,21 +164,24 @@ jobs:
         with:
           globs: "**/*.md"
 
+      - uses: ./.github/actions/setup-lab
+
       - name: Liens, pages docs/*.md et commandes make cités
         run: make check-docs
 
+      - name: Sections générées à jour (variables, catalogue, versions, compatibilité)
+        run: make docs-check
+
   e2e-kind:
-    name: E2E Kind (déploiement réel + test nginx)
-    needs: [shell]
+    name: E2E Kind (commandes des guides, nginx)
+    needs: [shell, python]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Installer kind et kubectl (versions de config/lab.env, SHA-256 vérifiés)
-        run: |
-          scripts/install-tools.sh kind kubectl
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-lab
+        with:
+          tools: kind kubectl helm
 
       # Les étapes suivantes sont exactement les commandes du guide docs/deploy-kind.md.
       - name: make help / make doctor
@@ -165,31 +190,33 @@ jobs:
           make doctor
           make doctor MODE=kind
 
-      - name: make deploy MODE=kind (1 control-plane + 2 workers)
-        run: make deploy MODE=kind
+      - name: make config / make deploy MODE=kind (1 control-plane + 2 workers)
+        run: |
+          make config MODE=kind
+          make deploy MODE=kind
 
       - name: deploy une seconde fois avec ./k8s-lab (idempotence, rien ne doit être recréé)
         run: |
           ./k8s-lab deploy kind | tee second-deploy.log
           grep -q "existe déjà" second-deploy.log
 
-      - name: kubectl (export KUBECONFIG, get nodes, get pods -A)
+      - name: kubectl (export KUBECONFIG, get nodes, get pods -A, certificats kubelet)
         run: |
           export KUBECONFIG="$PWD/.kube/config"
           kubectl get nodes
           kubectl get pods -A
           test "$(kubectl get nodes --no-headers | grep -c ' Ready ')" -eq 3
+          kubectl get csr
+          kubectl logs -n kube-system -l component=kube-apiserver --tail=1
 
-      - name: make status / make kubeconfig
+      - name: make status / make kubeconfig / make test
         run: |
           make status
           make kubeconfig
+          make test
 
-      - name: make test (nginx + Service + DNS)
-        run: make test
-
-      - name: Diagnostic en cas d'échec
-        if: failure()
+      - name: Diagnostic en cas d'échec (ou d'annulation)
+        if: failure() || cancelled()
         run: |
           export KUBECONFIG="$PWD/.kube/config"
           kubectl get nodes -o wide || true
@@ -209,39 +236,131 @@ jobs:
         if: always()
         run: make destroy MODE=kind YES=1
 
+  e2e-kind-addons:
+    name: E2E Kind + addons (${{ matrix.scenario }})
+    needs: [shell, python, addons-render]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [kind-core, kind-traefik-storage, kind-cilium, kind-observability, kind-security]
+    env:
+      LAB_ENV_FILE: tests/e2e/${{ matrix.scenario }}.env
+      # Identifiants FACTICES du stockage S3 de test (tests/e2e/fixtures/s3-server.yaml).
+      VELERO_S3_ACCESS_KEY: ci-test-access
+      VELERO_S3_SECRET_KEY: ci-test-secret-not-real
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-lab
+        with:
+          tools: kind kubectl helm
+
+      - name: Plan résolu (make config, make addons-plan)
+        run: |
+          make config
+          make addons-plan
+
+      - name: Cluster sans addons, puis services de test (NFS, S3) pour le scénario stockage
+        if: matrix.scenario == 'kind-traefik-storage'
+        env:
+          ADDONS: ""
+          STORAGE_BACKENDS: ""
+          GATEWAY_CONTROLLER: none
+          LOADBALANCER_PROVIDER: none
+        run: |
+          make deploy
+          export KUBECONFIG="$PWD/.kube/config"
+          sudo modprobe nfsd
+          kubectl apply -f tests/e2e/fixtures/nfs-server.yaml
+          kubectl create namespace s3-test --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n s3-test create secret generic s3-root --from-literal=access="$VELERO_S3_ACCESS_KEY" \
+            --from-literal=secret="$VELERO_S3_SECRET_KEY" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f tests/e2e/fixtures/s3-server.yaml
+          kubectl -n nfs-test rollout status deploy/nfs-server --timeout=180s
+          kubectl -n s3-test rollout status deploy/s3 --timeout=180s
+
+      - name: make deploy (cluster + addons + tests fonctionnels des addons)
+        run: make deploy
+
+      - name: make addons-status
+        run: make addons-status
+
+      - name: Idempotence (2e make addons-apply sans aucun changement)
+        run: |
+          make addons-apply | tee addons-second-apply.log
+          if grep -E '^localhost +: .*changed=[1-9]' addons-second-apply.log; then
+            echo "::error::La 2e installation des addons a modifié le cluster (voir les tâches « changed » ci-dessus)."
+            exit 1
+          fi
+
+      - name: Diagnostic en cas d'échec (ou d'annulation)
+        if: failure() || cancelled()
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          kubectl get nodes -o wide || true
+          kubectl get pods -A -o wide || true
+          helm list -A --kube-context "kind-$(sed -n 's/^CLUSTER_NAME=//p' "$LAB_ENV_FILE")" || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -80 || true
+          mkdir -p diag
+          if [ -d .lab/reports ]; then cp -r .lab/reports diag/; fi
+
+      - name: Conserver les rapports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-${{ matrix.scenario }}
+          path: diag
+          retention-days: 7
+
+      # Le serveur NFS de test tourne dans le NOYAU (nfsd) depuis un nœud kind : tant qu'il
+      # exporte, Docker ne peut pas tuer ce nœud (« did not receive an exit event ») et
+      # make destroy échoue. Son arrêt normal (SIGTERM : rpc.nfsd 0, exportfs -ua) le libère.
+      - name: Arrêt des services de test (NFS, S3) avant la destruction
+        if: always() && matrix.scenario == 'kind-traefik-storage'
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          if ! kubectl delete namespace nfs-test s3-test --ignore-not-found --wait --timeout=180s; then
+            echo "::warning::Les services de test NFS/S3 ne se sont pas arrêtés : make destroy peut échouer."
+          fi
+
+      - name: make destroy YES=1
+        if: always()
+        run: make destroy YES=1
+
   e2e-minikube:
-    name: E2E Minikube (driver docker)
-    needs: [shell]
+    name: E2E Minikube (driver docker, metrics-server natif)
+    needs: [shell, python]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Installer minikube et kubectl (versions de config/lab.env, SHA-256 vérifiés)
-        run: |
-          scripts/install-tools.sh minikube kubectl
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-lab
+        with:
+          tools: minikube kubectl helm
 
       # Les étapes suivantes sont exactement les commandes du guide docs/deploy-minikube.md.
       - name: make doctor MODE=minikube
         run: make doctor MODE=minikube
 
-      - name: make deploy MODE=minikube
+      - name: make deploy MODE=minikube (avec l'addon metrics-server)
         run: make deploy MODE=minikube
         env:
           MINIKUBE_DRIVER: docker
+          ADDONS: metrics-server
 
-      - name: kubectl (export KUBECONFIG, get nodes, get pods -A)
+      - name: kubectl (export KUBECONFIG, get nodes, get pods -A, top)
         run: |
           export KUBECONFIG="$PWD/.kube/config"
           kubectl get nodes
           kubectl get pods -A
+          kubectl top nodes
 
       - name: make test (nginx + Service + DNS)
         run: make test
 
-      - name: Diagnostic en cas d'échec
-        if: failure()
+      - name: Diagnostic en cas d'échec (ou d'annulation)
+        if: failure() || cancelled()
         run: |
           minikube logs --profile k8s-lab --length 200 || true
 
@@ -249,26 +368,155 @@ jobs:
         if: always()
         run: make destroy MODE=minikube YES=1
 
-  e2e-kubeadm:
-    name: E2E Ansible + kubeadm (nœuds conteneurs systemd)
-    needs: [ansible]
+  e2e-attach:
+    name: E2E attach (cluster existant, composant d'un autre outil)
+    needs: [shell, python]
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 40
+    env:
+      LAB_ENV_FILE: tests/e2e/attach.env
+      EXISTING_KUBECONFIG: ${{ github.workspace }}/.lab/attach-target.kubeconfig
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: ./.github/actions/setup-lab
         with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+          tools: kind kubectl helm
 
-      - name: Installer Ansible, les collections et kubectl
+      - name: Cluster créé hors du framework, metrics-server installé par un autre outil
         run: |
-          pip install -r requirements-dev.txt
-          ansible-galaxy collection install -r ansible/requirements.yml
-          scripts/install-tools.sh kubectl
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          mkdir -p .lab
+          kind create cluster --name attach-target --kubeconfig "$EXISTING_KUBECONFIG" --wait 120s
+          helm --kubeconfig "$EXISTING_KUBECONFIG" install other-metrics metrics-server \
+            --repo https://kubernetes-sigs.github.io/metrics-server --version 3.14.0 \
+            --namespace kube-system --set 'args={--kubelet-insecure-tls}' --wait --timeout 5m
 
-      - name: site.yml sur 1 control-plane + 2 workers, idempotence, test nginx
+      - name: Refus de prendre le contrôle du composant (EXISTING_ADDON_POLICY=fail)
+        run: |
+          if ./k8s-lab deploy attach --yes >attach-fail.log 2>&1; then
+            cat attach-fail.log
+            echo "::error::le mode attach aurait dû refuser metrics-server (installé par un autre outil)"
+            exit 1
+          fi
+          cat attach-fail.log
+          grep -q "déjà installé par un autre outil" attach-fail.log
+          if kubectl --kubeconfig "$EXISTING_KUBECONFIG" get namespace cert-manager; then
+            echo "::error::un addon a été installé malgré le refus"
+            exit 1
+          fi
+
+      - name: Composant existant utilisé tel quel (EXISTING_ADDON_POLICY=skip), addons testés
+        run: ./k8s-lab deploy attach --yes
+        env:
+          EXISTING_ADDON_POLICY: skip
+
+      - name: Second déploiement (idempotence), release de l'autre outil intacte
+        run: |
+          ./k8s-lab deploy attach --yes
+          helm --kubeconfig "$EXISTING_KUBECONFIG" status other-metrics --namespace kube-system
+        env:
+          EXISTING_ADDON_POLICY: skip
+
+      - name: destroy refusé en mode attach, cluster intact
+        run: |
+          if ./k8s-lab destroy attach --yes; then
+            echo "::error::destroy aurait dû être refusé en mode attach"
+            exit 1
+          fi
+          kubectl --kubeconfig "$EXISTING_KUBECONFIG" get nodes
+
+      - name: Diagnostic en cas d'échec (ou d'annulation)
+        if: failure() || cancelled()
+        run: |
+          kubectl --kubeconfig "$EXISTING_KUBECONFIG" get pods -A -o wide
+          kubectl --kubeconfig "$EXISTING_KUBECONFIG" get events -A --sort-by=.lastTimestamp | tail -n 60
+
+      - name: Nettoyage (cluster créé par ce job)
+        if: always()
+        run: kind delete cluster --name attach-target
+
+  e2e-kubeadm:
+    name: E2E kubeadm (${{ matrix.name }})
+    needs: [ansible, python]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: "Ubuntu 24.04, Flannel, 1 CP + 2 workers, restauration etcd"
+            os: "ubuntu"
+            version: "24.04"
+            cps: 1
+            workers: 2
+            cni: "flannel"
+            restore: "1"
+            experimental: false
+          - name: "Debian 12, Calico"
+            os: "debian"
+            version: "12"
+            cps: 1
+            workers: 1
+            cni: "calico"
+            experimental: false
+          - name: "Debian 13, Flannel"
+            os: "debian"
+            version: "13"
+            cps: 1
+            workers: 1
+            cni: "flannel"
+            experimental: false
+          - name: "Rocky Linux 9, Flannel"
+            os: "rocky"
+            version: "9"
+            cps: 1
+            workers: 1
+            cni: "flannel"
+            experimental: false
+          - name: "HA 3 control-planes, Cilium sans kube-proxy, kube-vip"
+            os: "ubuntu"
+            version: "24.04"
+            cps: 3
+            workers: 1
+            cni: "cilium"
+            experimental: false
+          - name: "Mise à niveau 1.36.5 -> 1.37.1"
+            os: "ubuntu"
+            version: "24.04"
+            cps: 1
+            workers: 1
+            cni: "flannel"
+            kubernetes: "1.36.5"
+            upgrade: "1.37.1"
+            experimental: false
+          - name: "Ubuntu 26.04 (expérimental)"
+            os: "ubuntu"
+            version: "26.04"
+            cps: 1
+            workers: 1
+            cni: "flannel"
+            experimental: true
+          - name: "Rocky Linux 10 (expérimental)"
+            os: "rocky"
+            version: "10"
+            cps: 1
+            workers: 1
+            cni: "flannel"
+            experimental: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-lab
+        with:
+          tools: kubectl helm
+
+      - name: ./k8s-lab deploy existing sur des nœuds conteneurs (${{ matrix.os }} ${{ matrix.version }})
         run: tests/kubeadm-in-docker/run.sh
+        env:
+          NODE_OS: ${{ matrix.os }}
+          NODE_OS_VERSION: ${{ matrix.version }}
+          CONTROL_PLANES: ${{ matrix.cps }}
+          WORKERS: ${{ matrix.workers }}
+          CNI: ${{ matrix.cni }}
+          KUBERNETES_VERSION: ${{ matrix.kubernetes }}
+          UPGRADE_TO: ${{ matrix.upgrade }}
+          RESTORE_TEST: ${{ matrix.restore }}

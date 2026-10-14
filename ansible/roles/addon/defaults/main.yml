@@ -1,0 +1,37 @@
+---
+# Cluster ciblé : fourni par ./k8s-lab (contexte vérifié avant toute action).
+addon_kubeconfig: "{{ lab.kubeconfig }}"
+addon_context: "{{ lab.kube_context }}"
+addon_kubectl:
+  - kubectl
+  - "--kubeconfig={{ addon_kubeconfig }}"
+  - "--context={{ addon_context }}"
+  - --request-timeout=60s
+
+# apply | status | test | remove
+addon_action: apply
+# Addons déjà présents utilisés tels quels (mode attach, EXISTING_ADDON_POLICY=skip).
+addon_skip: []
+# Conserver les ressources de test (namespace k8s-lab-test-<addon>) pour les examiner.
+addon_keep_test_resources: false
+# Tests destructifs (arrêt d'un nœud...) : jamais par défaut.
+addon_destructive_tests: false
+
+# Trace des addons installés par le framework (lue par make addons-status et le mode attach).
+addon_state_namespace: k8s-lab-system
+addon_state_configmap: k8s-lab-addons
+
+# Contrôles de santé après installation (ENABLE_HEALTHCHECKS).
+addon_health_checks: "{{ cfg.ENABLE_HEALTHCHECKS | default('true') }}"
+
+# Délais d'attente.
+addon_health_timeout: 600s
+addon_status_timeout: 10s
+addon_manifest_retries: 12
+
+# Labels communs des namespaces créés par le framework.
+addon_namespace_labels:
+  app.kubernetes.io/managed-by: k8s-lab
+
+# Tâches d'aide aux tests (curl dans le cluster...).
+addon_helpers: "{{ playbook_dir }}/roles/addon/tasks/helpers"

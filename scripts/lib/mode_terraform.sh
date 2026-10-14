@@ -48,7 +48,7 @@ tf_output() {
   "$(terraform_bin)" -chdir="$(tf_dir "$1")" output -raw "$2" 2>/dev/null
 }
 
-# Réglages de config/lab.env transmis à Terraform (variables TF_VAR_*).
+# Réglages résolus (scripts/labctl) transmis à Terraform (variables TF_VAR_*).
 # Les réglages propres à l'infrastructure restent dans terraform.tfvars.
 tf_export_vars() {
   local provider="$1"
@@ -58,20 +58,39 @@ tf_export_vars() {
   fi
   ensure_ssh_key
   export TF_VAR_cluster_name="${CLUSTER_NAME}"
-  export TF_VAR_worker_count="${WORKER_COUNT}"
+  export TF_VAR_control_plane_count="${LAB_R_CP_COUNT:-${CONTROL_PLANE_COUNT}}"
+  export TF_VAR_worker_count="${LAB_R_WORKER_COUNT:-${WORKER_COUNT}}"
   export TF_VAR_hostname_prefix="${NODE_HOSTNAME_PREFIX}"
   export TF_VAR_node_cpus="${NODE_CPUS}"
   export TF_VAR_node_memory_mb="${NODE_MEMORY_MB}"
   export TF_VAR_node_disk_gb="${NODE_DISK_GB}"
+  export TF_VAR_ssh_user="${LAB_R_SSH_USER:-ubuntu}"
+  export TF_VAR_os_family="${LAB_R_OS_FAMILY:-debian}"
   export TF_VAR_ssh_private_key_file="${SSH_PRIVATE_KEY_FILE}"
   TF_VAR_ssh_public_key="$(cat "${SSH_PRIVATE_KEY_FILE}.pub")"
   export TF_VAR_ssh_public_key
+  # Disque Longhorn dédié (LONGHORN_DEDICATED_DISK=true et Longhorn dans le plan).
+  if [[ "${LAB_R_LONGHORN_DISK:-false}" == true ]]; then
+    export TF_VAR_longhorn_disk_gb="${LONGHORN_DISK_SIZE_GB}"
+    [[ -z "${LONGHORN_DISK_DATASTORE:-}" ]] || export TF_VAR_longhorn_datastore="${LONGHORN_DISK_DATASTORE}"
+  else
+    export TF_VAR_longhorn_disk_gb=0
+  fi
   case "${provider}" in
     proxmox)
-      export TF_VAR_image_url="${VM_IMAGE_URL}"
-      export TF_VAR_image_sha256="${VM_IMAGE_SHA256}"
+      export TF_VAR_node_os="${LAB_R_OS_NAME}" TF_VAR_node_os_version="${LAB_R_OS_VERSION}"
+      export TF_VAR_cpu_type="${NODE_CPU_TYPE}"
+      if [[ "${LAB_R_IMAGE_SOURCE}" == template ]]; then
+        export TF_VAR_template_vm_id="${LAB_R_TEMPLATE}"
+      else
+        export TF_VAR_image_url="${LAB_R_IMAGE_URL}" TF_VAR_image_sha256="${LAB_R_IMAGE_SHA256}"
+      fi
+      ;;
+    vsphere)
+      [[ -z "${LAB_R_TEMPLATE:-}" ]] || export TF_VAR_vsphere_template="${LAB_R_TEMPLATE}"
       ;;
     libvirt)
+      export TF_VAR_node_os="${LAB_R_OS_NAME}" TF_VAR_node_os_version="${LAB_R_OS_VERSION}"
       tf_libvirt_prepare_image
       ;;
   esac
@@ -80,13 +99,13 @@ tf_export_vars() {
 # libvirt : l'image est téléchargée une seule fois dans .lab/cache/ et son
 # SHA-256 est vérifié AVANT d'être confiée à Terraform.
 tf_libvirt_prepare_image() {
-  local cache="${LAB_STATE_DIR}/cache/images" file sum
-  file="${cache}/$(basename "${VM_IMAGE_URL}")"
+  local cache="${LAB_STATE_DIR}/cache/images" file sum url="${LAB_R_IMAGE_URL}" expected="${LAB_R_IMAGE_SHA256}"
+  file="${cache}/$(basename "${url}")"
   mkdir -p "${cache}"
   if [[ ! -f "${file}" ]]; then
-    step "Téléchargement de l'image Ubuntu (une seule fois) : ${VM_IMAGE_URL}"
-    run curl -fL --progress-bar -o "${file}.part" "${VM_IMAGE_URL}" ||
-      die "Téléchargement impossible : ${VM_IMAGE_URL}" "Vérifiez votre connexion Internet."
+    step "Téléchargement de l'image ${LAB_R_OS_NAME} ${LAB_R_OS_VERSION} (une seule fois) : ${url}"
+    run curl -fL --progress-bar -o "${file}.part" "${url}" ||
+      die "Téléchargement impossible : ${url}" "Vérifiez votre connexion Internet."
     mv "${file}.part" "${file}"
   fi
   if have sha256sum; then
@@ -94,11 +113,11 @@ tf_libvirt_prepare_image() {
   else
     sum="$(shasum -a 256 "${file}" | awk '{print $1}')"
   fi
-  if [[ "${sum}" != "${VM_IMAGE_SHA256}" ]]; then
+  if [[ "${sum}" != "${expected}" ]]; then
     rm -f "${file}"
     die "Empreinte SHA-256 incorrecte pour $(basename "${file}") : fichier supprimé." \
-      "Attendu : ${VM_IMAGE_SHA256}" "Obtenu  : ${sum}" \
-      "Si vous avez changé VM_IMAGE_URL, mettez aussi à jour VM_IMAGE_SHA256 (fichier SHA256SUMS de la release)."
+      "Attendu : ${expected}" "Obtenu  : ${sum}" \
+      "Image personnalisée : NODE_IMAGE_URL et NODE_IMAGE_SHA256 doivent correspondre (fichier SHA256SUMS de la release)."
   fi
   ok "Image vérifiée (SHA-256) : ${file#"${LAB_ROOT}"/}"
   export TF_VAR_image_source="${file}"
@@ -167,8 +186,7 @@ terraform_deploy() {
     ansible_install_kubernetes "$(tf_inventory "${provider}")"
     kubeconfig_merge "${LAB_KUBE_DIR}/clusters/${context}.yaml" "${context}"
   fi
-  smoke_basic "${context}"
-  kubeconfig_hint "${context}"
+  post_deploy "${context}"
   if [[ "${provider}" == "eks" ]]; then
     printf '\nInformations du cluster : %s -chdir=terraform/providers/eks output\n' "$(terraform_bin)"
     [[ "${AWS_TARGET}" == "aws" ]] && warn "Le cluster EKS est facturé tant qu'il existe. Fin du TP : $(hint_cmd destroy terraform eks)"

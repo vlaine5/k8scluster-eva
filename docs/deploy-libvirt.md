@@ -11,7 +11,8 @@ Terraform → VMs KVM (libvirt) → Ansible → kubeadm → Kubernetes
 
 - 1 control-plane : la VM `k8s-cp-1` (192.168.123.10)
 - 2 workers : les VMs `k8s-worker-1` et `k8s-worker-2` (192.168.123.11 et .12)
-- Kubernetes 1.37 installé avec kubeadm, runtime containerd, réseau des Pods Flannel
+- Kubernetes 1.36 (version verrouillée : [versions.md](versions.md)) installé avec kubeadm,
+  runtime containerd, réseau des Pods Flannel (ou Calico, Cilium : [cni.md](cni.md))
 - un réseau et un stockage libvirt dédiés au lab (`k8s-lab-net`, `k8s-lab-pool`)
 
 ## Prérequis
@@ -100,7 +101,7 @@ ssh -i .lab/ssh/id_ed25519 ubuntu@192.168.123.10
 | --- | --- | --- |
 | `libvirt_pool` | `k8s-lab-pool` | stockage dans `/var/lib/libvirt/images/k8s-lab` |
 | `libvirt_network` | `k8s-lab-net` | réseau NAT `192.168.123.0/24` |
-| `libvirt_volume` | `k8s-lab-ubuntu-base.qcow2` | image Ubuntu 24.04 de base |
+| `libvirt_volume` | `k8s-lab-ubuntu-2404-base.qcow2` | image de base de l'OS choisi (Ubuntu 24.04 par défaut) |
 | `libvirt_volume` | `<nœud>.qcow2` | disque de chaque VM (copie sur écriture de l'image de base) |
 | `libvirt_cloudinit_disk` | `<nœud>-cloudinit.iso` | configuration cloud-init (IP fixe, clé SSH) |
 | `libvirt_domain` | `k8s-cp-1`, `k8s-worker-1`… | les VMs |
@@ -117,3 +118,15 @@ s'appliquent plus. Utiliser Terraform directement : [terraform.md](terraform.md)
 Le code est vérifié en CI (`terraform validate` contre le schéma du provider, TFLint,
 `terraform test` des modules communs) ; le déploiement sur un hôte KVM réel n'a pas encore été
 testé.
+
+## Autres possibilités du framework
+
+- Système des nœuds : `NODE_OS` / `NODE_OS_VERSION` (Ubuntu, Debian, Rocky) : [os.md](os.md)
+- Haute disponibilité : `CONTROL_PLANE_COUNT=3` et `CONTROL_PLANE_VIP` : [high-availability.md](high-availability.md)
+- Réseau : `CNI=calico` ou `cilium`, Gateway API, LoadBalancer : [cni.md](cni.md),
+  [gateway-api.md](gateway-api.md), [loadbalancer.md](loadbalancer.md)
+- Addons : `ADDON_PROFILE=homelab` (ou un profil d'[exemple](../examples/profiles/README.md)) : [addons.md](addons.md)
+- Stockage : NFS ou Longhorn sur disque dédié (`LONGHORN_DEDICATED_DISK=true`) : [storage.md](storage.md)
+- Exploitation (mises à niveau, sauvegardes, santé) : [day2.md](day2.md)
+- Une nouvelle image d'OS (config/versions.yaml) ne recrée jamais les VMs : l'image de base
+  d'un cluster existant est conservée ; `make os-update` met les nœuds à jour.

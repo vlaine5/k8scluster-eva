@@ -1,0 +1,25 @@
+# Valeurs du chart csi-driver-nfs (version verrouillée dans config/versions.yaml).
+# La StorageClass est gérée par le framework (manifests/storageclass.yaml.j2) pour
+# pouvoir changer ses paramètres sans réinstaller le pilote.
+driver:
+  name: nfs.csi.k8s.io
+controller:
+  replicas: {{ 2 if (lab.worker_count | default(0) | int) > 1 else 1 }}
+  logLevel: 2
+  # Un PV supprimé (politique Delete uniquement) : son sous-dossier est supprimé.
+  defaultOnDeletePolicy: delete
+node:
+  logLevel: 2
+feature:
+  enableFSGroupPolicy: true
+# Le contrôleur d'instantanés est un addon à part (snapshot-controller) : jamais deux copies.
+externalSnapshotter:
+  enabled: false
+  customResourceDefinitions:
+    enabled: false
+volumeSnapshotClass:
+  create: {{ 'snapshot-controller' in lab_addon_ids }}
+  name: nfs-csi-snapclass
+  deletionPolicy: Retain
+storageClass:
+  create: false

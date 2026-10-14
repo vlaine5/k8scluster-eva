@@ -1,0 +1,50 @@
+---
+# =============================================================================
+#  Contrôles préalables SEULS (lecture seule) : rien n'est modifié.
+#  Mode existing : ./k8s-lab le lance avant de demander confirmation.
+#
+#    cd ansible
+#    ansible-playbook -i inventories/<inventaire>.ini preflight.yml -e @vars.json
+# =============================================================================
+
+- name: Connect to the machines and gather their facts
+  hosts: k8s_cluster
+  gather_facts: false
+  tasks:
+    - name: Check the SSH connection
+      ansible.builtin.wait_for_connection:
+        timeout: 60
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+- name: Preflight checks (read-only)
+  hosts: k8s_cluster
+  become: true
+  gather_facts: false
+  vars:
+    preflight_strict: true
+  roles:
+    - role: preflight
+
+# Sur le 1er control-plane (et non localhost) : k8s_api_endpoint se calcule à partir
+# de hostvars, qui n'est pas disponible quand on lit la variable d'un autre hôte.
+- name: Summarize the inventory
+  hosts: control_plane[0]
+  gather_facts: false
+  tasks:
+    - name: Show the cluster that would be created
+      ansible.builtin.debug:
+        msg:
+          - "Control-planes: {{ groups['control_plane'] | join(', ') }}"
+          - "Workers: {{ groups['workers'] | default([]) | join(', ') or 'none (single-node cluster)' }}"
+          - "Operating systems: {{ groups['k8s_cluster'] | map('extract', hostvars, 'preflight_os_name') | zip(groups['k8s_cluster']
+            | map('extract', hostvars, 'preflight_os_version')) | map('join', ' ') | unique | join(', ') }}"
+          - "API endpoint: {{ k8s_api_endpoint }}"
+
+    - name: Warn about mixed operating systems
+      ansible.builtin.debug:
+        msg: >-
+          Several distributions in one cluster: each is supported, but this exact mix has not been validated by the CI.
+          Prefer a single distribution for production-like labs.
+      when: groups['k8s_cluster'] | map('extract', hostvars, 'preflight_os_name') | unique | length > 1

@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=k8s-lab : instantané etcd
+After=containerd.service kubelet.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/k8s-lab-etcd-snapshot
+Nice=10
+IOSchedulingClass=best-effort

@@ -18,6 +18,7 @@ admin.conf
 join-command
 ansible/inventories/*.ini
 !ansible/inventories/example.ini
+!ansible/inventories/existing.example.ini
 
 # -----------------------------------------------------------------------------
 #  Terraform / OpenTofu (le state peut contenir des données sensibles)
@@ -50,3 +51,11 @@ terraform.rc
 *.swp
 .DS_Store
 terraform/modules/**/.terraform.lock.hcl
+
+# -----------------------------------------------------------------------------
+#  Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/

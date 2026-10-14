@@ -1,0 +1,105 @@
+# kube-prometheus-stack : Prometheus, Alertmanager, Grafana, node-exporter, kube-state-metrics.
+# Les CRD sont fournies par l'addon prometheus-operator-crds (une seule source).
+{% set kubeadm = lab.kubeadm | default(false) %}
+{% set verify_kubelet = kubeadm or lab.platform in ['kind', 'eks'] %}
+{% set persistence = cfg.MONITORING_PERSISTENCE | bool %}
+crds:
+  enabled: false
+defaultRules:
+  rules:
+    etcd: {{ kubeadm }}
+    kubeControllerManager: {{ kubeadm }}
+    kubeSchedulerAlerting: {{ kubeadm }}
+    kubeSchedulerRecording: {{ kubeadm }}
+    kubeProxy: {{ kubeadm and not lab.kube_proxy_replacement | default(false) }}
+
+# --- Composants du plan de contrôle -----------------------------------------------------
+# kubeadm (framework) : métriques exposées par la configuration générée (bind 0.0.0.0,
+# etcd sur :2381 en HTTP). kind/minikube/EKS/attach : non joignables, non collectés.
+kubeControllerManager:
+  enabled: {{ kubeadm }}
+kubeScheduler:
+  enabled: {{ kubeadm }}
+kubeEtcd:
+  enabled: {{ kubeadm }}
+  service:
+    port: 2381
+    targetPort: 2381
+kubeProxy:
+  enabled: {{ kubeadm and not lab.kube_proxy_replacement | default(false) }}
+kubelet:
+  serviceMonitor:
+    # Certificats des kubelets signés par la CA du cluster : vérifiés (pas d'insecureSkipVerify).
+    tlsConfig:
+      insecureSkipVerify: {{ not verify_kubelet }}
+      ca:
+        configMap:
+          name: kube-root-ca.crt
+          key: ca.crt
+
+prometheus-node-exporter:
+  hostRootFsMount:
+    # Les « nœuds » kind/minikube sont des conteneurs : pas de propagation de montage.
+    enabled: {{ lab.platform not in ['kind', 'minikube'] }}
+
+prometheusOperator:
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+
+prometheus:
+  prometheusSpec:
+    retention: {{ cfg.MONITORING_RETENTION }}
+    # Toutes les ServiceMonitor/PodMonitor/règles du cluster, pas seulement celles de la release.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    resources:
+      requests: {cpu: 200m, memory: 512Mi}
+{% if 'tempo' in lab_addon_ids %}
+    # Métriques calculées par Tempo (graphe des services) et exemplaires.
+    enableFeatures: [exemplar-storage]
+    enableRemoteWriteReceiver: true
+{% endif %}
+{% if 'opentelemetry-collector' in lab_addon_ids %}
+    # Métriques OTLP envoyées par le collecteur OpenTelemetry.
+    enableOTLPReceiver: true
+{% endif %}
+{% if persistence %}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: {{ cfg.MONITORING_STORAGE_SIZE_GB }}Gi
+{% endif %}
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+
+grafana:
+{% if lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASSWORD') %}
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+{% endif %}
+  sidecar:
+    datasources:
+      searchNamespace: ALL
+    dashboards:
+      searchNamespace: ALL
+  persistence:
+    enabled: {{ persistence }}
+    size: 2Gi
+{% if cfg.GRAFANA_EXPOSE | bool %}
+  grafana.ini:
+    server:
+      root_url: "{{ 'https' if lab.gateway_tls else 'http' }}://grafana.{{ cfg.GATEWAY_DOMAIN }}"
+{% endif %}
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}

@@ -1,0 +1,43 @@
+id: envoy-gateway
+name: Envoy Gateway
+description: >-
+  Implémentation de référence de Gateway API basée sur Envoy Proxy (GatewayClass « envoy-gateway »).
+  Supporte HTTPRoute, GRPCRoute, TLSRoute, et TCPRoute/UDPRoute avec le canal expérimental.
+category: network
+phase: 5
+components: [envoy-gateway]
+depends_on: [gateway-api-crds]
+integrates_with: [prometheus-operator-crds]
+selected_by:
+  GATEWAY_CONTROLLER: [envoy-gateway]
+gateway:
+  class: envoy-gateway
+  listener_ports: {http: 80, https: 443}
+  routes: [HTTPRoute, GRPCRoute, TLSRoute]
+  experimental_routes: [TCPRoute, UDPRoute]
+support:
+  default: supported
+  eks: {status: configured, note: "Le Service LoadBalancer crée un load balancer AWS payant."}
+validated: [ci-kind]
+resources: {cpu_m: 200, memory_mb: 256}
+install:
+  namespace: envoy-gateway-system
+  pod_security: baseline
+  releases:
+    # 1) CRD propres à Envoy Gateway (les CRD Gateway API viennent de gateway-api-crds : un seul propriétaire).
+    #    method template : chart rendu puis appliqué en server-side apply, sans release Helm
+    #    (le Secret d'une release de ce chart dépasse la limite de 1 Mio de Kubernetes).
+    - name: envoy-gateway-crds
+      component: envoy-gateway
+      chart_key: crds_chart
+      namespace: envoy-gateway-system
+      values: values-crds.yaml.j2
+      method: template
+    - {name: envoy-gateway, component: envoy-gateway, namespace: envoy-gateway-system, values: values.yaml.j2, timeout: 10m, skip_crds: true}
+  manifests: [gatewayclass.yaml.j2]
+health:
+  - {kind: Deployment, namespace: envoy-gateway-system, name: envoy-gateway}
+  - {kind: GatewayClass, name: envoy-gateway}
+remove:
+  notes: "Les CRD d'Envoy Gateway sont conservées (helm uninstall ne supprime pas les CRD)."
+docs: docs/gateway-api.md

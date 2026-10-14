@@ -7,7 +7,7 @@ Kind est plus léger ; Minikube est plus « outillé ».
 ## Ce que vous allez obtenir
 
 - 1 nœud qui est à la fois control-plane et worker
-- Kubernetes 1.37
+- Kubernetes 1.36 (version verrouillée : [versions.md](versions.md))
 - un réseau des Pods fourni par Minikube
 - les addons Minikube (`minikube addons list`)
 
@@ -91,7 +91,7 @@ minikube ssh --profile k8s-lab                  # dans le nœud : sudo crictl ps
 - Réglages disponibles dans `.env` : `MINIKUBE_NODES`, `MINIKUBE_CPUS`, `MINIKUBE_MEMORY_MB`,
   `MINIKUBE_EXTRA_ARGS` (ex : `--addons=ingress,metrics-server`). Voir
   [configuration.md](configuration.md).
-- Le CLI lance `minikube start --profile k8s-lab --kubernetes-version v1.37.0 …` : la commande
+- Le CLI lance `minikube start --profile k8s-lab --kubernetes-version v1.36.5 …` : la commande
   exacte est affichée pendant le déploiement.
 - Étape suivante : un vrai cluster kubeadm sur des VMs avec [Vagrant](deploy-vagrant.md).
 

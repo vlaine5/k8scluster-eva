@@ -1,0 +1,33 @@
+id: traefik
+name: Traefik (contrôleur Gateway API)
+description: >-
+  Traefik Proxy comme contrôleur Kubernetes Gateway API (GatewayClass « traefik »), avec le support
+  des Ingress historiques. Conformité Gateway API v1.6.2 (canal standard ; TCPRoute en expérimental).
+category: network
+phase: 5
+components: [traefik]
+depends_on: [gateway-api-crds]
+integrates_with: [prometheus-operator-crds]
+selected_by:
+  GATEWAY_CONTROLLER: [traefik]
+gateway:
+  class: traefik
+  listener_ports: {http: 8000, https: 8443}
+  routes: [HTTPRoute, GRPCRoute, TLSRoute]
+  experimental_routes: [TCPRoute]
+support:
+  default: supported
+  eks: {status: configured, note: "Le Service LoadBalancer crée un load balancer AWS payant."}
+validated: [ci-kind]
+resources: {cpu_m: 100, memory_mb: 128}
+install:
+  namespace: traefik
+  pod_security: restricted
+  releases:
+    - {name: traefik, component: traefik, namespace: traefik, values: values.yaml.j2, timeout: 10m}
+health:
+  - {kind: Deployment, namespace: traefik, name: traefik}
+  - {kind: GatewayClass, name: traefik}
+remove:
+  notes: "Les routes (HTTPRoute) des applications restent en place mais ne sont plus servies."
+docs: docs/gateway-api.md

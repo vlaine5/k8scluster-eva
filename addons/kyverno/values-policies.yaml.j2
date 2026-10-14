@@ -1,0 +1,8 @@
+# Politiques Pod Security « baseline » (CEL, ValidatingPolicy), en mode
+# {{ cfg.KYVERNO_POLICY_MODE }} (KYVERNO_POLICY_MODE=audit : rapports seulement ;
+# enforce : refus à l'admission). Namespaces des composants privilégiés du lab exclus.
+policyType: ValidatingPolicy
+podSecurityStandard: baseline
+validationFailureAction: {{ 'Enforce' if cfg.KYVERNO_POLICY_MODE == 'enforce' else 'Audit' }}
+vpolExclude:
+  excludeNamespaces: {{ lab_privileged_namespaces | to_json }}

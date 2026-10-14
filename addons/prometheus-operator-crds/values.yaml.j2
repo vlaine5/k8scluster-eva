@@ -1,0 +1,5 @@
+# CRD de Prometheus Operator, installées AVANT les addons qui créent des ServiceMonitor.
+# helm.sh/resource-policy=keep : désinstaller la release ne supprime jamais les CRD.
+crds:
+  annotations:
+    helm.sh/resource-policy: keep

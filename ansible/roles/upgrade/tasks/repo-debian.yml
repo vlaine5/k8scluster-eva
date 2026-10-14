@@ -1,0 +1,14 @@
+---
+- name: Point the Kubernetes APT repository to the target minor version
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: [deb]
+    uris: ["https://pkgs.k8s.io/core:/stable:/v{{ upgrade_target_minor }}/deb/"]
+    suites: ["/"]
+    signed_by: "https://pkgs.k8s.io/core:/stable:/v{{ upgrade_target_minor }}/deb/Release.key"
+    state: present
+
+# Toujours rafraîchi : la mise à niveau exige la liste à jour des correctifs disponibles.
+- name: Refresh the APT cache
+  ansible.builtin.apt:
+    update_cache: true

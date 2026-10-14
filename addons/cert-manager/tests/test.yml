@@ -1,0 +1,100 @@
+---
+# =============================================================================
+#  Test de cert-manager :
+#    1. émission d'un certificat par la CA interne (ClusterIssuer k8s-lab-ca)
+#    2. le certificat est signé par la CA du lab (ca.crt == certificat de la CA)
+#    3. réémission : le Secret supprimé est recréé (nouvelle révision)
+#  Les émetteurs ACME ne sont pas testés ici (domaine public et accès Internet requis).
+# =============================================================================
+
+- name: Choose the issuer to test
+  ansible.builtin.set_fact:
+    certmgr_test_issuer: >-
+      {{ {'kind': 'ClusterIssuer', 'name': 'k8s-lab-ca'} if cfg.CERT_MANAGER_ISSUER != 'none'
+         else {'kind': 'Issuer', 'name': 'test-selfsigned'} }}
+
+- name: Create a namespaced self-signed issuer (no lab issuer configured)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: cert-manager.io/v1
+      kind: Issuer
+      metadata: {name: test-selfsigned, namespace: "{{ addon_test_ns }}"}
+      spec: {selfSigned: {}}
+  when: cfg.CERT_MANAGER_ISSUER == 'none'
+
+- name: Request a certificate from {{ certmgr_test_issuer.name }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata: {name: test-cert, namespace: "{{ addon_test_ns }}"}
+      spec:
+        secretName: test-cert-tls
+        dnsNames: ["test.{{ cfg.GATEWAY_DOMAIN }}"]
+        duration: 24h
+        renewBefore: 1h
+        privateKey: {algorithm: ECDSA, size: 256, rotationPolicy: Always}
+        issuerRef: {name: "{{ certmgr_test_issuer.name }}", kind: "{{ certmgr_test_issuer.kind }}", group: cert-manager.io}
+
+- name: Wait until the certificate is issued
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'wait', '--for=condition=Ready', '--timeout=180s', 'certificate/test-cert'] }}"
+  changed_when: false
+
+- name: Read the issued certificate and the CA of the lab
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', item.ns, 'get', 'secret', item.name, '-o', 'jsonpath={.data.' ~ item.key ~ '}'] }}"
+  loop:
+    - {ns: "{{ addon_test_ns }}", name: test-cert-tls, key: 'ca\.crt'}
+    - {ns: "{{ addon_test_ns }}", name: test-cert-tls, key: 'tls\.crt'}
+    - {ns: cert-manager, name: k8s-lab-ca, key: 'tls\.crt'}
+  loop_control:
+    label: "{{ item.ns }}/{{ item.name }} {{ item.key }}"
+  register: certmgr_test_secrets
+  changed_when: false
+  when: item.ns != 'cert-manager' or cfg.CERT_MANAGER_ISSUER != 'none'
+
+- name: Check that the certificate was signed by the CA of the lab
+  ansible.builtin.assert:
+    that:
+      - certmgr_test_secrets.results[1].stdout | length > 0
+      - certmgr_test_secrets.results[0].stdout == certmgr_test_secrets.results[2].stdout
+    fail_msg: "The ca.crt of the issued certificate is not the certificate of the k8s-lab-ca CA."
+    quiet: true
+  when: cfg.CERT_MANAGER_ISSUER != 'none'
+
+- name: Read the revision of the certificate
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'certificate', 'test-cert', '-o', 'jsonpath={.status.revision}'] }}"
+  register: certmgr_test_revision
+  changed_when: false
+
+- name: Delete the certificate secret to force a new issuance
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    kind: Secret
+    namespace: "{{ addon_test_ns }}"
+    name: test-cert-tls
+
+- name: Wait for the new revision
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'certificate', 'test-cert', '-o', 'jsonpath={.status.revision}'] }}"
+  register: certmgr_test_new_revision
+  changed_when: false
+  until: certmgr_test_new_revision.stdout | int > certmgr_test_revision.stdout | int
+  retries: 18
+  delay: 5
+
+- name: Report the cert-manager test
+  ansible.builtin.debug:
+    msg: >-
+      cert-manager OK — certificate issued by {{ certmgr_test_issuer.kind }}/{{ certmgr_test_issuer.name }}
+      and renewed (revision {{ certmgr_test_revision.stdout }} → {{ certmgr_test_new_revision.stdout }}).

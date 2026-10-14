@@ -1,0 +1,75 @@
+# LB IPAM de Cilium : plage d'IP des Services LoadBalancer (LOADBALANCER_IP_POOL).
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: lab-pool
+spec:
+  blocks:
+{% for block in lab.loadbalancer.pool %}
+{% if '/' in block %}
+    - cidr: "{{ block }}"
+{% elif '-' in block %}
+    - start: "{{ block.split('-')[0] }}"
+      stop: "{{ block.split('-')[1] }}"
+{% else %}
+    - start: "{{ block }}"
+      stop: "{{ block }}"
+{% endif %}
+{% endfor %}
+---
+{% if lab.loadbalancer.provider == 'cilium-l2' %}
+# Annonce L2 (ARP) des IP des Services par un nœud élu (bail Kubernetes).
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: lab-l2
+spec:
+  loadBalancerIPs: true
+  externalIPs: false
+{% if lab.loadbalancer.interfaces %}
+  interfaces: {{ lab.loadbalancer.interfaces.split(',') | map('trim') | list | to_json }}
+{% endif %}
+{% else %}
+# BGP : routeur pair configuré et validé de SON côté au préalable (jamais supposé).
+apiVersion: cilium.io/v2
+kind: CiliumBGPClusterConfig
+metadata:
+  name: lab-bgp
+spec:
+  bgpInstances:
+    - name: lab
+      localASN: {{ cfg.BGP_LOCAL_ASN }}
+      peers:
+        - name: lab-router
+          peerASN: {{ cfg.BGP_PEER_ASN }}
+          peerAddress: "{{ cfg.BGP_PEER_ADDRESS }}"
+          peerConfigRef:
+            name: lab-peer
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPPeerConfig
+metadata:
+  name: lab-peer
+spec:
+  families:
+    - afi: ipv4
+      safi: unicast
+      advertisements:
+        matchLabels:
+          advertise: lab-bgp
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPAdvertisement
+metadata:
+  name: lab-services
+  labels:
+    advertise: lab-bgp
+spec:
+  advertisements:
+    - advertisementType: Service
+      service:
+        addresses: [LoadBalancerIP]
+      selector:
+        matchExpressions:
+          - {key: k8s-lab.io/no-bgp, operator: NotIn, values: ["true"]}
+{% endif %}

@@ -1,0 +1,25 @@
+---
+# ufw actif (Ubuntu / Debian) : il n'est PAS désactivé ; on ajoute uniquement
+# les règles nécessaires à Kubernetes, au CNI et aux addons, ainsi que le
+# routage du réseau des Pods. docs/security.md#pare-feu
+- name: Open the Kubernetes, CNI and addon ports (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.split('/') | first | replace('-', ':') }}"
+    proto: "{{ item.split('/') | last }}"
+    comment: k8s-lab
+  loop: "{{ common_firewall_ports }}"
+
+- name: Allow the Pod and Service networks (ufw)
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ item }}"
+    comment: k8s-lab pods/services
+  loop: "{{ [pod_cidr, service_cidr] | select | list }}"
+
+- name: Allow routed Pod traffic (ufw)
+  community.general.ufw:
+    rule: allow
+    route: true
+    from_ip: "{{ pod_cidr }}"
+    comment: k8s-lab pod routing

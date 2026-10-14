@@ -1,0 +1,43 @@
+---
+# État d'un addon : releases Helm (version installée / verrouillée) et santé.
+- name: Read the Helm releases of {{ addon_item.id }}
+  # helm list plutôt que kubernetes.core.helm_info : ce dernier relit tout le manifeste
+  # de la release avec yaml.safe_load, qui échoue sur certains charts (étiquette YAML
+  # « = » des CRD de prometheus-operator).
+  ansible.builtin.command:
+    argv: [helm, list, --kubeconfig, "{{ addon_kubeconfig }}", --kube-context, "{{ addon_context }}",
+           --namespace, "{{ addon_release.namespace }}", --filter, "^{{ addon_release.name }}$", --output, json]
+  loop: "{{ addon_install.releases | default([]) }}"
+  loop_control:
+    loop_var: addon_release
+    label: "{{ addon_release.namespace }}/{{ addon_release.name }}"
+  register: addon_status_releases
+  changed_when: false
+  # Une release « template » n'existe pas dans Helm : sa santé passe par health.
+  when:
+    - addon_override.minikube_addon is not defined
+    - addon_release.method | default('release') == 'release'
+
+- name: Check the health of {{ addon_item.id }}
+  ansible.builtin.include_tasks: health.yml
+  loop: "{{ addon_spec.health | default([]) }}"
+  loop_control:
+    loop_var: addon_check
+    label: "{{ addon_check.kind }} {{ addon_check.name }}"
+  vars:
+    addon_health_mode: status
+
+- name: Summarize {{ addon_item.id }}
+  ansible.builtin.set_fact:
+    addon_status_report: >-
+      {{ addon_status_report | default([]) + [{
+           'addon': addon_item.id,
+           'releases': addon_status_releases.results | default([]) | selectattr('stdout', 'defined')
+                       | map(attribute='stdout') | map('from_json') | select | map('first')
+                       | map(attribute='chart') | list,
+           'missing_releases': addon_status_releases.results | default([]) | selectattr('stdout', 'defined')
+                       | selectattr('stdout', 'equalto', '[]') | map(attribute='addon_release')
+                       | map(attribute='name') | list,
+           'locked': addon_item.versions,
+           'healthy': addon_health_report | default([]) | selectattr('addon', 'equalto', addon_item.id)
+                      | rejectattr('ok') | list | length == 0}] }}

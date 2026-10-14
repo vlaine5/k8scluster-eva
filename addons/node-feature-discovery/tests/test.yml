@@ -1,0 +1,29 @@
+---
+# =============================================================================
+#  Test de Node Feature Discovery : chaque nœud où tourne l'agent NFD (DaemonSet
+#  node-feature-discovery-worker ; pas les control-planes, dont le taint n'est pas
+#  toléré) reçoit les étiquettes NFD (ex. feature.node.kubernetes.io/kernel-version.major).
+# =============================================================================
+
+- name: List the nodes that run the NFD worker
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'node-feature-discovery', 'get', 'pods', '-l', 'app.kubernetes.io/name=node-feature-discovery,role=worker',
+                               '-o', 'jsonpath={range .items[*]}{.spec.nodeName}{\"\\n\"}{end}'] }}"
+  register: nfd_test_worker_nodes
+  changed_when: false
+
+- name: Check that the NFD worker runs on at least one node
+  ansible.builtin.assert:
+    that: nfd_test_worker_nodes.stdout_lines | select | list | length > 0
+    fail_msg: "No NFD worker Pod: kubectl -n node-feature-discovery get daemonset node-feature-discovery-worker"
+    quiet: true
+
+- name: Wait until every node running the NFD worker is labelled
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'nodes', '-l', 'feature.node.kubernetes.io/kernel-version.major',
+                               '-o', 'jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}'] }}"
+  register: nfd_test_labelled
+  changed_when: false
+  until: nfd_test_worker_nodes.stdout_lines | select | difference(nfd_test_labelled.stdout_lines) | length == 0
+  retries: 18
+  delay: 10

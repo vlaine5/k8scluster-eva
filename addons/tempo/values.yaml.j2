@@ -1,0 +1,27 @@
+# Grafana Tempo (monolithique) : traces OTLP (gRPC 4317, HTTP 4318), API sur 3200.
+replicas: 1
+tempo:
+  reportingEnabled: false
+  retention: 72h
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 1Gi}
+{% if 'monitoring' in lab_addon_ids %}
+  # Graphe des services et métriques RED calculés depuis les traces, écrits dans Prometheus.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: http://kube-prometheus-stack-prometheus.monitoring:9090/api/v1/write
+{% endif %}
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities: {drop: [ALL]}
+    seccompProfile: {type: RuntimeDefault}
+serviceMonitor:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}

@@ -7,8 +7,9 @@ C'est le moyen recommandé pour commencer.
 
 - 1 control-plane
 - 2 workers
-- Kubernetes 1.37, prêt en 1 à 2 minutes
-- un réseau des Pods déjà en place (kindnet, fourni par Kind)
+- Kubernetes 1.36 (version verrouillée : [versions.md](versions.md)), prêt en 1 à 2 minutes
+- un réseau des Pods déjà en place (kindnet, fourni par Kind ; `CNI=calico` ou `cilium`
+  possibles : [cni.md](cni.md))
 
 ## Prérequis
 
@@ -64,7 +65,7 @@ make destroy MODE=kind
 | Symptôme | Solution |
 | --- | --- |
 | `doctor` : Docker introuvable, ou Docker ne répond pas | installez ou démarrez Docker ; sous Linux, pour l'utiliser sans sudo : `sudo usermod -aG docker $USER`, puis reconnectez-vous |
-| `Docker utilise cgroup v1` | Kubernetes 1.37 exige cgroup v2 : distribution récente, Docker Desktop ou WSL2 à jour |
+| `Docker utilise cgroup v1` | Kubernetes ≥ 1.35 exige cgroup v2 : distribution récente, Docker Desktop ou WSL2 à jour |
 | `The connection to the server localhost:8080 was refused` | vous avez oublié `export KUBECONFIG="$PWD/.kube/config"` |
 | Le cluster `k8s-lab` existe déjà | c'est normal : `deploy` ne détruit jamais un cluster ; pour le recréer : `make deploy MODE=kind RECREATE=1` |
 | Machine lente ou peu de RAM | un seul worker : `make deploy MODE=kind WORKERS=1` (ajoutez `RECREATE=1` si le cluster existe déjà) |

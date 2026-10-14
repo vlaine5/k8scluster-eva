@@ -1,0 +1,67 @@
+---
+# Une release Helm d'un addon : chart et version verrouillés (config/versions.yaml),
+# valeurs rendues depuis addons/<id>/<values>.j2. kubernetes.core.helm compare la
+# version et les valeurs installées : rien n'est réinstallé si rien n'a changé.
+#   method: release  (défaut) release Helm classique (historique, rollback atomique)
+#   method: template chart rendu (helm template) puis appliqué en server-side apply, SANS
+#                    release : pour les charts de CRD trop volumineux pour le Secret de
+#                    release de Helm (limite de 1 Mio, ex. CRD d'Envoy Gateway).
+# Attention : addon_release['values'] (et non .values, qui désigne la méthode dict.values).
+- name: Describe the chart of the release {{ addon_release.name }}
+  ansible.builtin.set_fact:
+    addon_component: "{{ addon_item.components[addon_release.component] }}"
+
+- name: Install or upgrade the Helm release {{ addon_release.name }}
+  kubernetes.core.helm:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    name: "{{ addon_release.name }}"
+    chart_ref: "{{ addon_component[addon_release.chart_key | default('chart')] if addon_component.type == 'helm-oci' else addon_component.chart }}"
+    chart_repo_url: "{{ addon_component.repo if addon_component.type == 'helm' else omit }}"
+    chart_version: "{{ addon_component.version }}"
+    release_namespace: "{{ addon_release.namespace }}"
+    create_namespace: false
+    values: "{{ (lookup('ansible.builtin.template', addon_dir ~ '/' ~ addon_release['values']) | from_yaml) if addon_release['values'] is defined else {} }}"
+    skip_crds: "{{ addon_release.skip_crds | default(false) }}"
+    # Rollback automatique si l'installation échoue (sauf composants avec données).
+    atomic: "{{ not (addon_spec.stateful | default(false)) }}"
+    wait: "{{ addon_release.wait | default(true) }}"
+    timeout: "{{ addon_release.timeout | default('10m') }}"
+  # Condition only_if de addon.yaml, évaluée par le résolveur (scripts/labcore/render.py).
+  when:
+    - addon_release.enabled | default(true)
+    - addon_release.method | default('release') == 'release'
+
+- name: Render without a Helm release the chart of {{ addon_release.name }}
+  kubernetes.core.helm_template:
+    chart_ref: "{{ addon_component[addon_release.chart_key | default('chart')] if addon_component.type == 'helm-oci' else addon_component.chart }}"
+    chart_repo_url: "{{ addon_component.repo if addon_component.type == 'helm' else omit }}"
+    chart_version: "{{ addon_component.version }}"
+    release_name: "{{ addon_release.name }}"
+    release_namespace: "{{ addon_release.namespace }}"
+    release_values: >-
+      {{ (lookup('ansible.builtin.template', addon_dir ~ '/' ~ addon_release['values']) | from_yaml)
+         if addon_release['values'] is defined else {} }}
+    include_crds: true
+  register: addon_release_rendered
+  # Rendu seul (aucune modification) : seule l'application ci-dessous compte comme changement.
+  changed_when: false
+  when:
+    - addon_release.enabled | default(true)
+    - addon_release.method | default('release') == 'template'
+
+- name: Apply server-side the rendered resources of {{ addon_release.name }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    apply: true
+    # Ressources dont le lab est le seul propriétaire (CRD d'un addon) : les conflits de
+    # champs (ancienne installation par Helm) sont résolus en faveur du lab.
+    server_side_apply:
+      field_manager: k8s-lab
+      force_conflicts: true
+    definition: "{{ addon_release_rendered.stdout | from_yaml_all | select | list }}"
+  when:
+    - addon_release.enabled | default(true)
+    - addon_release.method | default('release') == 'template'

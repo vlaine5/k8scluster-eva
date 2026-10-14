@@ -13,3 +13,12 @@ exclude_paths:
 
 # Les collections sont décrites dans ansible/requirements.yml
 offline: false
+
+# Les modèles Jinja (*.j2) des addons ne sont pas du YAML Ansible.
+
+# Fichiers de tâches des addons (inclus par le rôle addon) et des tests.
+kinds:
+  - tasks: "addons/*/tasks/*.yml"
+  - tasks: "addons/*/tests/*.yml"
+  - tasks: "tests/addons/render_addon.yml"
+  - playbook: "tests/addons/render.yml"

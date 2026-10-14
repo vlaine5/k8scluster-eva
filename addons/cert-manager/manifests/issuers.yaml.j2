@@ -1,0 +1,94 @@
+{% if cfg.CERT_MANAGER_ISSUER != 'none' %}
+# --- CA interne du lab (aucun domaine public requis) -------------------------------------
+# Une CA auto-signée (10 ans) émet les certificats des applications (ClusterIssuer k8s-lab-ca).
+# Pour faire confiance aux certificats du lab depuis votre poste :
+#   kubectl -n cert-manager get secret k8s-lab-ca -o jsonpath='{.data.tls\.crt}' | base64 -d > k8s-lab-ca.crt
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: k8s-lab-selfsigned
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: k8s-lab-ca
+  namespace: cert-manager
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+spec:
+  isCA: true
+  commonName: "{{ cfg.CLUSTER_NAME }} lab CA"
+  subject:
+    organizations: [k8s-lab]
+  secretName: k8s-lab-ca
+  duration: 87600h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  issuerRef:
+    name: k8s-lab-selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: k8s-lab-ca
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+spec:
+  ca:
+    secretName: k8s-lab-ca
+{% endif %}
+{% if cfg.CERT_MANAGER_ISSUER in ['acme-http01', 'acme-dns01'] %}
+---
+# --- Let's Encrypt ({{ cfg.ACME_ENVIRONMENT }}) ---------------------------------------------
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-{{ cfg.ACME_ENVIRONMENT }}
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+spec:
+  acme:
+    email: "{{ cfg.ACME_EMAIL }}"
+    server: "{{ 'https://acme-v02.api.letsencrypt.org/directory' if cfg.ACME_ENVIRONMENT == 'production'
+                else 'https://acme-staging-v02.api.letsencrypt.org/directory' }}"
+    privateKeySecretRef:
+      name: letsencrypt-{{ cfg.ACME_ENVIRONMENT }}-account
+    solvers:
+{% if cfg.CERT_MANAGER_ISSUER == 'acme-http01' %}
+      # HTTP-01 : le nom doit être joignable depuis Internet sur le port 80 de la Gateway.
+      - http01:
+          gatewayHTTPRoute:
+            parentRefs:
+              - name: lab-gateway
+                namespace: gateway-system
+                kind: Gateway
+                sectionName: http
+{% else %}
+      - selector:
+          dnsZones: ["{{ cfg.GATEWAY_DOMAIN }}"]
+        dns01:
+{% if cfg.ACME_DNS01_PROVIDER == 'cloudflare' %}
+          cloudflare:
+            apiTokenSecretRef:
+              name: cert-manager-dns01-credentials
+              key: cloudflare-api-token
+{% elif cfg.ACME_DNS01_PROVIDER == 'rfc2136' %}
+          rfc2136:
+            nameserver: "{{ cfg.RFC2136_NAMESERVER }}"
+            tsigKeyName: "{{ cfg.RFC2136_TSIG_KEY_NAME }}"
+            tsigAlgorithm: {{ cfg.RFC2136_TSIG_ALGORITHM }}
+            tsigSecretSecretRef:
+              name: cert-manager-dns01-credentials
+              key: rfc2136-tsig-secret
+{% elif cfg.ACME_DNS01_PROVIDER == 'route53' %}
+          # Identifiants AWS ambiants (rôle IAM du nœud ou IRSA) : aucun secret dans le dépôt.
+          route53:
+            region: "{{ cfg.AWS_REGION | default('us-east-1', true) }}"
+{% endif %}
+{% endif %}
+{% endif %}

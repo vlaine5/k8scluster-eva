@@ -1,0 +1,5 @@
+{"resourceSpans": [{"resource": {"attributes": [{"key": "service.name", "value": {"stringValue": "k8s-lab-test"}}]},
+  "scopeSpans": [{"scope": {"name": "k8s-lab"}, "spans": [{
+    "traceId": "{{ addon_trace_id }}", "spanId": "{{ addon_trace_id[:16] }}", "name": "k8s-lab-test-span", "kind": 1,
+    "startTimeUnixNano": "{{ (now(utc=true).timestamp() * 1000000000) | int }}",
+    "endTimeUnixNano": "{{ (now(utc=true).timestamp() * 1000000000 + 5000000) | int }}"}]}]}]}

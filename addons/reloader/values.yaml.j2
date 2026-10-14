@@ -1,0 +1,17 @@
+# Reloader : redémarre les Deployments/StatefulSets/DaemonSets annotés quand leurs
+# ConfigMaps ou Secrets changent (annotation reloader.stakater.com/auto: "true").
+reloader:
+  watchGlobally: true
+  autoReloadAll: false
+  reloadOnCreate: false
+  logFormat: json
+  deployment:
+    resources:
+      requests: {cpu: 10m, memory: 64Mi}
+    # Namespace en Pod Security « restricted » : le chart ne le fixe pas pour le conteneur.
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+  podMonitor:
+    enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}

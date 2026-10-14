@@ -1,0 +1,19 @@
+# External Secrets Operator : synchronise des secrets d'un coffre externe (Vault, AWS,
+# Bitwarden...) vers des Secrets Kubernetes. Aucun SecretStore n'est créé par le
+# framework : la connexion au coffre dépend de votre environnement (docs/security.md).
+installCRDs: true
+replicaCount: 1
+serviceMonitor:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+resources:
+  requests: {cpu: 10m, memory: 64Mi}
+webhook:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+  serviceMonitor:
+    enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+certController:
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+  serviceMonitor:
+    enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}

@@ -1,0 +1,66 @@
+# Collecteur OpenTelemetry (Deployment) : point d'entrée OTLP unique des applications
+# (otel-collector-opentelemetry-collector.opentelemetry:4317/4318), qui route :
+#   traces -> Tempo, journaux -> Loki (OTLP), métriques -> Prometheus (récepteur OTLP).
+{% set tempo = 'tempo' in lab_addon_ids %}
+{% set loki = 'logging' in lab_addon_ids %}
+{% set prom = 'monitoring' in lab_addon_ids %}
+mode: deployment
+image:
+  repository: otel/opentelemetry-collector-k8s
+replicaCount: 1
+# Namespace en Pod Security « restricted » : le chart ne fixe aucun contexte de sécurité.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  seccompProfile: {type: RuntimeDefault}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 512Mi}
+config:
+  exporters:
+    debug:
+      verbosity: basic
+{% if tempo %}
+    otlp/tempo:
+      endpoint: tempo.tracing.svc:4317
+      tls:
+        insecure: true
+{% endif %}
+{% if loki %}
+    otlphttp/loki:
+      endpoint: http://loki.logging.svc:3100/otlp
+{% endif %}
+{% if prom %}
+    otlphttp/prometheus:
+      endpoint: http://kube-prometheus-stack-prometheus.monitoring.svc:9090/api/v1/otlp
+{% endif %}
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: {{ ['debug'] + (['otlp/tempo'] if tempo else []) }}
+      logs:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: {{ ['debug'] + (['otlphttp/loki'] if loki else []) }}
+      metrics:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: {{ ['debug'] + (['otlphttp/prometheus'] if prom else []) }}
+ports:
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+serviceMonitor:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}

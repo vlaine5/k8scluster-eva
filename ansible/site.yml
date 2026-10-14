@@ -1,34 +1,40 @@
 ---
 # =============================================================================
-#  Déploiement d'un cluster Kubernetes avec kubeadm.
+#  Déploiement d'un cluster Kubernetes avec kubeadm (1, 3 ou 5 control-planes).
 #
-#  Les étapes suivent la documentation officielle "Creating a cluster with
-#  kubeadm" : https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/
+#  Les étapes suivent la documentation officielle :
+#  https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/
 #
-#    1. Préparer tous les nœuds : OS, containerd, kubeadm/kubelet/kubectl
-#    2. Initialiser le control-plane (kubeadm init) puis installer le CNI
-#    3. Joindre les workers (kubeadm join)
-#    4. Vérifier le cluster et récupérer le kubeconfig sur votre poste
+#    1. Contrôles préalables (lecture seule)
+#    2. Préparer tous les nœuds : OS, containerd, kubeadm/kubelet/kubectl,
+#       prérequis des addons, disque dédié Longhorn
+#    3. Initialiser le 1er control-plane (kubeadm init, VIP kube-vip en HA)
+#    4. Installer le CNI et les composants de base
+#    5. Joindre les autres control-planes, un à la fois (etcd vérifié)
+#    6. Joindre les workers
+#    7. Vérifier le cluster et récupérer le kubeconfig sur votre poste
 #
 #  Utilisation (depuis le dossier ansible/) :
-#    ansible-playbook -i inventories/<inventaire>.ini site.yml
+#    ansible-playbook -i inventories/<inventaire>.ini site.yml [-e @vars.json]
 #
-#  Ce playbook est idempotent : le relancer ne casse pas un cluster existant.
+#  Ce playbook est idempotent : le relancer ne casse pas un cluster existant
+#  et ne change jamais sa version (voir upgrade.yml).
 # =============================================================================
 
-- name: Check inventory and wait for the nodes
+- name: Check the inventory and wait for the nodes
   hosts: k8s_cluster
   gather_facts: false
   tasks:
-    - name: Check that the inventory describes exactly one control-plane
+    - name: Check the number of control-planes
       ansible.builtin.assert:
         that:
           - groups['control_plane'] is defined
-          - groups['control_plane'] | length == 1
+          - groups['control_plane'] | length in [1, 3, 5]
+          - groups['control_plane'] | length == 1 or control_plane_endpoint | length > 0
         fail_msg: >-
-          The inventory must contain exactly one host in the [control_plane] group
-          (found {{ groups['control_plane'] | default([]) | length }}).
-          Multi control-plane (HA) clusters are not supported by this lab.
+          The inventory must contain 1, 3 or 5 hosts in [control_plane] (found
+          {{ groups['control_plane'] | default([]) | length }}); several control-planes need a stable
+          endpoint (CONTROL_PLANE_VIP or CONTROL_PLANE_ENDPOINT). docs/high-availability.md
         quiet: true
       run_once: true
       delegate_to: localhost
@@ -37,8 +43,8 @@
       ansible.builtin.wait_for_connection:
         timeout: 600
 
-    # Les images cloud (Terraform) finissent leur configuration en arrière-plan :
-    # on attend la fin de cloud-init pour éviter les conflits sur le verrou APT.
+    # Les images cloud finissent leur configuration en arrière-plan : on attend
+    # la fin de cloud-init pour éviter les conflits sur le verrou APT/DNF.
     # "removes" : la commande n'est lancée que si cloud-init est installé.
     - name: Wait for cloud-init to finish (if present)
       ansible.builtin.command:
@@ -52,7 +58,14 @@
     - name: Gather facts
       ansible.builtin.setup:
 
-- name: Prepare every node (OS, container runtime, Kubernetes packages)
+- name: Preflight checks (read-only)
+  hosts: k8s_cluster
+  become: true
+  gather_facts: false
+  roles:
+    - role: preflight
+
+- name: Prepare every node (OS, container runtime, Kubernetes packages, addon prerequisites)
   hosts: k8s_cluster
   become: true
   gather_facts: false
@@ -60,14 +73,40 @@
     - role: common
     - role: container_runtime
     - role: kubernetes
+    - role: node_prereqs
 
-- name: Initialize the control-plane and install the CNI
-  hosts: control_plane
+- name: Prepare the dedicated Longhorn disks (storage nodes = workers, or control-planes without worker)
+  hosts: k8s_cluster
+  become: true
+  gather_facts: false
+  roles:
+    - role: storage_disk
+      when:
+        - longhorn_disk.enabled | default(false) | bool
+        - inventory_hostname in (groups['workers'] if groups['workers'] | default([]) | length > 0 else groups['control_plane'])
+
+- name: Initialize the first control-plane
+  hosts: control_plane[0]
   become: true
   gather_facts: false
   roles:
     - role: control_plane
+
+- name: Install the Pod network (CNI) and the core components
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  roles:
     - role: cni
+    - role: cluster_core
+
+- name: Join the additional control-planes, one at a time
+  hosts: control_plane[1:]
+  become: true
+  gather_facts: false
+  serial: 1
+  roles:
+    - role: control_plane
 
 - name: Join the workers
   hosts: workers
@@ -77,7 +116,7 @@
     - role: worker
 
 - name: Verify the cluster and export the kubeconfig
-  hosts: control_plane
+  hosts: control_plane[0]
   become: true
   gather_facts: false
   tasks:
@@ -90,3 +129,14 @@
       ansible.builtin.include_role:
         name: control_plane
         tasks_from: kubeconfig.yml
+
+- name: Schedule the etcd snapshots (BACKUP_ENABLED)
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install the etcd snapshot timer
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: schedule.yml
+      when: backup.etcd_snapshots | default(false) | bool

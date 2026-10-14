@@ -1,0 +1,11 @@
+---
+# Numéro de série posé sur le disque dédié par Terraform (Proxmox, libvirt) et Vagrant (libvirt).
+storage_disk_serial: k8slab-longhorn
+# Sélecteur par défaut : le numéro de série. vSphere : adresse SCSI (unité 1),
+# variable d'inventaire longhorn_disk_match_key=hctl.
+storage_disk_match_key: "{{ longhorn_disk_match_key | default('serial') }}"
+storage_disk_match_regex: "{{ longhorn_disk_match_regex | default('^' ~ storage_disk_serial ~ '$') }}"
+# Chemin explicite (mode existing : LONGHORN_DISK_DEVICE ou variable d'inventaire longhorn_disk_device).
+storage_disk_device: "{{ longhorn_disk_device | default(longhorn_disk.device | default('')) }}"
+storage_disk_fstype: ext4
+storage_disk_label: k8slab-longhorn

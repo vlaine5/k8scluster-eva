@@ -1,0 +1,16 @@
+# Tetragon : événements d'exécution (processus, fichiers, réseau) par eBPF, exportés
+# sur la sortie standard du conteneur export-stdout.
+tetragon:
+  enableProcessCred: true
+  enableProcessNs: true
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+  prometheus:
+    serviceMonitor:
+      enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+tetragonOperator:
+  prometheus:
+    serviceMonitor:
+      enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}
+export:
+  mode: stdout

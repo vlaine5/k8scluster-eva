@@ -1,0 +1,74 @@
+# Grafana Alloy (DaemonSet) : chaque instance lit, par l'API Kubernetes, les journaux
+# des conteneurs de SON nœud et les envoie à Loki.
+alloy:
+  configMap:
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("HOSTNAME")
+        }
+      }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name", "__meta_kubernetes_pod_label_app"]
+          regex         = "^;*([^;]+)(;.*)?$"
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          target_label  = "node"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+{% if cfg.LOGGING_NODE_LOGS | bool %}
+
+      // Journal systemd des nœuds (kubelet, containerd...) : LOGGING_NODE_LOGS=true.
+      loki.relabel "journal" {
+        forward_to = []
+        rule {
+          source_labels = ["__journal__systemd_unit"]
+          target_label  = "unit"
+        }
+      }
+
+      loki.source.journal "node" {
+        path          = "/var/log/journal"
+        relabel_rules = loki.relabel.journal.rules
+        labels        = {job = "node-journal", node = sys.env("HOSTNAME")}
+        forward_to    = [loki.write.default.receiver]
+      }
+{% endif %}
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.logging.svc:3100/loki/api/v1/push"
+        }
+        external_labels = {cluster = "{{ cfg.CLUSTER_NAME }}"}
+      }
+  mounts:
+    varlog: {{ cfg.LOGGING_NODE_LOGS | bool }}
+  enableReporting: false
+  resources:
+    requests: {cpu: 20m, memory: 96Mi}
+serviceMonitor:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}

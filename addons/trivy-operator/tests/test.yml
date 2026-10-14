@@ -1,0 +1,52 @@
+---
+# =============================================================================
+#  Test de Trivy Operator : un Deployment est analysé et son rapport d'audit de
+#  configuration (ConfigAuditReport) est produit. Les rapports de vulnérabilités
+#  exigent le téléchargement de la base Trivy (Internet) : ils sont vérifiés s'ils
+#  apparaissent, sans faire échouer le test.
+# =============================================================================
+
+- name: Deploy a workload to scan
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    wait: true
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: scan-me, namespace: "{{ addon_test_ns }}"}
+      spec:
+        replicas: 1
+        selector: {matchLabels: {app: scan-me}}
+        template:
+          metadata: {labels: {app: scan-me}}
+          spec:
+            containers:
+              - {name: test, image: "{{ lab_test_images.busybox }}", command: [sleep, "3600"]}
+
+- name: Wait for the configuration audit report
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'configauditreports.aquasecurity.github.io', '-o', 'json'] }}"
+  register: trivy_test_audit
+  changed_when: false
+  until: (trivy_test_audit.stdout | from_json)['items'] | length > 0
+  retries: 30
+  delay: 10
+
+- name: Look for a vulnerability report (informational)
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'vulnerabilityreports.aquasecurity.github.io', '-o', 'name'] }}"
+  register: trivy_test_vuln
+  changed_when: false
+  until: trivy_test_vuln.stdout | length > 0
+  retries: 18
+  delay: 10
+  failed_when: false
+
+- name: Report the Trivy test
+  ansible.builtin.debug:
+    msg: >-
+      Trivy OK — configuration audit report produced ({{ (trivy_test_audit.stdout | from_json)['items'][0].report.summary | default({}) }}).
+      Vulnerability report: {{ 'produced' if trivy_test_vuln.stdout | default('') | length > 0
+      else 'not yet (Trivy database download from the Internet still running or blocked)' }}.

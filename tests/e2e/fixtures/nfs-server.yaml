@@ -1,0 +1,52 @@
+# Serveur NFS de TEST dans le cluster (CI uniquement) : jamais pour de vraies données.
+# Image officielle des tests e2e de Kubernetes (export /exports, NFSv4 fsid=0), épinglée
+# par empreinte. L'ancienne image registry.k8s.io/volume-nfs (manifeste Docker schéma 1)
+# n'est plus lisible par containerd >= 2.1.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nfs-test
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nfs-server
+  namespace: nfs-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: nfs-server}
+  template:
+    metadata:
+      labels: {app: nfs-server}
+    spec:
+      containers:
+        - name: nfs-server
+          image: registry.k8s.io/e2e-test-images/volume/nfs:1.6.0@sha256:fd050af01687ef04d87bcef58b9e27f8e74cde52293113cfb35e63a0253e29c2
+          # Comme les tests e2e de Kubernetes : export /exports accessible en écriture à tous.
+          args: ["-G", "777", "/exports"]
+          securityContext:
+            privileged: true
+          ports:
+            - {name: nfs, containerPort: 2049}
+            - {name: mountd, containerPort: 20048}
+            - {name: rpcbind, containerPort: 111}
+          volumeMounts:
+            - {name: exports, mountPath: /exports}
+      volumes:
+        - name: exports
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nfs-server
+  namespace: nfs-test
+spec:
+  selector: {app: nfs-server}
+  ports:
+    - {name: nfs, port: 2049}
+    - {name: mountd, port: 20048}
+    - {name: rpcbind, port: 111}

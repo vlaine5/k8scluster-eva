@@ -1,65 +1,70 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # =============================================================================
-#  Installation de Kubernetes (kubeadm) par Ansible, commune à Vagrant et
-#  Terraform : l'outil qui crée les VMs écrit un inventaire, Ansible fait le reste.
+#  Ansible : installation de Kubernetes (kubeadm) sur les nœuds, addons depuis
+#  votre poste, opérations de maintenance. Toutes les variables viennent du
+#  résolveur (scripts/labctl ansible-vars) : un seul fichier JSON, sans secret.
 # =============================================================================
 
 ansible_ensure_collections() {
-  if ansible-galaxy collection list community.general 2>/dev/null | grep -q '^community.general' &&
-    ansible-galaxy collection list ansible.posix 2>/dev/null | grep -q '^ansible.posix'; then
-    return 0
-  fi
+  local collection missing=0
+  for collection in community.general ansible.posix kubernetes.core; do
+    ansible-galaxy collection list "${collection}" 2>/dev/null | grep -q "^${collection} " || missing=1
+  done
+  ((missing == 0)) && return 0
   step "Installation des collections Ansible (ansible/requirements.yml)"
   run ansible-galaxy collection install -r "${LAB_ROOT}/ansible/requirements.yml"
 }
 
-# Paramètres Kubernetes de config/lab.env transmis à Ansible (extra vars).
-ansible_write_vars() {
-  local file="${LAB_STATE_DIR}/ansible/cluster-vars.yml"
+# Inventaire « localhost » des playbooks exécutés depuis votre poste (addons, CNI kind) :
+# l'interpréteur Python est celui d'Ansible (avec la bibliothèque kubernetes).
+ansible_local_inventory() {
+  local file="${LAB_STATE_DIR}/ansible/localhost.ini"
   mkdir -p "${LAB_STATE_DIR}/ansible"
-  cat >"${file}" <<VARS
-# Généré par ./k8s-lab depuis config/lab.env et .env (ne pas modifier).
-kubernetes_version: "${KUBERNETES_VERSION}"
-pod_cidr: "${POD_CIDR}"
-service_cidr: "${SERVICE_CIDR}"
-cni: "${CNI}"
-flannel_version: "${FLANNEL_VERSION}"
-container_runtime: "${CONTAINER_RUNTIME}"
-containerd_version: "${CONTAINERD_VERSION}"
-VARS
+  cat >"${file}" <<'INV'
+# Généré par ./k8s-lab : playbooks exécutés sur votre poste (API Kubernetes).
+localhost ansible_connection=local ansible_python_interpreter="{{ ansible_playbook_python }}"
+INV
   echo "${file}"
 }
 
-# ansible_install_kubernetes <inventaire (relatif à ansible/)> [options ansible-playbook...]
-ansible_install_kubernetes() {
-  local inventory="$1" vars_file
-  shift
-  [[ -s "${LAB_ROOT}/ansible/${inventory}" ]] ||
-    die "Inventaire Ansible introuvable : ansible/${inventory}" \
-      "Il est normalement généré par Vagrant ou Terraform juste avant cette étape."
+# ansible_playbook <inventaire> <playbook> [options ansible-playbook...]
+# Lance un playbook depuis ansible/ avec les variables du plan courant.
+ansible_playbook() {
+  local inventory="$1" playbook="$2" vars_file
+  shift 2
+  [[ "${inventory}" == /* ]] || inventory="${LAB_ROOT}/ansible/${inventory}"
+  [[ -s "${inventory}" ]] || die "Inventaire Ansible introuvable : ${inventory#"${LAB_ROOT}"/}" \
+    "Vagrant ou Terraform l'écrivent juste avant cette étape ; en mode existing : EXISTING_INVENTORY."
   ansible_ensure_collections
-  vars_file="$(ansible_write_vars)"
-  step "Installation de Kubernetes avec Ansible + kubeadm (5 à 15 minutes)"
-  info "Inventaire : ansible/${inventory}   |   Playbook : ansible/site.yml"
+  vars_file="$(lab_ansible_vars)"
+  local extra=(-e "@${vars_file}")
+  # Le nom des fichiers (kubeconfig, sauvegardes, marqueur) suit le contexte du mode.
+  lab_is_kubeadm && extra+=(-e "cluster_name=${LAB_R_CONTEXT}")
+  # Variables Ansible supplémentaires (fichier) : réservé aux tests du framework
+  # (nœuds conteneurs de tests/kubeadm-in-docker) ou à un usage avancé documenté.
+  [[ -z "${LAB_ANSIBLE_EXTRA_VARS:-}" ]] || extra+=(-e "@${LAB_ANSIBLE_EXTRA_VARS}")
   (
     cd "${LAB_ROOT}/ansible" &&
-      ANSIBLE_CONFIG="${LAB_ROOT}/ansible/ansible.cfg" run ansible-playbook -i "${inventory}" site.yml -e "@${vars_file}" "$@"
-  ) || die "Le playbook Ansible a échoué (voir la tâche en erreur ci-dessus)." \
-    "Relancer l'installation : $(hint_cmd deploy "${LAB_MODE:-<mode>}" "${LAB_PROVIDER:-}") (sans risque : les VMs sont conservées)" \
-    "Voir docs/troubleshooting.md"
+      ANSIBLE_CONFIG="${LAB_ROOT}/ansible/ansible.cfg" run ansible-playbook -i "${inventory}" "${playbook}" "${extra[@]}" "$@"
+  )
 }
 
-# Récupère (à nouveau) le kubeconfig depuis le control-plane.
-ansible_fetch_kubeconfig() {
+# ansible_install_kubernetes <inventaire> : site.yml (préparation, kubeadm, CNI, vérifications).
+ansible_install_kubernetes() {
   local inventory="$1"
-  [[ -s "${LAB_ROOT}/ansible/${inventory}" ]] ||
-    die "Inventaire Ansible introuvable : ansible/${inventory}" "Le cluster est-il déployé ? $(hint_cmd status)"
-  ansible_ensure_collections
-  (
-    cd "${LAB_ROOT}/ansible" &&
-      ANSIBLE_CONFIG="${LAB_ROOT}/ansible/ansible.cfg" run ansible-playbook -i "${inventory}" kubeconfig.yml
-  ) || die "Impossible de récupérer le kubeconfig depuis le control-plane."
+  step "Installation de Kubernetes avec Ansible + kubeadm (5 à 20 minutes)"
+  info "Inventaire : ${inventory}   |   Playbook : ansible/site.yml"
+  ansible_playbook "${inventory}" site.yml ||
+    die "Le playbook Ansible a échoué (voir la tâche en erreur ci-dessus)." \
+      "Relancer l'installation : $(hint_cmd deploy "${LAB_MODE:-<mode>}" "${LAB_PROVIDER:-}") (sans risque : rien n'est réinitialisé)" \
+      "Voir docs/troubleshooting.md"
+}
+
+# Récupère (à nouveau) le kubeconfig depuis le premier control-plane.
+ansible_fetch_kubeconfig() {
+  ansible_playbook "$1" kubeconfig.yml ||
+    die "Impossible de récupérer le kubeconfig depuis le control-plane."
 }
 
 # Oublie les clés SSH des VMs d'un inventaire (après destruction) : de

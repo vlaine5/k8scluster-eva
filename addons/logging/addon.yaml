@@ -1,0 +1,30 @@
+id: logging
+name: Loki + Grafana Alloy
+description: >-
+  Centralisation des journaux : Grafana Alloy (DaemonSet) collecte les journaux des conteneurs
+  (et du journal systemd des nœuds si LOGGING_NODE_LOGS=true) et les envoie à Loki (mode
+  SingleBinary). Consultation dans Grafana si la supervision est installée.
+category: observability
+phase: 8
+components: [loki, alloy]
+integrates_with: [monitoring, prometheus-operator-crds]
+settings: [LOGGING_RETENTION, LOGGING_PERSISTENCE, LOGGING_NODE_LOGS]
+stateful: true
+support:
+  default: supported
+validated: [ci-kind]
+resources: {cpu_m: 300, memory_mb: 768}
+install:
+  namespace: logging
+  pod_security: privileged
+  releases:
+    - {name: loki, component: loki, namespace: logging, values: values-loki.yaml.j2, timeout: 15m}
+    - {name: alloy, component: alloy, namespace: logging, values: values-alloy.yaml.j2, timeout: 10m}
+  manifests: [grafana-datasource.yaml.j2]
+health:
+  - {kind: StatefulSet, namespace: logging, name: loki}
+  - {kind: DaemonSet, namespace: logging, name: alloy}
+tests: tests/test.yml
+remove:
+  notes: "Le PVC de Loki (si persistance) est conservé."
+docs: docs/observability.md#journaux

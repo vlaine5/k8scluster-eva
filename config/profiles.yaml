@@ -1,0 +1,63 @@
+# =============================================================================
+#  Profils d'addons (ADDON_PROFILE)
+# =============================================================================
+#  Règles de priorité (sans ambiguïté, docs/addons.md) :
+#    1. Le profil fournit une liste d'addons de base ("addons") et des valeurs
+#       pour les sélecteurs laissés à "auto" ("defaults").
+#    2. ADDONS complète le profil : "nom" ajoute, "-nom" retire.
+#       Avec ADDON_PROFILE=custom, ADDONS est la liste complète.
+#    3. Une valeur explicite (GATEWAY_CONTROLLER=traefik...) l'emporte
+#       toujours sur le profil.
+#    4. Les dépendances sont ajoutées automatiquement et AFFICHÉES
+#       (make addons-plan) ; retirer une dépendance nécessaire est refusé.
+#    5. Une configuration contradictoire (ajout et retrait du même addon,
+#       deux addons incompatibles...) est refusée avant toute modification.
+#
+#  Clés de "defaults" : GATEWAY_CONTROLLER et LOADBALANCER_PROVIDER.
+#    gateway "auto-cilium-or-traefik" : cilium si CNI=cilium avec remplacement
+#      de kube-proxy, traefik sinon.
+#    loadbalancer "auto-if-pool" : cilium-l2 (CNI=cilium) ou metallb si
+#      LOADBALANCER_IP_POOL est défini et que le mode est bare metal ; none sinon.
+# =============================================================================
+profiles:
+  minimal:
+    description: Kubernetes, CNI et CoreDNS. Aucun addon optionnel.
+    addons: []
+    defaults:
+      GATEWAY_CONTROLLER: none
+      LOADBALANCER_PROVIDER: none
+
+  homelab:
+    description: Cluster utilisable au quotidien - publication des applications (Gateway API, LoadBalancer), certificats, métriques et GitOps.
+    addons: [metrics-server, cert-manager, argo-cd]
+    defaults:
+      GATEWAY_CONTROLLER: auto-cilium-or-traefik
+      LOADBALANCER_PROVIDER: auto-if-pool
+
+  observability:
+    description: Supervision et diagnostic - métriques, tableaux de bord, alertes, journaux.
+    addons: [metrics-server, monitoring, logging]
+    defaults:
+      GATEWAY_CONTROLLER: none
+      LOADBALANCER_PROVIDER: auto-if-pool
+
+  enterprise-lab:
+    description: Pratiques d'entreprise - GitOps, supervision et journaux, politiques, scan de vulnérabilités, secrets externes.
+    addons: [metrics-server, cert-manager, external-secrets, reloader, argo-cd, monitoring, logging, kyverno, trivy-operator]
+    defaults:
+      GATEWAY_CONTROLLER: auto-cilium-or-traefik
+      LOADBALANCER_PROVIDER: auto-if-pool
+
+  ci:
+    description: CI locale (kind / minikube) - rapide, sans NAS ni ressource cloud payante.
+    addons: [metrics-server, cert-manager]
+    defaults:
+      GATEWAY_CONTROLLER: none
+      LOADBALANCER_PROVIDER: none
+
+  custom:
+    description: Sélection explicite par ADDONS uniquement.
+    addons: []
+    defaults:
+      GATEWAY_CONTROLLER: none
+      LOADBALANCER_PROVIDER: none

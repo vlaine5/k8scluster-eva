@@ -1,7 +1,7 @@
 # {{ ansible_managed }}
 #
-# Adaptation du manifeste officiel de Flannel {{ flannel_version }} :
-#   - net-conf.json : réseau des Pods = pod_cidr ({{ pod_cidr }})
+# Adaptation du manifeste officiel de Flannel {{ k8s_cni_version }} :
+#   - net-conf.json : réseau des Pods = pod_cidr ({{ pod_cidr }}), backend {{ k8s_cni_mode }}
 #   - FLANNELD_IFACE : Flannel utilise l'IP du nœud (status.hostIP = node-ip du
 #     kubelet) pour choisir sa carte réseau. Indispensable pour les VMs à
 #     plusieurs cartes (Vagrant : NAT + réseau privé).
@@ -9,7 +9,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - kube-flannel-{{ flannel_version }}.yml
+  - kube-flannel-{{ k8s_cni_version }}.yml
 patches:
   - patch: |-
       apiVersion: v1
@@ -23,7 +23,7 @@ patches:
             "Network": "{{ pod_cidr }}",
             "EnableNFTables": false,
             "Backend": {
-              "Type": "{{ cni_flannel_backend }}"
+              "Type": "{{ k8s_cni_mode }}"
             }
           }
   - patch: |-

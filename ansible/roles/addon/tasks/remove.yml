@@ -1,0 +1,77 @@
+---
+# =============================================================================
+#  Désinstallation EXPLICITE d'un addon. Les données ne sont jamais supprimées :
+#    - les PVC créés par un chart sont marqués « helm.sh/resource-policy: keep »
+#      AVANT le helm uninstall (Helm les conserve) ;
+#    - les CRD, les namespaces contenant des volumes, les StorageClasses et les
+#      données externes (NAS, S3) restent en place ;
+#    - Longhorn n'est jamais désinstallé automatiquement (procédure manuelle).
+# =============================================================================
+
+- name: Refuse to uninstall Longhorn automatically
+  ansible.builtin.fail:
+    msg: |
+      Longhorn is never uninstalled automatically: its volumes hold application data.
+      Follow docs/storage-longhorn.md#desinstallation (back up, migrate the volumes, then set the
+      deleting-confirmation-flag yourself). Nothing was changed.
+  when: addon_item.id == 'longhorn'
+
+- name: Protect the PVCs created by the Helm releases of {{ addon_item.id }}
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_release.namespace, 'annotate', 'pvc', '--overwrite',
+           '-l', 'app.kubernetes.io/instance=' ~ addon_release.name, 'helm.sh/resource-policy=keep'] }}"
+  loop: "{{ addon_install.releases | default([]) }}"
+  loop_control:
+    loop_var: addon_release
+    label: "{{ addon_release.namespace }}/{{ addon_release.name }}"
+  register: addon_remove_pvc
+  changed_when: "'annotated' in addon_remove_pvc.stdout"
+  failed_when: false
+
+- name: Disable the native minikube addon
+  ansible.builtin.command:
+    argv: [minikube, addons, disable, "{{ addon_override.minikube_addon }}", --profile, "{{ cfg.CLUSTER_NAME }}"]
+  changed_when: true
+  when: addon_override.minikube_addon is defined
+
+- name: Delete the manifests (stateless addons only) of {{ addon_item.id }}
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    definition: "{{ lookup('ansible.builtin.template', addon_dir ~ '/manifests/' ~ addon_manifest) | from_yaml_all | select | list }}"
+  loop: "{{ (addon_install.manifests | default([])) | reverse | list }}"
+  loop_control:
+    loop_var: addon_manifest
+  when:
+    - not (addon_spec.stateful | default(false))
+    - addon_spec.remove.delete_manifests | default(true)
+  failed_when: false
+
+- name: Uninstall in reverse order the Helm releases of {{ addon_item.id }}
+  kubernetes.core.helm:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    name: "{{ addon_release.name }}"
+    release_namespace: "{{ addon_release.namespace }}"
+    state: absent
+    wait: true
+  loop: "{{ (addon_install.releases | default([])) | reverse | list }}"
+  loop_control:
+    loop_var: addon_release
+    label: "{{ addon_release.namespace }}/{{ addon_release.name }}"
+  # Une release « template » (CRD) n'existe pas dans Helm : ses CRD sont conservées.
+  when:
+    - addon_override.minikube_addon is not defined
+    - addon_release.method | default('release') == 'release'
+
+- name: Forget in the state ConfigMap the addon {{ addon_item.id }}
+  ansible.builtin.include_tasks: state.yml
+  vars:
+    addon_state_operation: forget
+
+- name: Explain what was kept
+  ansible.builtin.debug:
+    msg:
+      - "{{ addon_item.id }} uninstalled. Kept: CRDs, namespace {{ addon_install.namespace | default('-') }}, persistent volumes and their data."
+      - "{{ addon_spec.remove.notes | default('') }}"

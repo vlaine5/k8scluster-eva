@@ -1,0 +1,39 @@
+# Valeurs du chart Longhorn (version : LONGHORN_VERSION, auto-compatible = verrouillée).
+# La StorageClass est gérée par le framework (manifests/storageclass.yaml.j2).
+persistence:
+  createStorageClass: false
+  defaultClass: false
+defaultSettings:
+  # Disque dédié monté par le rôle storage_disk sur ce chemin, sinon disque système.
+  defaultDataPath: "{{ cfg.LONGHORN_DATA_PATH }}"
+  defaultReplicaCount: '{"v1":"{{ cfg.LONGHORN_REPLICA_COUNT }}"}'
+  # Jamais deux réplicas d'un volume sur le même nœud.
+  replicaSoftAntiAffinity: false
+  replicaAutoBalance: best-effort
+  storageMinimalAvailablePercentage: 15
+  # Nœud en panne : les Pods de StatefulSet/Deployment bloqués sont supprimés pour redémarrer ailleurs.
+  nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+  nodeDrainPolicy: block-if-contains-last-replica
+  # Pas d'appel extérieur depuis le lab.
+  upgradeChecker: false
+  allowCollectingLonghornUsageMetrics: false
+  # deletingConfirmationFlag n'est JAMAIS positionné par le framework (désinstallation manuelle).
+{% if cfg.LONGHORN_BACKUP_ENABLED | bool %}
+defaultBackupStore:
+  backupTarget: "{{ cfg.LONGHORN_BACKUP_TARGET }}"
+{% if cfg.LONGHORN_BACKUP_TARGET.startswith('s3://') %}
+  backupTargetCredentialSecret: longhorn-backup-credentials
+{% endif %}
+{% endif %}
+longhornUI:
+  replicas: {{ (2 if (lab.worker_count | default(1) | int) > 1 else 1) if cfg.LONGHORN_UI_ENABLED | bool else 0 }}
+longhornGlobalManager:
+  replicas: {{ [3, [lab.worker_count | default(1) | int, 1] | max] | min }}
+csi:
+  attacherReplicaCount: {{ [3, [lab.worker_count | default(1) | int, 1] | max] | min }}
+  provisionerReplicaCount: {{ [3, [lab.worker_count | default(1) | int, 1] | max] | min }}
+  resizerReplicaCount: {{ [3, [lab.worker_count | default(1) | int, 1] | max] | min }}
+  snapshotterReplicaCount: {{ [3, [lab.worker_count | default(1) | int, 1] | max] | min }}
+metrics:
+  serviceMonitor:
+    enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}

@@ -1,0 +1,245 @@
+# =============================================================================
+#  Schéma de la configuration (config/lab.env + .env + environnement)
+# =============================================================================
+#  Chaque variable connue du framework est décrite ici : type, valeurs
+#  possibles, caractère secret. scripts/labctl valide la configuration
+#  effective avec ce schéma AVANT toute action ; la CI vérifie que chaque clé
+#  de config/lab.env est décrite ici (et réciproquement).
+#
+#  Types : string, int, bool, enum, cidr, cidr_list, ip, ip_ranges, list,
+#          version, path, cron, endpoint, url
+#  empty: true  -> la valeur vide est acceptée (= non défini / automatique)
+#  secret: true -> jamais affichée (make config affiche ****), jamais écrite
+#                  dans un fichier généré, transmise à Ansible par l'environnement
+#  lab_env: false -> variable volontairement absente de config/lab.env
+#                    (identifiants, alias historiques)
+# =============================================================================
+groups:
+  platform: Plateforme de déploiement
+  cluster: Forme du cluster et haute disponibilité
+  nodes: Machines
+  os: Système d'exploitation
+  kubernetes: Kubernetes (kubeadm)
+  cni: Réseau des Pods (CNI)
+  gateway: Gateway API
+  loadbalancer: LoadBalancer
+  storage: Stockage
+  addons: Addons
+  addon-settings: Réglages des addons
+  maintenance: Exploitation, sauvegarde, mises à jour
+  existing: Modes existing et attach
+  kind: Kind
+  minikube: Minikube
+  vagrant: Vagrant
+  eks: AWS EKS
+  tools: Versions d'outils
+  credentials: Identifiants (.env uniquement)
+
+variables:
+  # --- Plateforme --------------------------------------------------------------
+  DEPLOYMENT_MODE: {group: platform, type: enum, empty: true, values: [kind, minikube, vagrant, terraform, existing, attach], description: "Mode utilisé quand la commande n'en précise pas."}
+  DEPLOYMENT_PROVIDER: {group: platform, type: enum, empty: true, values: [proxmox, vsphere, libvirt, eks], description: "Provider Terraform par défaut."}
+
+  # --- Cluster -----------------------------------------------------------------
+  CLUSTER_NAME: {group: cluster, type: string, pattern: '^[a-z][a-z0-9-]{0,30}$', description: "Nom du cluster (minuscules, chiffres, tirets)."}
+  CONTROL_PLANE_COUNT: {group: cluster, type: int, min: 1, max: 5, description: "Nombre de control-planes (1, 3 ou 5)."}
+  WORKER_COUNT: {group: cluster, type: int, min: 0, max: 20, description: "Nombre de workers."}
+  HA_MODE: {group: cluster, type: enum, values: [auto, "off", stacked-etcd, external-etcd], description: "Topologie etcd / haute disponibilité."}
+  CONTROL_PLANE_ENDPOINT: {group: cluster, type: endpoint, auto: true, description: "Adresse stable de l'API (host:port) ou auto."}
+  CONTROL_PLANE_VIP: {group: cluster, type: ip, empty: true, description: "IP virtuelle de l'API (kube-vip)."}
+  API_LB_PROVIDER: {group: cluster, type: enum, values: [auto, kube-vip, external, none], description: "Répartiteur de charge de l'API Kubernetes."}
+
+  # --- Machines --------------------------------------------------------------------
+  NODE_HOSTNAME_PREFIX: {group: nodes, type: string, pattern: '^[a-z][a-z0-9-]{0,40}$', description: "Préfixe des hostnames."}
+  NODE_CPUS: {group: nodes, type: int, min: 2, max: 128, description: "vCPU par VM."}
+  NODE_MEMORY_MB: {group: nodes, type: int, min: 2048, max: 1048576, description: "Mémoire par VM (Mo)."}
+  NODE_DISK_GB: {group: nodes, type: int, min: 10, max: 4096, description: "Disque système par VM (Go)."}
+  NODE_CPU_TYPE: {group: nodes, type: string, pattern: '^[A-Za-z0-9._-]+$', description: "Type de CPU virtuel (Proxmox)."}
+  SSH_PRIVATE_KEY_FILE: {group: nodes, type: path, empty: true, description: "Clé SSH privée d'Ansible (vide = clé dédiée générée)."}
+  NODE_SSH_USER: {group: nodes, type: string, empty: true, pattern: '^[a-z_][a-z0-9_-]{0,31}$', description: "Utilisateur SSH créé par cloud-init."}
+
+  # --- OS --------------------------------------------------------------------------
+  NODE_OS: {group: os, type: enum, values: [ubuntu, debian, rocky, auto], description: "Distribution des nœuds."}
+  NODE_OS_VERSION: {group: os, type: string, empty: true, pattern: '^[0-9]+(\.[0-9]+)?$', description: "Version de la distribution."}
+  NODE_IMAGE_SOURCE: {group: os, type: enum, values: [catalog, url, template], description: "Origine de l'image des VMs."}
+  NODE_IMAGE_URL: {group: os, type: url, empty: true, description: "URL d'une image personnalisée."}
+  NODE_IMAGE_SHA256: {group: os, type: string, empty: true, pattern: '^[0-9a-f]{64}$', description: "SHA-256 de NODE_IMAGE_URL."}
+  NODE_TEMPLATE_ID: {group: os, type: string, empty: true, description: "Template Proxmox (ID) ou vSphere (nom)."}
+  VM_IMAGE_URL: {group: os, type: url, empty: true, deprecated: NODE_IMAGE_URL, description: "Ancien nom de NODE_IMAGE_URL."}
+  VM_IMAGE_SHA256: {group: os, type: string, empty: true, pattern: '^[0-9a-f]{64}$', deprecated: NODE_IMAGE_SHA256, description: "Ancien nom de NODE_IMAGE_SHA256."}
+  NODE_SWAP: {group: os, type: enum, values: [disable, keep], description: "Gestion du swap des nœuds."}
+  NODE_FIREWALL: {group: os, type: enum, values: [auto, managed, unmanaged], description: "Gestion du pare-feu des nœuds."}
+
+  # --- Kubernetes ----------------------------------------------------------------
+  KUBERNETES_VERSION: {group: kubernetes, type: version, pattern: '^[0-9]+\.[0-9]+\.[0-9]+$', description: "Version complète de Kubernetes (ex : 1.36.5)."}
+  POD_CIDR: {group: kubernetes, type: cidr, description: "Réseau des Pods."}
+  SERVICE_CIDR: {group: kubernetes, type: cidr, description: "Réseau des Services."}
+  RESERVED_CIDRS: {group: kubernetes, type: cidr_list, empty: true, description: "Réseaux du LAN à ne pas chevaucher."}
+  NODE_NETWORK_CIDR: {group: kubernetes, type: cidr, empty: true, description: "Réseau des nœuds (vide = déduit)."}
+  RESERVED_IPS: {group: kubernetes, type: ip_ranges, empty: true, description: "Adresses à ne jamais attribuer (nœuds, LoadBalancer, VIP)."}
+  CONTAINER_RUNTIME: {group: kubernetes, type: enum, values: [containerd], description: "Runtime de conteneurs."}
+  CONTAINERD_VERSION: {group: kubernetes, type: string, empty: true, pattern: '^2\.[0-9]+(\.[0-9*]+)?(\*)?$', description: "Motif de version de containerd.io (2.x)."}
+  CONTAINERD_SELINUX: {group: kubernetes, type: bool, description: "Étiquetage SELinux des conteneurs (Rocky)."}
+  KUBELET_SERVING_CERTS: {group: kubernetes, type: enum, values: [signed, self-signed], description: "Certificats de service des kubelets."}
+
+  # --- CNI -----------------------------------------------------------------------
+  CNI: {group: cni, type: enum, values: [auto, flannel, calico, cilium, none], description: "Plugin réseau des Pods."}
+  CNI_VERSION: {group: cni, type: string, empty: true, pattern: '^v?[0-9]+\.[0-9]+\.[0-9]+$', description: "Version du CNI (vide = verrouillée)."}
+  CNI_MODE: {group: cni, type: enum, values: [auto, vxlan, host-gw, vxlan-crosssubnet, ipip, ipip-crosssubnet, direct, geneve, native], description: "Mode réseau du CNI."}
+  KUBE_PROXY_MODE: {group: cni, type: enum, values: [auto, iptables, nftables, ipvs, cilium], description: "Mode de kube-proxy (cilium = remplacement eBPF)."}
+  NETWORK_POLICY_MODE: {group: cni, type: enum, values: [auto, none, kubernetes, calico, cilium], description: "Moteur de NetworkPolicy attendu."}
+  ENABLE_HUBBLE: {group: cni, type: bool, description: "Hubble (Cilium)."}
+  HUBBLE_UI: {group: cni, type: bool, description: "Interface web de Hubble."}
+  FLANNEL_VERSION: {group: cni, type: string, empty: true, pattern: '^v[0-9]+\.[0-9]+\.[0-9]+$', deprecated: CNI_VERSION, description: "Ancien réglage de version de Flannel."}
+
+  # --- Gateway API -----------------------------------------------------------------
+  GATEWAY_CONTROLLER: {group: gateway, type: enum, values: [auto, none, traefik, envoy-gateway, cilium], description: "Contrôleur Gateway API."}
+  GATEWAY_API_VERSION: {group: gateway, type: string, empty: true, pattern: '^v1\.[0-9]+\.[0-9]+$', description: "Version des CRD Gateway API."}
+  GATEWAY_API_CHANNEL: {group: gateway, type: enum, values: [standard, experimental], description: "Canal des CRD Gateway API."}
+  GATEWAY_DOMAIN: {group: gateway, type: string, pattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$', description: "Domaine DNS des applications publiées."}
+  GATEWAY_TLS: {group: gateway, type: enum, values: [auto, "true", "false"], description: "Écouteur HTTPS de la Gateway partagée."}
+  GATEWAY_SERVICE_TYPE: {group: gateway, type: enum, values: [auto, LoadBalancer, NodePort, ClusterIP], description: "Type du Service de la Gateway."}
+
+  # --- LoadBalancer ----------------------------------------------------------------
+  LOADBALANCER_PROVIDER: {group: loadbalancer, type: enum, values: [auto, none, metallb, cilium-l2, cilium-bgp], description: "Fournisseur de Services LoadBalancer."}
+  LOADBALANCER_MODE: {group: loadbalancer, type: enum, values: [l2, bgp], description: "Mode d'annonce de MetalLB."}
+  LOADBALANCER_IP_POOL: {group: loadbalancer, type: ip_ranges, empty: true, description: "Plage(s) d'IP des Services LoadBalancer."}
+  LOADBALANCER_INTERFACES: {group: loadbalancer, type: string, empty: true, description: "Interfaces d'annonce L2 (regex)."}
+  BGP_LOCAL_ASN: {group: loadbalancer, type: int, empty: true, min: 1, max: 4294967295, description: "ASN local (BGP)."}
+  BGP_PEER_ADDRESS: {group: loadbalancer, type: ip, empty: true, description: "Adresse du routeur BGP pair."}
+  BGP_PEER_ASN: {group: loadbalancer, type: int, empty: true, min: 1, max: 4294967295, description: "ASN du routeur pair."}
+
+  # --- Stockage ----------------------------------------------------------------------
+  STORAGE_BACKENDS: {group: storage, type: list, empty: true, values: [nfs-csi, longhorn], description: "Backends de stockage."}
+  DEFAULT_STORAGE_CLASS: {group: storage, type: string, pattern: '^(auto|platform|none|[a-z0-9][a-z0-9.-]*)$', description: "StorageClass par défaut."}
+  NFS_SERVER: {group: storage, type: string, empty: true, pattern: '^[A-Za-z0-9.:-]+$', description: "Serveur NFS."}
+  NFS_SHARE: {group: storage, type: string, empty: true, pattern: '^/[^\s]*$', description: "Export NFS."}
+  NFS_VERSION: {group: storage, type: enum, values: ["3", "4", "4.0", "4.1", "4.2"], description: "Version du protocole NFS."}
+  NFS_STORAGE_CLASS: {group: storage, type: string, pattern: '^[a-z0-9][a-z0-9.-]*$', description: "Nom de la StorageClass NFS."}
+  NFS_RECLAIM_POLICY: {group: storage, type: enum, values: [Retain, Delete], description: "Politique de récupération des volumes NFS."}
+  NFS_MOUNT_OPTIONS: {group: storage, type: list, empty: true, description: "Options de montage NFS supplémentaires."}
+  NFS_SUBDIR: {group: storage, type: string, description: "Modèle de sous-dossier par volume."}
+  NFS_DEFAULT_STORAGE_CLASS: {group: storage, type: bool, empty: true, deprecated: DEFAULT_STORAGE_CLASS, description: "Ancienne forme : true = DEFAULT_STORAGE_CLASS=nfs-csi."}
+  NFS_CSI_ENABLED: {group: storage, type: bool, empty: true, lab_env: false, deprecated: STORAGE_BACKENDS, description: "Alias : true = nfs-csi dans STORAGE_BACKENDS."}
+  LONGHORN_ENABLED: {group: storage, type: bool, empty: true, lab_env: false, deprecated: STORAGE_BACKENDS, description: "Alias : true = longhorn dans STORAGE_BACKENDS."}
+  LONGHORN_VERSION: {group: storage, type: string, pattern: '^(auto-compatible|v?[0-9]+\.[0-9]+\.[0-9]+)$', description: "Version de Longhorn."}
+  LONGHORN_REPLICA_COUNT: {group: storage, type: int, min: 1, max: 10, description: "Nombre de réplicas par volume."}
+  LONGHORN_DATA_PATH: {group: storage, type: path, description: "Répertoire des données Longhorn sur les nœuds."}
+  LONGHORN_STORAGE_CLASS: {group: storage, type: string, pattern: '^[a-z0-9][a-z0-9.-]*$', description: "Nom de la StorageClass Longhorn."}
+  LONGHORN_RECLAIM_POLICY: {group: storage, type: enum, values: [Retain, Delete], description: "Politique de récupération des volumes Longhorn."}
+  LONGHORN_UI_ENABLED: {group: storage, type: bool, description: "Interface web de Longhorn."}
+  LONGHORN_UI_EXPOSE: {group: storage, type: bool, description: "Publier l'interface par la Gateway."}
+  LONGHORN_BACKUP_ENABLED: {group: storage, type: bool, description: "Sauvegardes Longhorn."}
+  LONGHORN_BACKUP_TARGET: {group: storage, type: string, empty: true, pattern: '^(nfs://|s3://|cifs://|azblob://)\S+$', description: "Cible de sauvegarde Longhorn."}
+  LONGHORN_DEDICATED_DISK: {group: storage, type: bool, description: "Disque dédié sur chaque worker."}
+  LONGHORN_DISK_SIZE_GB: {group: storage, type: int, min: 10, max: 65536, description: "Taille du disque dédié."}
+  LONGHORN_DISK_DATASTORE: {group: storage, type: string, empty: true, description: "Stockage du disque dédié."}
+  LONGHORN_DISK_DEVICE: {group: storage, type: path, empty: true, description: "Périphérique dédié (mode existing)."}
+  LONGHORN_DISK_ALLOW_FORMAT: {group: storage, type: bool, description: "Autoriser le formatage d'un disque vide."}
+
+  # --- Addons ------------------------------------------------------------------------
+  ADDON_PROFILE: {group: addons, type: enum, values: [minimal, homelab, observability, enterprise-lab, ci, custom], description: "Profil d'addons."}
+  ADDONS: {group: addons, type: list, empty: true, description: "Addons ajoutés (nom ou +nom) ou retirés (-nom) par rapport au profil."}
+  COMPATIBILITY_POLICY: {group: addons, type: enum, values: [warn, strict], description: "Traitement des combinaisons non testées en amont."}
+  EXISTING_ADDON_POLICY: {group: addons, type: enum, values: [fail, skip], description: "Mode attach : composant déjà installé par un autre outil."}
+
+  # --- Réglages des addons -------------------------------------------------------------
+  CERT_MANAGER_ISSUER: {group: addon-settings, type: enum, values: [selfsigned-ca, acme-http01, acme-dns01, none], description: "ClusterIssuer créé par défaut."}
+  ACME_EMAIL: {group: addon-settings, type: string, empty: true, pattern: '^[^@\s]+@[^@\s]+$', description: "E-mail du compte ACME."}
+  ACME_ENVIRONMENT: {group: addon-settings, type: enum, values: [staging, production], description: "Serveur ACME (Let's Encrypt)."}
+  ACME_DNS01_PROVIDER: {group: addon-settings, type: enum, empty: true, values: [cloudflare, rfc2136, route53], description: "Fournisseur DNS-01."}
+  RFC2136_NAMESERVER: {group: addon-settings, type: string, empty: true, description: "Serveur DNS RFC2136 (host:port)."}
+  RFC2136_TSIG_KEY_NAME: {group: addon-settings, type: string, empty: true, description: "Nom de la clé TSIG."}
+  RFC2136_TSIG_ALGORITHM: {group: addon-settings, type: enum, values: [HMACMD5, HMACSHA1, HMACSHA256, HMACSHA512], description: "Algorithme TSIG."}
+  ARGOCD_REPO_URL: {group: addon-settings, type: url, empty: true, description: "Dépôt Git de l'application d'exemple."}
+  ARGOCD_REPO_PATH: {group: addon-settings, type: string, description: "Chemin dans le dépôt."}
+  ARGOCD_REPO_REVISION: {group: addon-settings, type: string, description: "Branche, tag ou commit."}
+  ARGOCD_AUTO_SYNC: {group: addon-settings, type: bool, description: "Synchronisation automatique."}
+  ARGOCD_EXPOSE: {group: addon-settings, type: bool, description: "Publier Argo CD par la Gateway."}
+  MONITORING_RETENTION: {group: addon-settings, type: string, pattern: '^[0-9]+[hdwy]$', description: "Rétention de Prometheus."}
+  MONITORING_PERSISTENCE: {group: addon-settings, type: bool, description: "Volumes persistants pour la supervision."}
+  MONITORING_STORAGE_SIZE_GB: {group: addon-settings, type: int, min: 1, max: 10000, description: "Taille du volume Prometheus."}
+  GRAFANA_EXPOSE: {group: addon-settings, type: bool, description: "Publier Grafana par la Gateway."}
+  LOGGING_RETENTION: {group: addon-settings, type: string, pattern: '^[0-9]+h$', description: "Rétention de Loki."}
+  LOGGING_PERSISTENCE: {group: addon-settings, type: bool, description: "Volume persistant pour Loki."}
+  LOGGING_NODE_LOGS: {group: addon-settings, type: bool, description: "Collecter le journal systemd des nœuds."}
+  KYVERNO_POLICY_MODE: {group: addon-settings, type: enum, values: [audit, enforce, none], description: "Politiques Kyverno d'exemple."}
+  EXTERNAL_DNS_PROVIDER: {group: addon-settings, type: enum, empty: true, values: [rfc2136, cloudflare, pihole], description: "Fournisseur DNS d'ExternalDNS."}
+  EXTERNAL_DNS_DOMAIN_FILTER: {group: addon-settings, type: string, empty: true, description: "Domaine géré par ExternalDNS."}
+  PIHOLE_SERVER: {group: addon-settings, type: url, empty: true, description: "URL de Pi-hole."}
+
+  # --- Exploitation ----------------------------------------------------------------------
+  BACKUP_ENABLED: {group: maintenance, type: bool, description: "Sauvegardes automatiques."}
+  BACKUP_PROVIDER: {group: maintenance, type: enum, values: [etcd-snapshot, velero, both], description: "Mécanisme de sauvegarde."}
+  BACKUP_SCHEDULE: {group: maintenance, type: cron, description: "Planification (cron)."}
+  BACKUP_RETENTION_DAYS: {group: maintenance, type: int, min: 1, max: 3650, description: "Rétention des sauvegardes (jours)."}
+  VELERO_S3_URL: {group: maintenance, type: url, empty: true, description: "URL S3-compatible de Velero."}
+  VELERO_BUCKET: {group: maintenance, type: string, empty: true, pattern: '^[a-z0-9][a-z0-9.-]{1,62}$', description: "Bucket Velero."}
+  VELERO_REGION: {group: maintenance, type: string, description: "Région S3."}
+  VELERO_FS_BACKUP: {group: maintenance, type: bool, description: "Sauvegarde des volumes par copie de fichiers."}
+  UPGRADE_POLICY: {group: maintenance, type: enum, values: [patch, minor], description: "Mises à jour proposées."}
+  ENABLE_HEALTHCHECKS: {group: maintenance, type: bool, description: "Contrôles de santé après déploiement."}
+  ENABLE_POST_DEPLOY_TESTS: {group: maintenance, type: bool, description: "Tests fonctionnels après déploiement."}
+
+  # --- existing / attach ---------------------------------------------------------------------
+  EXISTING_INVENTORY: {group: existing, type: path, empty: true, description: "Inventaire Ansible des machines existantes."}
+  EXISTING_KUBECONFIG: {group: existing, type: path, empty: true, description: "kubeconfig du cluster existant (attach)."}
+  EXISTING_CONTEXT: {group: existing, type: string, empty: true, description: "Contexte kubectl du cluster existant (attach)."}
+
+  # --- Kind / Minikube / Vagrant / EKS -----------------------------------------------------
+  KIND_NODE_IMAGE: {group: kind, type: string, empty: true, description: "Image des nœuds kind (vide = verrouillée)."}
+  KIND_CONFIG: {group: kind, type: path, empty: true, description: "Config kind personnalisée."}
+  MINIKUBE_KUBERNETES_VERSION: {group: minikube, type: string, empty: true, pattern: '^v[0-9]+\.[0-9]+\.[0-9]+$', description: "Version de Kubernetes de minikube."}
+  MINIKUBE_DRIVER: {group: minikube, type: string, empty: true, description: "Driver minikube."}
+  MINIKUBE_NODES: {group: minikube, type: int, min: 1, max: 10, description: "Nombre de nœuds minikube."}
+  MINIKUBE_CPUS: {group: minikube, type: int, min: 2, max: 64, description: "CPU par nœud minikube."}
+  MINIKUBE_MEMORY_MB: {group: minikube, type: int, min: 1800, max: 262144, description: "Mémoire par nœud minikube."}
+  MINIKUBE_EXTRA_ARGS: {group: minikube, type: string, empty: true, description: "Options supplémentaires de minikube start."}
+  VAGRANT_PROVIDER: {group: vagrant, type: enum, values: [virtualbox, libvirt, vmware_desktop, vmware_esxi], description: "Provider Vagrant."}
+  VAGRANT_BOX: {group: vagrant, type: string, empty: true, description: "Box Vagrant (vide = selon NODE_OS)."}
+  VAGRANT_BOX_VERSION: {group: vagrant, type: string, empty: true, description: "Version de la box."}
+  VAGRANT_NETWORK_PREFIX: {group: vagrant, type: string, pattern: '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$', description: "Préfixe /24 du réseau privé."}
+  VAGRANT_IP_START: {group: vagrant, type: int, min: 2, max: 250, description: "Première adresse des VMs."}
+  EKS_KUBERNETES_VERSION: {group: eks, type: string, pattern: '^1\.[0-9]+$', description: "Version mineure EKS."}
+  AWS_TARGET: {group: eks, type: enum, values: [aws, localstack], description: "Cible AWS."}
+  LOCALSTACK_ENDPOINT: {group: eks, type: url, description: "Adresse de LocalStack."}
+
+  # --- Outils ----------------------------------------------------------------------------------
+  KIND_VERSION: {group: tools, type: string, description: "Version conseillée de kind."}
+  KUBECTL_VERSION: {group: tools, type: string, description: "Version conseillée de kubectl."}
+  MINIKUBE_VERSION: {group: tools, type: string, description: "Version conseillée de minikube."}
+  HELM_VERSION: {group: tools, type: string, description: "Version conseillée de Helm."}
+  TERRAFORM_VERSION: {group: tools, type: string, description: "Version conseillée de Terraform."}
+  TFLINT_VERSION: {group: tools, type: string, description: "Version de TFLint (CI)."}
+  VAGRANT_VERSION: {group: tools, type: string, description: "Version de Vagrant (CI)."}
+  ACTIONLINT_VERSION: {group: tools, type: string, description: "Version d'actionlint (CI)."}
+
+  # --- Identifiants : uniquement dans .env (ou l'environnement) ---------------------------------
+  PROXMOX_VE_ENDPOINT: {group: credentials, type: url, empty: true, lab_env: false, description: "URL de l'API Proxmox."}
+  PROXMOX_VE_API_TOKEN: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Token API Proxmox."}
+  PROXMOX_VE_USERNAME: {group: credentials, type: string, empty: true, lab_env: false, description: "Utilisateur Proxmox (déconseillé)."}
+  PROXMOX_VE_PASSWORD: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Mot de passe Proxmox (déconseillé)."}
+  PROXMOX_VE_INSECURE: {group: credentials, type: bool, empty: true, lab_env: false, description: "Certificat auto-signé."}
+  VSPHERE_SERVER: {group: credentials, type: string, empty: true, lab_env: false, description: "vCenter."}
+  VSPHERE_USER: {group: credentials, type: string, empty: true, lab_env: false, description: "Utilisateur vCenter."}
+  VSPHERE_PASSWORD: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Mot de passe vCenter."}
+  VSPHERE_ALLOW_UNVERIFIED_SSL: {group: credentials, type: bool, empty: true, lab_env: false, description: "Certificat auto-signé."}
+  ESXI_HOSTNAME: {group: credentials, type: string, empty: true, lab_env: false, description: "ESXi autonome (Vagrant)."}
+  ESXI_USERNAME: {group: credentials, type: string, empty: true, lab_env: false, description: "Utilisateur ESXi."}
+  ESXI_PASSWORD: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Mot de passe ESXi."}
+  ESXI_DATASTORE: {group: credentials, type: string, empty: true, lab_env: false, description: "Datastore ESXi."}
+  ESXI_NETWORKS: {group: credentials, type: string, empty: true, lab_env: false, description: "Réseaux ESXi."}
+  LIBVIRT_DEFAULT_URI: {group: credentials, type: string, empty: true, lab_env: false, description: "URI libvirt."}
+  AWS_PROFILE: {group: credentials, type: string, empty: true, lab_env: false, description: "Profil AWS CLI."}
+  AWS_REGION: {group: credentials, type: string, empty: true, lab_env: false, description: "Région AWS."}
+  GRAFANA_ADMIN_PASSWORD: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Mot de passe admin Grafana (vide = généré dans le cluster)."}
+  ARGOCD_REPO_USERNAME: {group: credentials, type: string, empty: true, lab_env: false, description: "Utilisateur du dépôt Git privé."}
+  ARGOCD_REPO_PASSWORD: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Jeton du dépôt Git privé."}
+  CLOUDFLARE_API_TOKEN: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Jeton API Cloudflare (DNS-01, ExternalDNS)."}
+  RFC2136_TSIG_SECRET: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Secret TSIG (base64)."}
+  PIHOLE_PASSWORD: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Mot de passe Pi-hole."}
+  VELERO_S3_ACCESS_KEY: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Clé d'accès S3 de Velero."}
+  VELERO_S3_SECRET_KEY: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Clé secrète S3 de Velero."}
+  LONGHORN_BACKUP_S3_ENDPOINT: {group: credentials, type: url, empty: true, lab_env: false, description: "Point d'accès S3 de la cible Longhorn."}
+  LONGHORN_BACKUP_S3_ACCESS_KEY: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Clé d'accès S3 Longhorn."}
+  LONGHORN_BACKUP_S3_SECRET_KEY: {group: credentials, type: string, empty: true, secret: true, lab_env: false, description: "Clé secrète S3 Longhorn."}

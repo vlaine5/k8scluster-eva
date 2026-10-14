@@ -1,0 +1,32 @@
+---
+# =============================================================================
+#  Instantanés etcd automatiques (BACKUP_ENABLED=true, etcd-snapshot) :
+#  timer systemd sur chaque control-plane, rétention BACKUP_RETENTION_DAYS.
+#  Les copies restent sur le nœud (/var/backups/k8s-lab/etcd) : rapatriez-les
+#  avec make backup ou copiez-les vers un stockage externe (docs/backup-dr.md).
+# =============================================================================
+
+- name: Install the etcd snapshot script
+  ansible.builtin.template:
+    src: k8s-lab-etcd-snapshot.sh.j2
+    dest: /usr/local/sbin/k8s-lab-etcd-snapshot
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the etcd snapshot service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [k8s-lab-etcd-snapshot.service, k8s-lab-etcd-snapshot.timer]
+  register: etcd_timer_units
+
+- name: Enable the etcd snapshot timer
+  ansible.builtin.systemd_service:
+    name: k8s-lab-etcd-snapshot.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ etcd_timer_units is changed }}"

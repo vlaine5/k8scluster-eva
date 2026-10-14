@@ -1,0 +1,52 @@
+# StorageClass Longhorn gérée par le framework (le chart n'en crée pas).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ cfg.LONGHORN_STORAGE_CLASS }}
+  labels:
+    app.kubernetes.io/managed-by: k8s-lab
+    k8s-lab.io/addon: longhorn
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: {{ cfg.LONGHORN_RECLAIM_POLICY }}
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "{{ cfg.LONGHORN_REPLICA_COUNT }}"
+  staleReplicaTimeout: "30"
+  fsType: ext4
+  dataLocality: disabled
+{% if 'snapshot-controller' in lab_addon_ids %}
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: longhorn-snapshot
+  labels:
+    app.kubernetes.io/managed-by: k8s-lab
+driver: driver.longhorn.io
+deletionPolicy: Retain
+parameters:
+  type: snap
+{% endif %}
+{% if cfg.LONGHORN_UI_EXPOSE | bool and cfg.LONGHORN_UI_ENABLED | bool %}
+---
+# ATTENTION : l'interface Longhorn n'a PAS d'authentification. Exposée uniquement
+# sur demande (LONGHORN_UI_EXPOSE=true), via la Gateway HTTPS du lab.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: longhorn-ui
+  namespace: longhorn-system
+  labels:
+    app.kubernetes.io/managed-by: k8s-lab
+spec:
+  parentRefs:
+    - name: lab-gateway
+      namespace: gateway-system
+      sectionName: {{ 'https' if lab.gateway_tls else 'http' }}
+  hostnames: ["longhorn.{{ cfg.GATEWAY_DOMAIN }}"]
+  rules:
+    - backendRefs:
+        - name: longhorn-frontend
+          port: 80
+{% endif %}

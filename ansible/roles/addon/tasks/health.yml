@@ -1,0 +1,82 @@
+---
+# Contrôle de santé d'une ressource (addon.yaml -> health).
+#   addon_health_mode = wait   : attend l'état prêt (échec = erreur)
+#   addon_health_mode = status : constat rapide, sans échec
+- name: Build the health command
+  ansible.builtin.set_fact:
+    addon_health_argv: >-
+      {{ addon_kubectl + (['-n', addon_check.namespace] if addon_check.namespace is defined else [])
+         + (addon_health_commands[addon_check.kind] | default(['get', addon_check.kind | lower, addon_check.name])) }}
+  vars:
+    addon_timeout: "{{ addon_health_timeout if addon_health_mode == 'wait' else addon_status_timeout }}"
+    addon_health_commands:
+      Deployment: [rollout, status, "deployment/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      DaemonSet: [rollout, status, "daemonset/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      StatefulSet: [rollout, status, "statefulset/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      CustomResourceDefinition: [wait, --for=condition=Established, "crd/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      APIService: [wait, --for=condition=Available, "apiservice/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      GatewayClass: [wait, --for=condition=Accepted, "gatewayclass/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      Gateway: [wait, "--for=condition={{ addon_check.condition | default('Programmed') }}", "gateway/{{ addon_check.name }}", "--timeout={{ addon_timeout }}"]
+      BackupStorageLocation: [wait, "--for=jsonpath={.status.phase}=Available", "backupstoragelocation/{{ addon_check.name }}",
+                              "--timeout={{ addon_timeout }}"]
+
+# Attente bornée : d'abord l'existence de la ressource (une ressource tout juste créée par
+# un opérateur peut manquer quelques secondes), puis UN seul kubectl wait/rollout, limité
+# par son propre --timeout (addon_health_timeout). Jamais de nouvelles tentatives d'une
+# attente déjà expirée : une ressource qui ne devient pas prête fait échouer en 10 min.
+- name: Wait until the resource exists - {{ addon_check.kind ~ ' ' ~ addon_check.name }}
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + (['-n', addon_check.namespace] if addon_check.namespace is defined else [])
+              + ['get', addon_check.kind | lower, addon_check.name, '-o', 'name'] }}"
+  register: addon_health_exists
+  changed_when: false
+  failed_when: false
+  until: addon_health_exists.rc == 0
+  retries: 30
+  delay: 10
+  when: addon_health_mode == 'wait'
+
+- name: Check {{ addon_check.kind ~ ' ' ~ addon_check.name }}
+  ansible.builtin.command:
+    argv: "{{ addon_health_argv }}"
+  register: addon_health_result
+  changed_when: false
+  failed_when: false
+
+- name: Describe the resource that is not ready (diagnosis)
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + (['-n', addon_check.namespace] if addon_check.namespace is defined else [])
+              + ['describe', addon_check.kind | lower, addon_check.name] }}"
+  register: addon_health_describe
+  changed_when: false
+  failed_when: false
+  when:
+    - addon_health_mode == 'wait'
+    - addon_health_result.rc != 0
+
+- name: Record the health result
+  ansible.builtin.set_fact:
+    addon_health_report: >-
+      {{ addon_health_report | default([]) + [{'addon': addon_item.id, 'kind': addon_check.kind,
+         'name': addon_check.name, 'ok': addon_health_result.rc == 0,
+         'detail': (addon_health_result.stderr | default('') | trim | truncate(200))}] }}
+
+- name: Fail with a diagnosis for the unready resource {{ addon_check.kind ~ ' ' ~ addon_check.name }}
+  ansible.builtin.fail:
+    msg: |
+      {{ addon_item.id }} : {{ addon_check.kind }} {{ addon_check.namespace | default('') }}/{{ addon_check.name }} is not ready.
+      {{ addon_health_result.stderr | default('') | trim | truncate(800) }}
+      {{ addon_health_describe_tail }}
+      Diagnosis:
+        kubectl --context {{ addon_context }} get pods -A | grep -v Running
+        kubectl --context {{ addon_context }} -n {{ addon_health_ns }} get events --sort-by=.lastTimestamp | tail -20
+      Re-run safely: make addons-apply (only what is missing is installed). docs/troubleshooting.md#addons
+  vars:
+    addon_health_ns: "{{ addon_check.namespace | default(addon_install.namespace | default('default')) }}"
+    # 40 dernières lignes (statut et événements). Le séparateur vient de YAML ("\n" entre
+    # guillemets doubles) : ansible-core 2.21 ne convertit pas '\n' écrit dans une expression Jinja.
+    addon_health_describe_tail: "{{ (addon_health_describe.stdout | default('')).splitlines()[-40:] | join(addon_health_nl) }}"
+    addon_health_nl: "\n"
+  when:
+    - addon_health_mode == 'wait'
+    - addon_health_result.rc != 0

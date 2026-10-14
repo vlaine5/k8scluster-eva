@@ -1,0 +1,66 @@
+---
+# =============================================================================
+#  Test du descheduler : une exécution À BLANC (--dry-run, aucune éviction) est
+#  lancée depuis le modèle du CronJob et doit se terminer sans erreur.
+# =============================================================================
+
+- name: Read the CronJob of the descheduler
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'kube-system', 'get', 'cronjob', 'descheduler', '-o', 'json'] }}"
+  register: descheduler_test_cronjob
+  changed_when: false
+
+- name: Run the descheduler once in dry-run mode
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: present
+    definition:
+      apiVersion: batch/v1
+      kind: Job
+      metadata: {name: k8s-lab-test-descheduler, namespace: kube-system, labels: {app.kubernetes.io/managed-by: k8s-lab}}
+      spec: >-
+        {{ descheduler_job_spec | combine({'ttlSecondsAfterFinished': 600, 'template': descheduler_job_spec.template | combine({'spec':
+           descheduler_job_spec.template.spec | combine({'containers': [descheduler_job_spec.template.spec.containers[0]
+             | combine({'args': descheduler_job_spec.template.spec.containers[0].args + ['--dry-run']})]})})}) }}
+  vars:
+    descheduler_job_spec: "{{ (descheduler_test_cronjob.stdout | from_json).spec.jobTemplate.spec }}"
+
+# Complete ou Failed : une politique invalide fait échouer le Job en quelques secondes,
+# inutile d'attendre la fin du délai.
+- name: Wait for the dry run
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'kube-system', 'get', 'job', 'k8s-lab-test-descheduler', '-o',
+              'jsonpath={.status.succeeded}/{.status.failed}'] }}"
+  register: descheduler_test_job
+  changed_when: false
+  failed_when: false
+  until: descheduler_test_job.stdout is match('^1/') or descheduler_test_job.stdout is match('^[^/]*/[1-9]')
+  retries: 30
+  delay: 10
+
+- name: Read the logs of the dry run
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', 'kube-system', 'logs', 'job/k8s-lab-test-descheduler', '--tail=30'] }}"
+  register: descheduler_test_logs
+  changed_when: false
+  failed_when: false
+  when: descheduler_test_job.stdout is not match('^1/')
+
+- name: Check that the dry run succeeded
+  ansible.builtin.assert:
+    that: descheduler_test_job.stdout is match('^1/')
+    fail_msg: >-
+      The descheduler dry run did not succeed (succeeded/failed = {{ descheduler_test_job.stdout }}).
+      Logs: {{ descheduler_test_logs.stdout_lines | default([]) }}
+    quiet: true
+
+- name: Delete the dry-run Job
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    kind: Job
+    namespace: kube-system
+    name: k8s-lab-test-descheduler
+    delete_options: {propagationPolicy: Background}

@@ -1,0 +1,18 @@
+---
+- name: Unhold the packages to upgrade
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: install
+  loop: "{{ upgrade_packages }}"
+
+- name: Install the target version (APT)
+  ansible.builtin.apt:
+    name: "{{ upgrade_packages | map('regex_replace', '$', '=' ~ upgrade_target_version ~ '-*') | list }}"
+    state: present
+    allow_change_held_packages: true
+
+- name: Hold the packages again
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ upgrade_packages }}"

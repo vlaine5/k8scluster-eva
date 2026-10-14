@@ -1,13 +1,30 @@
 ---
 # Paquets de base installés sur chaque nœud.
-common_packages:
+common_packages_debian:
   - ca-certificates
   - curl
   - gnupg
   - bash-completion
   - conntrack
+  - socat
+  - iproute2
+  - jq
   # requis par le module Ansible deb822_repository
   - python3-debian
+  # requis par kubernetes.core.helm (CNI installé depuis le 1er control-plane)
+  - python3-yaml
+common_packages_redhat:
+  - ca-certificates
+  - curl
+  - gnupg2
+  - bash-completion
+  - conntrack-tools
+  - socat
+  - iproute
+  - iproute-tc
+  - jq
+  - tar
+  - python3-pyyaml
 
 # Modules noyau requis par containerd (overlay) et par le réseau des Pods
 # (br_netfilter : le trafic des bridges Linux passe par iptables).
@@ -27,10 +44,24 @@ common_sysctl_settings:
 # portée du nœud (conteneur de test partageant le swap de l'hôte).
 common_disable_swap: true
 
-# Ajoute tous les nœuds du cluster dans /etc/hosts (utile sans DNS local).
-common_manage_etc_hosts: true
+# Nom d'hôte et /etc/hosts : gérés pour les VMs créées par le lab, jamais
+# modifiés sur des machines existantes (mode existing).
+common_manage_hostname: "{{ lab_platform != 'existing' }}"
+common_manage_etc_hosts: "{{ lab_platform != 'existing' }}"
 
-# Kubernetes >= 1.35 exige cgroup v2. Ne passez à false que si vous savez
-# pourquoi (hôte ancien) ET que vous ajoutez failCgroupV1: false dans
-# control_plane_kubelet_config.
-common_require_cgroup_v2: true
+# Ports ouverts dans un pare-feu actif (firewalld / ufw), selon le rôle du nœud,
+# le CNI et les addons. Liste officielle : https://kubernetes.io/docs/reference/networking/ports-and-protocols/
+common_ports_control_plane: [6443/tcp, 2379-2380/tcp, 10250/tcp, 10257/tcp, 10259/tcp, 2381/tcp]
+common_ports_worker: [10250/tcp, 10256/tcp, 30000-32767/tcp, 30000-32767/udp]
+common_ports_cni:
+  flannel: [8472/udp]
+  calico: [179/tcp, 4789/udp, 5473/tcp]
+  cilium: [8472/udp, 6081/udp, 4240/tcp, 4244/tcp]
+  none: []
+common_firewall_ports: >-
+  {{ (common_ports_control_plane if inventory_hostname in groups['control_plane'] else [])
+     + common_ports_worker
+     + common_ports_cni[cni] | default([])
+     + ['9100/tcp', '10249/tcp']
+     + (node_prereqs.firewall_ports | default([]) | map(attribute='port') | map('string')
+        | zip(node_prereqs.firewall_ports | default([]) | map(attribute='proto')) | map('join', '/') | list) }}

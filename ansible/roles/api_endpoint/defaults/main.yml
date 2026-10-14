@@ -1,0 +1,4 @@
+---
+# before-init : 1er control-plane avant kubeadm init (super-admin.conf).
+# after-init  : configuration définitive (admin.conf).
+api_endpoint_phase: after-init

@@ -6,33 +6,43 @@
 #  Aucun secret ici : le token API se met dans le fichier .env à la racine
 #  (PROXMOX_VE_ENDPOINT, PROXMOX_VE_API_TOKEN). Voir docs/deploy-proxmox.md
 #
-#  La taille du cluster (WORKER_COUNT, NODE_CPUS...) se règle dans .env /
-#  config/lab.env : ./k8s-lab la transmet à Terraform.
+#  NE PAS définir ici ce qui est piloté par .env (le CLI refuse les doublons) :
+#  cluster_name, control_plane_count, worker_count, hostname_prefix, node_cpus,
+#  node_memory_mb, node_disk_gb, node_os, node_os_version, image_url,
+#  image_sha256, cpu_type. ./k8s-lab les transmet à Terraform.
 # =============================================================================
 
 # Nom du nœud Proxmox qui héberge les VMs (en haut à gauche de l'interface web).
 proxmox_node = "pve"
 
+# Optionnel : répartir les VMs sur plusieurs nœuds Proxmox (HA physique), à tour de rôle.
+# proxmox_nodes = ["pve1", "pve2", "pve3"]
+
 # Stockage des disques des VMs.
 vm_datastore = "local-lvm"
 
-# Stockage où l'image cloud Ubuntu est téléchargée : le type de contenu
-# "Import" doit y être activé (Datacenter > Storage > local > Edit > Content).
+# Stockage où l'image cloud est téléchargée : le type de contenu "Import"
+# doit y être activé (Datacenter > Storage > local > Edit > Content).
 image_datastore = "local"
 
-# Bridge réseau et VLAN éventuel.
+# Bridge réseau. vlan_id seulement si le bridge n'est PAS déjà sur le bon VLAN.
 network_bridge = "vmbr0"
 # vlan_id      = 20
 
-# Réseau des VMs : IP statiques à partir de .100 (control-plane), .101...
-# Choisissez une plage libre (hors de la plage DHCP de votre routeur).
+# Réseau des VMs : IP statiques à partir de ip_start (control-planes), puis les workers.
+# Choisissez une plage libre (hors de la plage DHCP de votre routeur) et réservez-la dans votre IPAM.
 network_cidr = "192.168.1.0/24"
 ip_start     = 100
+# worker_ip_offset = 10        # workers à .110+ : laisse de la place pour passer à 3 ou 5 control-planes
 # gateway    = "192.168.1.1"
 # dns_servers = ["192.168.1.1"]
 
-# Optionnel : cloner un template cloud-init existant au lieu d'importer l'image.
+# Optionnel : cloner un template cloud-init existant au lieu d'importer l'image
+# (équivaut à NODE_TEMPLATE_ID dans .env, prioritaire).
 # template_vm_id = 9000
 
-# Optionnel : IDs fixes des VMs (sinon Proxmox choisit).
+# Optionnel : IDs fixes des VMs (control-planes puis workers).
 # vm_id_start = 700
+
+# Disques Longhorn dédiés (LONGHORN_DEDICATED_DISK=true dans .env) : stockage des disques scsi1.
+# longhorn_datastore = "local-lvm"

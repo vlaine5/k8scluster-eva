@@ -1,0 +1,17 @@
+# KEDA : mise à l'échelle pilotée par des événements (files, cron, Prometheus...),
+# jusqu'à zéro réplique. Fournit l'API external.metrics.k8s.io.
+{% set monitored = 'prometheus-operator-crds' in lab_addon_ids %}
+resources:
+  operator:
+    requests: {cpu: 50m, memory: 100Mi}
+  metricServer:
+    requests: {cpu: 50m, memory: 100Mi}
+prometheus:
+  metricServer:
+    enabled: {{ monitored }}
+    serviceMonitor:
+      enabled: {{ monitored }}
+  operator:
+    enabled: {{ monitored }}
+    serviceMonitor:
+      enabled: {{ monitored }}

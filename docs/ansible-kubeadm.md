@@ -1,7 +1,8 @@
 # Ansible + kubeadm : comment le cluster est construit
 
-Quel que soit l'outil qui a créé les VMs (Vagrant ou Terraform), c'est le même playbook,
-`ansible/site.yml`, qui installe Kubernetes. (Le mode AWS EKS n'utilise pas ce playbook : AWS
+Quel que soit l'origine des machines (Vagrant, Terraform, ou vos machines en mode
+`existing`), c'est le même playbook, `ansible/site.yml`, qui installe Kubernetes, sur
+Ubuntu, Debian ou Rocky Linux ([os.md](os.md)). (Le mode AWS EKS n'utilise pas ce playbook : AWS
 fournit le control-plane, voir [deploy-eks.md](deploy-eks.md).) Il suit la documentation officielle
 [*Creating a cluster with kubeadm*](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/).
 
@@ -20,22 +21,28 @@ control_plane
 workers
 ```
 
-Il est **généré** (`inventories/vagrant.ini`, `inventories/terraform-<provider>.ini`) ;
-`inventories/example.ini` montre comment l'écrire à la main pour des VMs existantes.
-Le nombre de workers n'est écrit nulle part ailleurs : il suffit d'ajouter une ligne.
+Il est **généré** (`inventories/vagrant.ini`, `inventories/terraform-<provider>.ini`) ; en
+mode existing, c'est le vôtre (modèle : `inventories/existing.example.ini`,
+[existing-mode.md](existing-mode.md)). 1, 3 ou 5 control-planes ; le premier initialise le
+cluster, les autres le rejoignent.
 
 ## Les étapes (`ansible/site.yml`)
 
 | Étape | Rôle | Ce qui se passe |
 | --- | --- | --- |
-| 0 | *(play 1)* | attente SSH, attente de la fin de cloud-init, collecte des faits |
-| 1 | `common` | contrôle OS + **cgroup v2**, hostname, `/etc/hosts`, swap désactivé, modules `overlay` et `br_netfilter`, sysctl (`ip_forward`, `bridge-nf-call-iptables`) |
-| 2 | `container_runtime` | dépôt Docker (format deb822, clé dédiée), paquet `containerd.io` 2.x, `SystemdCgroup = true`, image `pause`, `crictl` ; vérification de la config effective |
-| 3 | `kubernetes` | dépôt `pkgs.k8s.io` de la version mineure, `kubelet`/`kubeadm`/`kubectl` **à la version exacte**, puis `apt-mark hold` |
-| 4 | `control_plane` | `kubeadm init --config /etc/kubernetes/kubeadm-config.yaml` (une seule fois), kubeconfig pour l'utilisateur SSH |
-| 5 | `cni` | Flannel : manifeste de release téléchargé (SHA-256 vérifié), adapté par Kustomize, appliqué |
-| 6 | `worker` | jeton de 15 min créé sur le control-plane, `kubeadm join --config …`, suppression du fichier, label `worker` |
-| 7 | *(play final)* | tous les nœuds `Ready`, Pods système prêts, kubeconfig exporté vers `.kube/clusters/` |
+| 0 | *(play 1)* | inventaire vérifié (1, 3 ou 5 control-planes), attente SSH et fin de cloud-init, faits |
+| 1 | `preflight` | **lecture seule** : OS dans la matrice (et conforme à `NODE_OS`), cgroup v2, ressources, `product_uuid`/MAC uniques, nœud déjà membre d'un autre cluster ; en mode existing : ports occupés, paquets en conflit, disques |
+| 2 | `common` | hostname, `/etc/hosts`, swap, modules `overlay`/`br_netfilter`, sysctl, SELinux (Rocky : `enforcing` conservé), pare-feu (firewalld sur Rocky) |
+| 3 | `container_runtime` | dépôt Docker (deb822 ou `yum_repository`, clé dédiée), `containerd.io` 2.x **gelé**, `SystemdCgroup = true`, image `pause`, `crictl` |
+| 4 | `kubernetes` | dépôt `pkgs.k8s.io` de la mineure, `kubelet`/`kubeadm`/`kubectl` **à la version exacte**, gelés (`dpkg` hold ou exclusion DNF) |
+| 5 | `node_prereqs` | paquets, modules et services demandés par les addons du plan (iSCSI et `dm_crypt` pour Longhorn, client NFS…) |
+| 6 | `storage_disk` | disque Longhorn dédié : identifié sans ambiguïté, formaté **seulement s'il est vide**, monté par étiquette |
+| 7 | `control_plane` (1er) | VIP de l'API (kube-vip) si demandée, `kubeadm init --config …` (une seule fois), kubeconfig |
+| 8 | `cni`, `cluster_core` | Flannel (manifeste SHA-256 + Kustomize), Calico (opérateur Tigera) ou Cilium (Helm) ; approbation des certificats de service des kubelets |
+| 9 | `control_plane` (autres) | un par un : quorum etcd vérifié, `kubeadm join --control-plane` |
+| 10 | `worker` | jeton de 15 min, `kubeadm join --config …`, suppression du fichier, label `worker` |
+| 11 | *(play final)* | nœuds `Ready`, Pods système prêts, kubeconfig exporté vers `.kube/clusters/` |
+| 12 | `etcd` | instantanés planifiés (`BACKUP_ENABLED=true`) |
 
 ### Points à observer sur une VM
 
@@ -58,7 +65,8 @@ Relancer le playbook ne casse rien :
 - un worker ajouté à l'inventaire est simplement joint au cluster existant.
 
 Changer `KUBERNETES_VERSION` sur un cluster existant est **refusé** avec un message
-explicatif : une mise à jour se fait avec `kubeadm upgrade`, pas par un changement de paquet.
+explicatif : une mise à jour se fait par `make upgrade-plan` puis `make upgrade` (kubeadm,
+nœud par nœud : [upgrades.md](upgrades.md)), pas par un changement de paquet.
 
 ## Sécurité
 
@@ -67,7 +75,8 @@ explicatif : une mise à jour se fait avec `kubeadm upgrade`, pas par un changem
 - Le jeton créé par `kubeadm init` expire aussi au bout de 15 minutes.
 - Le CA du cluster est vérifié par les workers (`caCertHashes`).
 - Fichiers sensibles en `0600` (config kubeadm, kubeconfig) ; aucun `0777`.
-- Manifeste Flannel : version épinglée **et** empreinte SHA-256 vérifiée.
+- CNI, charts et manifestes : versions épinglées **et** empreintes SHA-256 vérifiées
+  (`config/versions.yaml`).
 
 ## Variables
 
@@ -85,29 +94,31 @@ Exemples de réglages avancés :
 | `container_runtime_systemd_cgroup` | `container_runtime` | `false` uniquement avec `cgroupDriver: cgroupfs` côté kubelet |
 | `common_manage_etc_hosts` | `common` | `false` si `/etc/hosts` est géré ailleurs (conteneurs) |
 | `common_require_cgroup_v2` | `common` | `false` uniquement pour un hôte ancien, avec `failCgroupV1: false` |
-| `cni` | tous | `none` pour installer vous-même Calico ou Cilium |
+| `cni` | tous | `none` pour installer vous-même un autre CNI (sinon `CNI` dans `.env`) |
 
 ## Remettre à zéro
 
 ```bash
 cd ansible
-ansible-playbook -i inventories/<inventaire>.ini reset.yml -e reset_confirm=true   # DESTRUCTIF
+ansible-playbook -i inventories/<inventaire>.ini reset.yml -e reset_confirm=<nom-du-cluster>   # DESTRUCTIF
 ansible-playbook -i inventories/<inventaire>.ini site.yml                          # recrée
 ```
 
 ## Ajouter un CNI
 
-Créez `roles/cni/tasks/<nom>.yml` (en vous inspirant de `flannel.yml` : version épinglée,
-checksum, `kubectl apply`, attente), et ajoutez `<nom>` à la liste vérifiée dans
-`roles/cni/tasks/main.yml`.
+Créez `roles/cni/tasks/<nom>.yml` (en vous inspirant de `flannel.yml` ou `calico.yml` :
+version verrouillée dans `config/versions.yaml`, checksum ou chart, attente), ajoutez `<nom>`
+à la liste vérifiée dans `roles/cni/tasks/main.yml`, au schéma (`CNI`) et à la matrice de
+compatibilité, puis à un scénario de `tests/kubeadm-in-docker` dans la CI.
 
 ## État de validation
 
 - **En CI (GitHub Actions)** : `ansible-lint` (profil **production**, le plus strict), `yamllint`,
-  `ansible-playbook --syntax-check`, et le test d'intégration `tests/kubeadm-in-docker` : le
-  playbook complet sur 1 control-plane + 2 workers (conteneurs systemd Ubuntu 24.04, cgroup v2,
-  driver cgroup `systemd` par défaut), **2ᵉ exécution avec `changed=0`**, nœuds `Ready`, Pods
-  système prêts, test nginx inter-nœuds (Service + DNS).
+  `ansible-playbook --syntax-check`, et le test d'intégration `tests/kubeadm-in-docker` par le
+  vrai CLI (`./k8s-lab deploy existing`) : Ubuntu 24.04/26.04, Debian 12/13, Rocky 9/10,
+  Flannel, Calico, Cilium sans kube-proxy, 3 control-planes avec kube-vip, mise à niveau
+  1.36 → 1.37, sauvegarde puis restauration etcd ; **2ᵉ déploiement sans aucun changement**,
+  nœuds `Ready`, Pods système prêts, test nginx inter-nœuds (Service + DNS).
 - **Tests manuels complémentaires** (hors CI) : ajout d'un 4ᵉ nœud sur un cluster existant
   sans toucher aux autres, refus d'un changement de version, `reset.yml` puis redéploiement,
   inventaire généré par les modules Terraform du dépôt.
@@ -124,3 +135,8 @@ Il simule des VMs avec des conteneurs Docker privilégiés exécutant systemd, p
 tests/kubeadm-in-docker/run.sh           # crée 1 control-plane + 2 workers, déploie, teste
 tests/kubeadm-in-docker/run.sh --destroy # nettoie
 ```
+
+Ce que les nœuds conteneurs ont de plus qu'une VM, pour s'en rapprocher (test uniquement,
+jamais appliqué à vos machines) : montages en propagation partagée (`mount --make-rshared /`,
+fait par systemd sur une vraie machine), SSH et sudo sans pile PAM « account » sur Rocky (voir
+l'en-tête de `Dockerfile.rocky`).

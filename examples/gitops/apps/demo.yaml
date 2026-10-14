@@ -1,0 +1,48 @@
+# Application d'exemple synchronisée par Argo CD (ARGOCD_REPO_PATH=examples/gitops/apps).
+# Modifiez ce fichier dans VOTRE dépôt Git : Argo CD applique le changement.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-gitops
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  namespace: demo-gitops
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: echo}
+  template:
+    metadata:
+      labels: {app: echo}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: echo
+          image: registry.k8s.io/e2e-test-images/agnhost:2.61
+          args: [netexec, --http-port=8080]
+          ports: [{containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /hostname, port: 8080}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: demo-gitops
+spec:
+  selector: {app: echo}
+  ports: [{port: 80, targetPort: 8080}]

@@ -1,0 +1,26 @@
+---
+# Aide pour les tests : exécute curl dans un Pod éphémère du namespace de test.
+#   addon_curl_args   : arguments de curl (liste)
+#   addon_curl_expect : texte attendu dans la réponse (facultatif)
+- name: Run curl in the cluster ({{ addon_curl_label | default('HTTP') }})
+  ansible.builtin.command:
+    argv: >-
+      {{ addon_kubectl + ['-n', addon_test_ns, 'run', 'curl-' ~ (999999 | random | string), '--rm', '-i', '--restart=Never',
+         '--quiet', '--image=' ~ lab_test_images.curl, '--pod-running-timeout=3m', '--command', '--', 'curl', '-sS',
+         '--max-time', '15'] + addon_curl_args }}
+  register: addon_curl
+  changed_when: false
+  failed_when: false
+  retries: "{{ addon_curl_retries | default(12) }}"
+  delay: 10
+  until: addon_curl.rc == 0 and (addon_curl_expect is not defined or addon_curl_expect in addon_curl.stdout)
+
+- name: Check the curl result ({{ addon_curl_label | default('HTTP') }})
+  ansible.builtin.assert:
+    that:
+      - addon_curl.rc == 0
+      - addon_curl_expect is not defined or addon_curl_expect in addon_curl.stdout
+    fail_msg: >-
+      {{ addon_curl_label | default('HTTP') }} failed: rc={{ addon_curl.rc }}, expected "{{ addon_curl_expect | default('') }}",
+      got: {{ (addon_curl.stdout ~ ' ' ~ addon_curl.stderr) | trim | truncate(400) }}
+    quiet: true

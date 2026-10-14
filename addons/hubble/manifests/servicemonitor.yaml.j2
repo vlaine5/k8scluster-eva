@@ -1,0 +1,52 @@
+{% if 'prometheus-operator-crds' in lab_addon_ids %}
+# Métriques de Hubble (flux, DNS, pertes...) et de Cilium collectées par Prometheus.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hubble
+  namespace: kube-system
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+spec:
+  selector:
+    matchLabels: {k8s-app: hubble}
+  namespaceSelector:
+    matchNames: [kube-system]
+  endpoints:
+    - port: hubble-metrics
+      interval: 30s
+      honorLabels: true
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cilium
+  namespace: kube-system
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+spec:
+  selector:
+    matchExpressions:
+      - {key: k8s-app, operator: In, values: [cilium]}
+  namespaceSelector:
+    matchNames: [kube-system]
+  podMetricsEndpoints:
+    - port: prometheus
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cilium-operator
+  namespace: kube-system
+  labels: {app.kubernetes.io/managed-by: k8s-lab}
+spec:
+  selector:
+    matchLabels: {io.cilium/app: operator}
+  namespaceSelector:
+    matchNames: [kube-system]
+  podMetricsEndpoints:
+    - port: prometheus
+      interval: 30s
+{% endif %}

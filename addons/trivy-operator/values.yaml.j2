@@ -1,0 +1,22 @@
+# Trivy Operator : rapports de vulnérabilités, d'audit de configuration, de RBAC et de
+# secrets exposés (CRD *Report). Concurrence réduite pour un lab.
+excludeNamespaces: "k8s-lab-system"
+operator:
+  scanJobsConcurrentLimit: 2
+  vulnerabilityScannerEnabled: true
+  configAuditScannerEnabled: true
+  rbacAssessmentScannerEnabled: true
+  infraAssessmentScannerEnabled: true
+  exposedSecretScannerEnabled: true
+  clusterComplianceEnabled: true
+  # SBOM : coûteux en ressources, désactivé.
+  sbomGenerationEnabled: false
+  scannerReportTTL: "24h"
+trivy:
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+serviceMonitor:
+  enabled: {{ 'prometheus-operator-crds' in lab_addon_ids }}

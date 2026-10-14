@@ -1,0 +1,11 @@
+# Agent CNI d'Istio (chaîné après le CNI du cluster). Les Pods maillés reçoivent un
+# conteneur d'initialisation « istio-validation » sans capacité au lieu d'istio-init.
+{% if lab.platform == 'minikube' %}
+# minikube (driver docker) : espaces de noms réseau dans /var/run/docker/netns.
+global:
+  platform: minikube
+{% endif %}
+excludeNamespaces:
+  - kube-system
+resources:
+  requests: {cpu: 20m, memory: 64Mi}

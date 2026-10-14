@@ -9,6 +9,10 @@ version = 3
   # Image "pause" utilisée comme sandbox de chaque Pod.
   sandbox = '{{ container_runtime_sandbox_image }}'
 
+[plugins.'io.containerd.cri.v1.runtime']
+  # SELinux (Rocky) : false = conteneurs non étiquetés (l'hôte reste en enforcing).
+  enable_selinux = {{ (containerd_selinux | bool and k8s_os_family == 'redhat') | lower }}
+
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
   # Même driver cgroup que le kubelet (systemd).
   SystemdCgroup = {{ container_runtime_systemd_cgroup | bool | lower }}

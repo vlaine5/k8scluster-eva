@@ -1,0 +1,105 @@
+---
+# =============================================================================
+#  Installation / synchronisation d'un addon (idempotente) :
+#    namespace (Pod Security) -> secrets (depuis .env) -> manifestes préalables
+#    -> releases Helm (versions verrouillées) -> tâches spécifiques
+#    -> manifestes (server-side apply) -> contrôles de santé -> trace
+# =============================================================================
+
+- name: Use as is the existing (not managed) installation of {{ addon_item.id }}
+  ansible.builtin.debug:
+    msg: "{{ addon_item.id }} is already installed by another tool: used as is (EXISTING_ADDON_POLICY=skip)."
+  when: addon_item.id in addon_skip
+
+- name: Install {{ addon_item.id }}
+  when: addon_item.id not in addon_skip
+  block:
+    - name: Enable the native minikube addon instead of Helm for {{ addon_item.id }}
+      ansible.builtin.command:
+        argv: [minikube, addons, enable, "{{ addon_override.minikube_addon }}", --profile, "{{ cfg.CLUSTER_NAME }}"]
+      register: addon_minikube_enable
+      changed_when: "'is already enabled' not in addon_minikube_enable.stdout"
+      when: addon_override.minikube_addon is defined
+
+    - name: Create with Pod Security labels the namespace {{ addon_install.namespace | default('-') }}
+      kubernetes.core.k8s:
+        kubeconfig: "{{ addon_kubeconfig }}"
+        context: "{{ addon_context }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ addon_install.namespace }}"
+            labels: >-
+              {{ addon_namespace_labels | combine({
+                   'pod-security.kubernetes.io/enforce': addon_install.pod_security | default('baseline'),
+                   'pod-security.kubernetes.io/warn': 'restricted',
+                   'pod-security.kubernetes.io/audit': 'restricted'}) | combine(addon_install.namespace_labels | default({}))
+                 | combine(addon_expose_label) }}
+      vars:
+        # Routes HTTP autorisées sur la Gateway du lab seulement si l'exposition est demandée (*_EXPOSE=true).
+        addon_expose_label: >-
+          {{ {'gateway.k8s-lab.io/expose': 'true'} if (addon_install.expose_setting is defined
+             and cfg[addon_install.expose_setting] | bool) else {} }}
+      when:
+        - addon_override.minikube_addon is not defined
+        - addon_install.namespace is defined
+        - addon_install.namespace not in ['kube-system', 'default']
+
+    - name: Create from .env (values never logged) the secrets of {{ addon_item.id }}
+      ansible.builtin.include_tasks: secret.yml
+      loop: "{{ addon_install.secrets | default([]) }}"
+      loop_control:
+        loop_var: addon_secret
+        label: "{{ addon_secret.namespace }}/{{ addon_secret.name }}"
+      when: addon_override.minikube_addon is not defined
+
+    - name: Apply the prerequisite manifests of {{ addon_item.id }}
+      ansible.builtin.include_tasks: manifest.yml
+      loop: "{{ addon_install.manifests_pre | default([]) }}"
+      loop_control:
+        loop_var: addon_manifest
+      when: addon_override.minikube_addon is not defined
+
+    - name: Install the Helm releases of {{ addon_item.id }}
+      ansible.builtin.include_tasks: helm_release.yml
+      loop: "{{ addon_install.releases | default([]) }}"
+      loop_control:
+        loop_var: addon_release
+        label: "{{ addon_release.namespace }}/{{ addon_release.name }}"
+      when: addon_override.minikube_addon is not defined
+
+    - name: Run the specific tasks of {{ addon_item.id }}
+      ansible.builtin.include_tasks: "{{ addon_dir }}/{{ addon_install.tasks }}"
+      when:
+        - addon_override.minikube_addon is not defined
+        - addon_install.tasks is defined
+
+    - name: Apply the manifests of {{ addon_item.id }}
+      ansible.builtin.include_tasks: manifest.yml
+      loop: "{{ addon_install.manifests | default([]) }}"
+      loop_control:
+        loop_var: addon_manifest
+      when: addon_override.minikube_addon is not defined
+
+    - name: Run the post-install tasks of {{ addon_item.id }}
+      ansible.builtin.include_tasks: "{{ addon_dir }}/{{ addon_install.post_tasks }}"
+      when:
+        - addon_override.minikube_addon is not defined
+        - addon_install.post_tasks is defined
+
+    - name: Check the health of {{ addon_item.id }}
+      ansible.builtin.include_tasks: health.yml
+      loop: "{{ addon_spec.health | default([]) }}"
+      loop_control:
+        loop_var: addon_check
+        label: "{{ addon_check.kind }} {{ addon_check.namespace | default('') }}/{{ addon_check.name }}"
+      vars:
+        addon_health_mode: wait
+      when: addon_health_checks | bool
+
+    - name: Record the installation of {{ addon_item.id }}
+      ansible.builtin.include_tasks: state.yml
+      vars:
+        addon_state_operation: record

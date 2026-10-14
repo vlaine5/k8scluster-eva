@@ -1,0 +1,58 @@
+---
+# =============================================================================
+#  Santé des nœuds kubeadm (complète « make health », qui interroge l'API) :
+#  etcd et quorum, expiration des certificats, services, espace disque, VIP.
+#  Lecture seule.
+# =============================================================================
+
+- name: Check the control-planes
+  hosts: control_plane
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check etcd health and quorum
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: health.yml
+      run_once: true
+
+    - name: Read the certificate expirations
+      ansible.builtin.command:
+        argv: [kubeadm, certs, check-expiration]
+      register: health_certs
+      changed_when: false
+
+    - name: Show the certificate expirations
+      ansible.builtin.debug:
+        msg: "{{ health_certs.stdout_lines | select('search', '(CERTIFICATE|admin.conf|apiserver|etcd|ca )') | list }}"
+
+    - name: Warn about certificates expiring within 30 days
+      ansible.builtin.debug:
+        msg: >-
+          Some certificates expire soon on {{ inventory_hostname }}: renew them with
+          "kubeadm certs renew all" then restart the static Pods (docs/upgrades.md#certificats),
+          or upgrade Kubernetes (kubeadm upgrade renews them).
+      when: health_certs.stdout is search('\s([0-9]|[12][0-9])d\s')
+
+- name: Check every node
+  hosts: k8s_cluster
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check the services
+      ansible.builtin.command:
+        argv: [systemctl, is-active, containerd, kubelet]
+      register: health_services
+      changed_when: false
+      failed_when: health_services.stdout_lines | reject('equalto', 'active') | list | length > 0
+
+    - name: Measure the free space on /var
+      ansible.builtin.command:
+        argv: [df, --output=pcent, /var]
+      register: health_var
+      changed_when: false
+
+    - name: Warn when /var is almost full (image garbage collection, evictions)
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: /var is {{ health_var.stdout_lines[-1] | trim }} full."
+      when: health_var.stdout_lines[-1] | trim | regex_replace('%', '') | int > 80

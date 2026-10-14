@@ -1,0 +1,24 @@
+# StorageClass NFS : un sous-dossier par volume dans l'export existant
+# {{ cfg.NFS_SERVER }}:{{ cfg.NFS_SHARE }} (l'export n'est jamais créé ni modifié).
+# Une StorageClass est immuable (paramètres) : pour changer server/share, supprimez-la
+# puis relancez make addons-apply (les PV existants gardent leurs paramètres).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ cfg.NFS_STORAGE_CLASS }}
+  labels:
+    app.kubernetes.io/managed-by: k8s-lab
+    k8s-lab.io/addon: nfs-csi
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: "{{ cfg.NFS_SERVER }}"
+  share: "{{ cfg.NFS_SHARE }}"
+  subDir: "{{ cfg.NFS_SUBDIR }}"
+reclaimPolicy: {{ cfg.NFS_RECLAIM_POLICY }}
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers={{ cfg.NFS_VERSION }}
+{% for option in cfg.NFS_MOUNT_OPTIONS.split(',') | map('trim') | select | list %}
+  - {{ option }}
+{% endfor %}

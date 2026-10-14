@@ -1,0 +1,23 @@
+id: descheduler
+name: Descheduler
+description: >-
+  Rééquilibrage prudent des Pods (CronJob toutes les 30 minutes) : doublons sur un même nœud,
+  nœuds sous-utilisés. Respecte les PodDisruptionBudget ; namespaces système, volumes persistants
+  et stockage local exclus.
+category: operations
+phase: 8
+components: [descheduler]
+requires:
+  min_workers: 2
+support:
+  default: supported
+validated: [ci-kind]
+resources: {cpu_m: 50, memory_mb: 64}
+install:
+  namespace: kube-system
+  releases:
+    - {name: descheduler, component: descheduler, namespace: kube-system, values: values.yaml.j2, timeout: 5m}
+health:
+  - {kind: CronJob, namespace: kube-system, name: descheduler}
+tests: tests/test.yml
+docs: docs/addons.md#descheduler

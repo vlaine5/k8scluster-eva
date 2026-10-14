@@ -1,0 +1,23 @@
+id: snapshot-controller
+name: CSI Snapshot Controller
+description: >-
+  CRD VolumeSnapshot/VolumeSnapshotContent/VolumeSnapshotClass et contrôleur officiel
+  (kubernetes-csi/external-snapshotter). Utile seulement avec un pilote CSI qui sait faire des
+  instantanés (Longhorn ; NFS CSI par archive).
+category: storage
+phase: 6
+components: [snapshot-controller]
+requires:
+  any_addon: [nfs-csi, longhorn]
+support:
+  default: supported
+  eks: {status: configured, note: "Avec le pilote CSI EBS (non installé par le framework)."}
+validated: [ci-kind]
+install:
+  tasks: tasks/install.yml
+health:
+  - {kind: Deployment, namespace: kube-system, name: snapshot-controller}
+  - {kind: CustomResourceDefinition, name: volumesnapshots.snapshot.storage.k8s.io}
+remove:
+  notes: "Les CRD (et donc les instantanés) sont conservées."
+docs: docs/storage.md#instantanés

@@ -1,0 +1,33 @@
+---
+# Supprime les volumes de test (PVC du namespace de test, PV en politique Delete)
+# puis la StorageClass de test. Ne touche à aucun autre volume.
+- name: Delete the test volumes
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'delete', 'pvc', '--all', '--wait=true', '--timeout=180s'] }}"
+  register: addon_test_pvc_delete
+  changed_when: "'deleted' in addon_test_pvc_delete.stdout"
+  failed_when: false
+
+- name: Wait until the test PersistentVolumes are released
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'pv', '-o',
+           'jsonpath={range .items[?(@.spec.storageClassName==\"' ~ addon_test_sc_name ~ '\")]}{.metadata.name} {end}'] }}"
+  register: addon_test_pv_left
+  changed_when: false
+  until: addon_test_pv_left.stdout | trim | length == 0
+  retries: 30
+  delay: 10
+  failed_when: false
+
+- name: Report test volumes that could not be deleted
+  ansible.builtin.debug:
+    msg: "Test volumes still present (check the CSI driver): {{ addon_test_pv_left.stdout }}"
+  when: addon_test_pv_left.stdout | default('') | trim | length > 0
+
+- name: Delete the test StorageClass
+  kubernetes.core.k8s:
+    kubeconfig: "{{ addon_kubeconfig }}"
+    context: "{{ addon_context }}"
+    state: absent
+    kind: StorageClass
+    name: "{{ addon_test_sc_name }}"

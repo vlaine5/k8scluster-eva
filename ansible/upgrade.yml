@@ -1,0 +1,114 @@
+---
+# =============================================================================
+#  Mise à niveau CONTRÔLÉE de Kubernetes (kubeadm), une mineure à la fois.
+#  ./k8s-lab upgrade la lance après « make upgrade-plan » et confirmation.
+#
+#    1. contrôles : confirmation, version cible = mineure actuelle ou +1,
+#       santé du cluster (nœuds, etcd)
+#    2. instantané etcd rapatrié sur votre poste
+#    3. control-planes un par un (le 1er : kubeadm upgrade apply)
+#    4. workers un par un (drain / uncordon)
+#    5. vérification finale
+#
+#    cd ansible
+#    ansible-playbook -i inventories/<inv>.ini upgrade.yml -e @vars.json -e upgrade_confirm=<nom-du-cluster>
+#  Les addons et le système d'exploitation ont leurs propres procédures (docs/upgrades.md).
+# =============================================================================
+
+- name: Check the upgrade request and the cluster health
+  hosts: control_plane[0]
+  become: true
+  gather_facts: true
+  vars:
+    upgrade_confirm: ""
+  tasks:
+    - name: Refuse to run without an explicit confirmation (the cluster name)
+      ansible.builtin.assert:
+        that: upgrade_confirm == k8s_cluster_name
+        fail_msg: "Re-run with -e upgrade_confirm={{ k8s_cluster_name }} to upgrade the cluster to {{ kubernetes_version }}."
+        quiet: true
+
+    - name: Read the current control-plane version
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, version, -o, json]
+      register: upgrade_current
+      changed_when: false
+
+    - name: Check the version skew policy (one minor version at a time, never down)
+      ansible.builtin.assert:
+        that:
+          - upgrade_target_version is version(upgrade_current_version, '>=')
+          - (upgrade_target_minor.split('.')[1] | int) - (upgrade_current_version.split('.')[1] | int) in [0, 1]
+        fail_msg: >-
+          Cannot upgrade from {{ upgrade_current_version }} to {{ upgrade_target_version }}: kubeadm supports one minor
+          version at a time and no downgrade (https://kubernetes.io/releases/version-skew-policy/).
+        quiet: true
+      vars:
+        upgrade_current_version: "{{ (upgrade_current.stdout | from_json).serverVersion.gitVersion | regex_replace('^v', '') }}"
+        upgrade_target_version: "{{ kubernetes_version }}"
+        upgrade_target_minor: "{{ kubernetes_version.split('.')[0:2] | join('.') }}"
+
+    - name: Check that every node is Ready before starting
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, wait, --for=condition=Ready, nodes, --all, --timeout=60s]
+      changed_when: false
+
+    - name: Take an etcd snapshot before touching anything
+      ansible.builtin.include_role:
+        name: etcd
+        tasks_from: snapshot.yml
+
+- name: Upgrade the control-planes, one at a time
+  hosts: control_plane
+  become: true
+  gather_facts: true
+  serial: 1
+  tasks:
+    - name: Upgrade this control-plane
+      ansible.builtin.include_role:
+        name: upgrade
+        tasks_from: node.yml
+
+# Après kubeadm upgrade apply, l'API peut encore redémarrer pendant que les
+# contrôleurs, kubelet et etcd convergent. Attendre /readyz avant les workers
+# au lieu de supposer que le premier "node Ready" suffit.
+- name: Wait for the API to recover after upgrading the control-planes
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait until the Kubernetes API reports Ready
+      ansible.builtin.command:
+        argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, --request-timeout=10s, get, --raw=/readyz]
+      register: upgrade_api_ready
+      until: upgrade_api_ready.rc == 0 and (upgrade_api_ready.stdout | trim) == 'ok'
+      retries: 60
+      delay: 5
+      changed_when: false
+
+- name: Upgrade the workers, one at a time
+  hosts: workers
+  become: true
+  gather_facts: true
+  serial: 1
+  tasks:
+    - name: Upgrade this worker
+      ansible.builtin.include_role:
+        name: upgrade
+        tasks_from: node.yml
+
+- name: Verify the upgraded cluster
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Verify the cluster
+      ansible.builtin.include_role:
+        name: control_plane
+        tasks_from: verify.yml
+
+    - name: Report the upgrade
+      ansible.builtin.debug:
+        msg: >-
+          Kubernetes upgraded to {{ kubernetes_version }} on every node. Remember: addons are upgraded separately
+          (make addons-plan / make addons-upgrade), the OS too (make os-update).

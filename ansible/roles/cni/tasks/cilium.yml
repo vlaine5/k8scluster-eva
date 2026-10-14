@@ -1,0 +1,78 @@
+---
+# Cilium (eBPF) : chart Helm officiel. Selon la configuration résolue :
+#   - remplacement de kube-proxy (KUBE_PROXY_MODE=cilium) : kubeadm n'a pas
+#     déployé kube-proxy et Cilium joint l'API par k8sServiceHost/Port ;
+#   - Hubble (+ Relay, + UI), Gateway API, LB IPAM avec annonces L2 ou BGP.
+# Prérequis eBPF : noyau >= 5.10 (RHEL/Rocky 9 : 5.14 avec rétroportages).
+- name: Read the kernel version
+  ansible.builtin.set_fact:
+    cni_kernel: "{{ ansible_facts['kernel'] | default('0') | regex_search('^[0-9]+\\.[0-9]+') }}"
+
+- name: Check the kernel requirement of Cilium
+  ansible.builtin.assert:
+    that: >-
+      cni_kernel is version(lab_lock.components.cilium.kernel_min | default('5.10'), '>=')
+      or ansible_facts['os_family'] | default('') == 'RedHat'
+    fail_msg: >-
+      Cilium {{ k8s_cni_version }} needs a Linux kernel >= {{ lab_lock.components.cilium.kernel_min }} with eBPF
+      ({{ inventory_hostname }} runs {{ ansible_facts['kernel'] | default('?') }}). Choose another CNI or OS.
+    quiet: true
+  when: ansible_facts['kernel'] is defined
+
+- name: Check that the kube-proxy replacement has the API endpoint
+  ansible.builtin.assert:
+    that: kube_proxy_mode != 'cilium' or cni_api_host | length > 0
+    fail_msg: "kube-proxy replacement needs the API address (k8sServiceHost): none was resolved."
+    quiet: true
+
+- name: Install Cilium {{ k8s_cni_version }}
+  kubernetes.core.helm:
+    name: cilium
+    chart_ref: "{{ lab_lock.components.cilium.chart }}"
+    chart_repo_url: "{{ lab_lock.components.cilium.repo }}"
+    chart_version: "{{ k8s_cni_version }}"
+    release_namespace: kube-system
+    values: "{{ lookup('ansible.builtin.template', 'cilium-values.yaml.j2') | from_yaml }}"
+    binary_path: "{{ cni_helm_binary }}"
+    kubeconfig: "{{ cni_kubeconfig }}"
+    wait: false
+    timeout: 10m0s
+
+- name: Wait for Cilium, with a diagnosis when it does not start
+  block:
+    # Opérateur : 2 réplicas sur des nœuds distincts, mais seul le 1er control-plane existe
+    # à ce stade (les autres nœuds rejoignent après le CNI) : on attend qu'il soit
+    # disponible (1 réplica suffit), pas la fin du déploiement, qui viendra avec les nœuds.
+    - name: Wait for the Cilium agents and operator
+      ansible.builtin.command:
+        argv: "{{ ['kubectl', '--kubeconfig=' ~ cni_kubeconfig, '-n', 'kube-system'] + item }}"
+      loop: >-
+        {{ [['rollout', 'status', 'daemonset/cilium', '--timeout=600s'],
+            ['wait', '--for=condition=Available', 'deployment/cilium-operator', '--timeout=600s']]
+           + ([['rollout', 'status', 'deployment/hubble-relay', '--timeout=600s']] if hubble.enabled | default(false) else []) }}
+      loop_control:
+        label: "{{ item[2] }}"
+      changed_when: false
+  rescue:
+    - name: Collect the state of the Cilium Pods (diagnosis)
+      ansible.builtin.command:
+        argv: "{{ ['kubectl', '--kubeconfig=' ~ cni_kubeconfig, '-n', 'kube-system'] + item }}"
+      loop:
+        - [get, pods, -o, wide, -l, "k8s-app in (cilium, cilium-operator)"]
+        - [describe, pods, -l, k8s-app=cilium]
+        - [logs, -l, k8s-app=cilium, --all-containers, --tail=40, --prefix]
+        - [logs, -l, io.cilium/app=operator, --tail=40, --prefix]
+      register: cni_cilium_diag
+      changed_when: false
+      failed_when: false
+
+    - name: Show the diagnosis
+      ansible.builtin.debug:
+        msg: "{{ cni_cilium_diag.results | map(attribute='stdout_lines') | flatten | select | list | to_nice_yaml }}"
+
+    - name: Fail after the diagnosis
+      ansible.builtin.fail:
+        msg: >-
+          Cilium did not become ready (see the diagnosis above: Pod events and agent logs). Common causes: the API
+          endpoint {{ cni_api_host }}:{{ cni_api_port }} unreachable from the nodes (kube-proxy replacement), a kernel
+          without the required eBPF features, or the bpffs/cgroup2 mounts. docs/cni.md#depannage

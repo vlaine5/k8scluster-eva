@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: storage_disk
+  author: k8s-lab
+  description: Safely identify, format (blank disks only) and mount the dedicated Longhorn disk
+  license: MIT
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions: [noble]
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

@@ -142,7 +142,8 @@ des sous-réseaux privés et un rôle IAM dédié au réseau des Pods (Pod Ident
 
 EKS a son propre calendrier : chaque version y est proposée quelques semaines après sa sortie,
 puis supportée 14 mois (support standard). Le lab utilise donc `EKS_KUBERNETES_VERSION`
-(1.36), distincte de `KUBERNETES_VERSION` des modes kubeadm (1.37). Liste à jour :
+(1.36), indépendante de `KUBERNETES_VERSION` des modes kubeadm (les deux peuvent différer).
+Liste à jour :
 <https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html>. Le cluster est
 configuré pour être mis à jour par AWS en fin de support standard plutôt que de passer en
 support étendu, facturé en supplément.

@@ -1,0 +1,10 @@
+# Node Feature Discovery : étiquettes des capacités matérielles et logicielles des nœuds
+# (CPU, noyau, PCI...), utilisables dans les nodeSelector/affinités.
+master:
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+worker:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+prometheus:
+  enable: {{ 'prometheus-operator-crds' in lab_addon_ids }}
