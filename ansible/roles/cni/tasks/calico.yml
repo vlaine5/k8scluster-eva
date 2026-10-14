@@ -76,7 +76,7 @@
   rescue:
     - name: Collect the state of Calico (diagnosis)
       ansible.builtin.command:
-        argv: "{{ [kubectl, '--kubeconfig=' ~ cni_kubeconfig] + item }}"
+        argv: "{{ ['kubectl', '--kubeconfig=' ~ cni_kubeconfig] + item }}"
       loop:
         - [get, tigerastatus, -o, wide]
         - [get, tigerastatus, calico, -o, "jsonpath={range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{'\\n'}{end}"]

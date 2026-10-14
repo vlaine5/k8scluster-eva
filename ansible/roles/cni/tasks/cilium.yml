@@ -40,15 +40,23 @@
 
 - name: Wait for Cilium, with a diagnosis when it does not start
   block:
+    # Opérateur : 2 réplicas sur des nœuds distincts, mais seul le 1er control-plane existe
+    # à ce stade (les autres nœuds rejoignent après le CNI) : on attend qu'il soit
+    # disponible (1 réplica suffit), pas la fin du déploiement, qui viendra avec les nœuds.
     - name: Wait for the Cilium agents and operator
       ansible.builtin.command:
-        argv: [kubectl, "--kubeconfig={{ cni_kubeconfig }}", -n, kube-system, rollout, status, "{{ item }}", --timeout=600s]
-      loop: "{{ ['daemonset/cilium', 'deployment/cilium-operator'] + (['deployment/hubble-relay'] if hubble.enabled | default(false) else []) }}"
+        argv: "{{ ['kubectl', '--kubeconfig=' ~ cni_kubeconfig, '-n', 'kube-system'] + item }}"
+      loop: >-
+        {{ [['rollout', 'status', 'daemonset/cilium', '--timeout=600s'],
+            ['wait', '--for=condition=Available', 'deployment/cilium-operator', '--timeout=600s']]
+           + ([['rollout', 'status', 'deployment/hubble-relay', '--timeout=600s']] if hubble.enabled | default(false) else []) }}
+      loop_control:
+        label: "{{ item[2] }}"
       changed_when: false
   rescue:
     - name: Collect the state of the Cilium Pods (diagnosis)
       ansible.builtin.command:
-        argv: "{{ [kubectl, '--kubeconfig=' ~ cni_kubeconfig, '-n', 'kube-system'] + item }}"
+        argv: "{{ ['kubectl', '--kubeconfig=' ~ cni_kubeconfig, '-n', 'kube-system'] + item }}"
       loop:
         - [get, pods, -o, wide, -l, "k8s-app in (cilium, cilium-operator)"]
         - [describe, pods, -l, k8s-app=cilium]
