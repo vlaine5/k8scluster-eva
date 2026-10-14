@@ -117,6 +117,12 @@ le catalogue : elle ne mentionne que les environnements effectivement couverts.
 Index complet : [docs/README.md](docs/README.md) — architecture, guides par mode,
 configuration, addons, exploitation, dépannage, [migration](docs/migration.md).
 
+## Contribuer, sécurité et versions
+
+- [Contribuer au framework](CONTRIBUTING.md) : architecture, ajouts d'addons, tests et PR.
+- [Signaler une vulnérabilité](SECURITY.md) : canal privé et protection des secrets.
+- [Journal des changements](CHANGELOG.md) : évolutions, limites et politique de release.
+
 ## Licence
 
 [MIT](LICENSE).
