@@ -242,7 +242,7 @@ Cette section est **générée** depuis `config/schema.yaml` et `config/lab.env`
 | `BACKUP_RETENTION_DAYS` | `7` | int (1…3650) | Rétention des sauvegardes (jours). |
 | `VELERO_S3_URL` | *(vide)* | url | URL S3-compatible de Velero. |
 | `VELERO_BUCKET` | *(vide)* | string | Bucket Velero. |
-| `VELERO_REGION` | `minio` | string | Région S3. |
+| `VELERO_REGION` | `us-east-1` | string | Région S3. |
 | `VELERO_FS_BACKUP` | `true` | bool | Sauvegarde des volumes par copie de fichiers. |
 | `UPGRADE_POLICY` | `patch` | `patch` · `minor` | Mises à jour proposées. |
 | `ENABLE_HEALTHCHECKS` | `true` | bool | Contrôles de santé après déploiement. |
