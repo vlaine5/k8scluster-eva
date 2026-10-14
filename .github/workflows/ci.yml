@@ -313,6 +313,17 @@ jobs:
           path: diag
           retention-days: 7
 
+      # Le serveur NFS de test tourne dans le NOYAU (nfsd) depuis un nœud kind : tant qu'il
+      # exporte, Docker ne peut pas tuer ce nœud (« did not receive an exit event ») et
+      # make destroy échoue. Son arrêt normal (SIGTERM : rpc.nfsd 0, exportfs -ua) le libère.
+      - name: Arrêt des services de test (NFS, S3) avant la destruction
+        if: always() && matrix.scenario == 'kind-traefik-storage'
+        run: |
+          export KUBECONFIG="$PWD/.kube/config"
+          if ! kubectl delete namespace nfs-test s3-test --ignore-not-found --wait --timeout=180s; then
+            echo "::warning::Les services de test NFS/S3 ne se sont pas arrêtés : make destroy peut échouer."
+          fi
+
       - name: make destroy YES=1
         if: always()
         run: make destroy YES=1
