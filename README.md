@@ -101,13 +101,13 @@ addons et exécute leurs tests fonctionnels à chaque push.
 | --- | --- |
 | Résolveur, catalogue, rendu de chaque addon et des rôles kubeadm (helm template, Pod Security), Terraform (tests avec API simulées), Ansible (lint) | testés en CI (statique) |
 | kind, minikube (commandes des guides) | testés en CI |
-| kind + addons : sécurité (Kyverno enforce, Falco, Trivy, Istio), Cilium sans kube-proxy (Gateway, LB L2, Hubble, Tetragon), observabilité (Prometheus, Grafana, Loki, Tempo, OpenTelemetry), réseau (Envoy Gateway, MetalLB, cert-manager, External Secrets, Reloader) | **testés en CI** : déploiement, tests fonctionnels, état, 2e installation sans changement |
-| kind + addons : stockage (NFS CSI, snapshots, Velero, Argo CD, KEDA, Descheduler, NFD) | en cours de validation en CI (corrections : identifiants et région S3 de Velero, politique du Descheduler, image redis d'Argo CD) |
+| kind + addons : sécurité (Kyverno enforce, Falco, Trivy, Istio), Cilium sans kube-proxy (Gateway, LB L2, Hubble, Tetragon), observabilité (Prometheus, Grafana, Loki, Tempo, OpenTelemetry), réseau (Envoy Gateway, MetalLB, cert-manager, External Secrets, Reloader), stockage et exploitation (Traefik, NFS CSI, snapshots, Velero, Argo CD, KEDA, Descheduler, NFD) | **testés en CI** : déploiement, tests fonctionnels, état, 2e installation sans changement |
 | mode attach (refus de reprendre un composant d'un autre outil, `skip`, idempotence, destroy refusé) | **testé en CI** |
 | kubeadm sur nœuds conteneurs (mode existing) : Ubuntu 24.04/26.04, Debian 12/13, Rocky 9/10 ; Flannel, Calico (Debian 12) ; HA 3 control-planes avec kube-vip et Cilium sans kube-proxy ; restauration etcd (Ubuntu 24.04) | **testés en CI** : contrôles préalables, installation, 2e déploiement sans changement, test nginx + Service + DNS |
-| kubeadm : mise à niveau 1.36 → 1.37 | installation validée ; correction de la mise à niveau en cours de validation |
+| kubeadm : mise à niveau 1.36 → 1.37 (`make upgrade-plan`, `make upgrade`) | **testée en CI** : tous les nœuds en 1.37, etcd sain après la mise à niveau |
 | Vagrant, Proxmox, vSphere, libvirt, EKS | **validés statiquement uniquement** : aucun déploiement réel par la CI |
 | Longhorn (disques, réplicas, perte de nœud) | rendu vérifié ; nécessite des VMs (non testé en CI) |
+| ExternalDNS | rendu vérifié ; aucun serveur DNS de test (non testé en CI) |
 
 La colonne « Testé en CI » de [compatibility.md](docs/compatibility.md) est générée depuis
 le catalogue : elle ne mentionne que les environnements effectivement couverts.
