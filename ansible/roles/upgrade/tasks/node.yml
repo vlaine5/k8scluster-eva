@@ -15,6 +15,12 @@
            -o, "jsonpath={.status.nodeInfo.kubeletVersion}"]
   delegate_to: "{{ k8s_control_plane_host }}"
   register: upgrade_node_version
+  # Le redémarrage des Pods statiques (API, etcd) après la mise à niveau du
+  # control-plane peut provoquer un bref refus de connexion. Une lecture
+  # transitoirement indisponible ne doit pas interrompre la suite des workers.
+  until: upgrade_node_version.rc == 0 and upgrade_node_version.stdout | length > 0
+  retries: 30
+  delay: 5
   changed_when: false
 
 - name: Upgrade the node
