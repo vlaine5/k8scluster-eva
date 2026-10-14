@@ -96,7 +96,7 @@ Notes :
 <!-- BEGIN GENERATED: os -->
 | Distribution | Version | Statut | Noyau | CPU x86-64 minimal | Testé en CI | Image épinglée |
 | --- | --- | --- | --- | --- | --- | --- |
-| ubuntu | 24.04 | supported | 6.8 | v1 | non | `ubuntu-24.04-server-cloudimg-amd64.img` |
+| ubuntu | 24.04 | supported | 6.8 | v1 | oui (kubeadm-in-docker) | `ubuntu-24.04-server-cloudimg-amd64.img` |
 | ubuntu | 26.04 | experimental | 7.0 | v1 | oui (kubeadm-in-docker) | `ubuntu-26.04-server-cloudimg-amd64.img` |
 | debian | 12 | supported | 6.1 | v1 | oui (kubeadm-in-docker) | `debian-12-generic-amd64-20261006-2623.qcow2` |
 | debian | 13 | supported | 6.12 | v1 | oui (kubeadm-in-docker) | `debian-13-generic-amd64-20261001-2618.qcow2` |
