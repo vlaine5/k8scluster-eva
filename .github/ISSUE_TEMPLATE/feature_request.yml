@@ -1,0 +1,46 @@
+name: Proposer une fonctionnalité
+description: Proposer un addon, un provider, une amélioration du CLI ou de la documentation
+title: "feat: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de préciser le besoin et le contexte d'utilisation.
+        Le framework privilégie la compatibilité, l'idempotence et la reproductibilité.
+  - type: textarea
+    id: need
+    attributes:
+      label: Problème à résoudre
+      description: Décrivez le besoin avant la solution proposée
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposition
+      description: Interface .env, nouveau mode/addon, limites et dépendances
+    validations:
+      required: true
+  - type: dropdown
+    id: modes
+    attributes:
+      label: Portée estimée
+      options:
+        - Tous les modes
+        - Modes kubeadm (VM et existing)
+        - Modes locaux (kind/minikube)
+        - Cluster existant (attach)
+        - Provider Terraform
+        - Documentation uniquement
+        - À déterminer
+  - type: textarea
+    id: tests
+    attributes:
+      label: Critères d'acceptation et tests possibles
+      description: Comment démontrer que cette fonction marche réellement ?
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Contraintes
+      options:
+        - label: Cette proposition doit rester optionnelle pour les profils minimaux.
