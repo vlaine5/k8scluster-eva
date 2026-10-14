@@ -59,6 +59,18 @@
   register: node_prereqs_multipathd
   when: "'iscsid' in node_prereqs.services | default([])"
 
+- name: Create the multipath configuration directory (lab VMs only)
+  ansible.builtin.file:
+    path: /etc/multipath/conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - "'iscsid' in node_prereqs.services | default([])"
+    - node_prereqs_multipathd.stat.exists | default(false)
+    - lab_platform != 'existing'
+
 - name: Exclude the Longhorn devices from multipath (lab VMs only)
   ansible.builtin.copy:
     dest: /etc/multipath/conf.d/k8s-lab-longhorn.conf

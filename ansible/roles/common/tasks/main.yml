@@ -95,6 +95,15 @@
       Load the module (modprobe br_netfilter) or use a kernel that includes it.
     quiet: true
 
+# Absent de certaines images minimales (Rocky 9/10) : le module sysctl y écrit.
+- name: Create the directory of the kernel parameters
+  ansible.builtin.file:
+    path: /etc/sysctl.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Configure the kernel network parameters required by Kubernetes
   ansible.posix.sysctl:
     name: "{{ item.key }}"
