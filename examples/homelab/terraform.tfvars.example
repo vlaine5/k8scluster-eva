@@ -15,12 +15,16 @@ longhorn_datastore = "local-lvm"
 # vmbr0 est déjà sur le VLAN 20 : surtout PAS de vlan_id.
 network_bridge = "vmbr0"
 
-# 10.20.0.100 = k8s-cp-1, 10.20.0.101-103 = k8s-worker-1..3.
+# 1) Reseau REEL du VLAN : le /16 sera configure sur CHAQUE VM.
 network_cidr = "10.20.0.0/16"
-ip_start     = 100
-# Pour placer les noeuds en 10.20.50.x avec un masque /16 :
-# node_ip_cidr = "10.20.50.0/24"
-# ip_start = 10
+# 2) Optionnel : les trois premiers nombres des IP des noeuds.
+#    "10.20.50" ne signifie PAS un /24 ! Les VM auront bien /16.
+#    Sans ce parametre, les IP commencent a 10.20.0.x.
+node_ip_prefix = "10.20.50"
+# 3) Dernier nombre de la premiere IP :
+#    cp-1=10.20.50.10/16, worker-1=.11/16, worker-2=.12/16, worker-3=.13/16.
+#    Reserver ces IP hors de la plage DHCP avant le deploiement.
+ip_start = 10
 gateway      = "10.20.0.1"
 # À VALIDER : serveur(s) DNS du VLAN 20.
 dns_servers  = ["10.20.0.1"]
