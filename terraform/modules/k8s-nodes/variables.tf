@@ -41,6 +41,12 @@ variable "network_cidr" {
   }
 }
 
+variable "node_ip_cidr" {
+  description = "Optional IPv4 subnet used for node addresses, within network_cidr."
+  type = string
+  default = null
+}
+
 variable "ip_start" {
   description = "Host number of the first control-plane inside network_cidr (e.g. 100 -> 192.168.1.100)."
   type        = number
@@ -55,7 +61,7 @@ variable "ip_start" {
   validation {
     condition = !can(cidrhost(var.network_cidr, 0)) || (
       var.ip_start + max(var.control_plane_count, coalesce(var.worker_ip_offset, var.control_plane_count) + var.worker_count)
-      < pow(2, 32 - tonumber(split("/", var.network_cidr)[1])) - 1
+      < pow(2, 32 - tonumber(split("/", coalesce(var.node_ip_cidr, var.network_cidr))[1])) - 1
     )
     error_message = "network_cidr is too small for the control-planes and workers starting at ip_start."
   }
