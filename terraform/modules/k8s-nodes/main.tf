@@ -12,6 +12,7 @@
 
 locals {
   prefix_length    = tonumber(split("/", var.network_cidr)[1])
+  address_cidr     = coalesce(var.node_ip_cidr, var.network_cidr)
   gateway          = coalesce(var.gateway, cidrhost(var.network_cidr, 1))
   worker_ip_offset = coalesce(var.worker_ip_offset, var.control_plane_count)
 
@@ -38,8 +39,8 @@ locals {
   # Map nom -> description complète du nœud (utilisée avec for_each).
   nodes = {
     for n in concat(local.control_planes, local.workers) : n.name => merge(n, {
-      ip            = cidrhost(var.network_cidr, var.ip_start + n.ip_offset)
-      address       = "${cidrhost(var.network_cidr, var.ip_start + n.ip_offset)}/${local.prefix_length}"
+      ip            = cidrhost(local.address_cidr, var.ip_start + n.ip_offset)
+      address       = "${cidrhost(local.address_cidr, var.ip_start + n.ip_offset)}/${local.prefix_length}"
       longhorn_disk = var.longhorn_disk_gb > 0 && n.role == local.storage_role
     })
   }
