@@ -45,6 +45,16 @@ variable "node_ip_cidr" {
   description = "Optional IPv4 subnet used for node addresses, within network_cidr."
   type = string
   default = null
+
+  validation {
+    condition = var.node_ip_cidr == null ? true : (
+      can(cidrhost(var.node_ip_cidr, 0)) &&
+      !strcontains(var.node_ip_cidr, ":") &&
+      tonumber(split("/", var.node_ip_cidr)[1]) >= tonumber(split("/", var.network_cidr)[1]) &&
+      cidrhost(var.network_cidr, 0) == cidrhost(format("%s/%s", split("/", var.node_ip_cidr)[0], split("/", var.network_cidr)[1]), 0)
+    )
+    error_message = "node_ip_cidr must be an IPv4 subnet contained in network_cidr."
+  }
 }
 
 variable "ip_start" {
