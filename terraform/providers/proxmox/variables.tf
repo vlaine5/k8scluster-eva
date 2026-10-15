@@ -223,14 +223,19 @@ variable "network_cidr" {
   type        = string
 }
 
-variable "node_ip_cidr" {
-  description = "Optional IPv4 subnet used for node IP allocation, e.g. 10.20.50.0/24 within 10.20.0.0/16."
-  type = string
-  default = null
+# Optionnel : trois premiers octets des adresses IP des VM.
+# Exemple : network_cidr="10.20.0.0/16", node_ip_prefix="10.20.50", ip_start=10
+# -> VM 10.20.50.10/16, puis 10.20.50.11/16, etc.
+# Ce parametre NE change PAS le masque reseau des VM (/16 ici).
+# Sans cette option, les IP sont calculees depuis network_cidr comme avant.
+variable "node_ip_prefix" {
+  description = "Optional first three octets of node IPs (e.g. 10.20.50); VM mask still comes from network_cidr."
+  type        = string
+  default     = null
 }
 
 variable "ip_start" {
-  description = "Host number of the first control-plane in network_cidr (100 -> x.x.x.100)."
+  description = "Last octet of the first control-plane when node_ip_prefix is set (10 -> 10.20.50.10)."
   type        = number
   default     = 100
 }
