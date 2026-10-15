@@ -46,14 +46,18 @@ Mémoire allouée : 16 Gio sur 188.
    l'API, [high-availability.md](high-availability.md)).
 4. Complétez `RESERVED_IPS` (plage DHCP du VLAN 20) et `RESERVED_CIDRS` (tous les réseaux
    du homelab) dans `.env` : le résolveur refusera tout chevauchement.
-5. DNS : choisissez le serveur pour `dns_servers` (`terraform.tfvars`) ; l'exemple utilise la
-   passerelle.
+5. DNS : `dns_servers = ["10.20.0.30"]` dans l’exemple. Vérifiez que cette IP héberge
+   réellement un service DNS avant le premier déploiement.
 
 ## 2. Préparer Proxmox **[modifie Proxmox, à la main]**
 
 Sur `pv05` (shell root ou interface web) :
 
-1. *Datacenter → Storage → local → Edit → Content* : cochez **Import**.
+1. Pour `image_datastore`, choisissez un stockage **fichier** qui accepte `Import`
+   (ex. *Datacenter → Storage → local → Edit → Content* : cochez **Import**).
+   Attention : un stockage Proxmox de type **zfspool** ne permet généralement pas
+   d’y télécharger le fichier image cloud via `proxmox_download_file`.
+   Vérifiez également `Store` (disques système) et `VM-ZFS` (Longhorn).
 2. Créez un utilisateur et un token **dédiés**, avec le rôle minimal décrit dans
    [deploy-proxmox.md](deploy-proxmox.md#2-configurer) (`pveum role add K8sLab ...`,
    `pveum user token add terraform@pve k8s-lab --privsep 0`). Notez le secret, affiché une
@@ -68,7 +72,7 @@ configure jamais le NAS ni le pare-feu.
 
 1. DSM → *Panneau de configuration → Services de fichiers → NFS* : activez NFS, protocole
    maximal **NFSv4.1**.
-2. Dossier partagé dédié `kubernetes` (chemin à confirmer sur le NAS) → *Autorisations NFS* :
+2. Dossier partagé `/volume1/kubevolume` (chemin exact à confirmer sur le NAS) → *Autorisations NFS* :
    créer des règles **pour les seules IP des nœuds** `10.20.50.10-13`, en lecture/écriture,
    et vérifier les options d'export proposées par DSM. **Conserver le root squashing si
    possible.** Le NFS CSI doit pouvoir créer ses sous-dossiers ; tester une création de PVC
@@ -133,7 +137,7 @@ make deploy
    refusez-le s'il n'est pas attendu. Rien n'est créé avant votre « o ».
 2. Terraform crée les VMs après votre confirmation.
 3. Ansible : contrôles préalables en lecture seule (OS, ressources, ports,
-   disques), préparation des nœuds, containerd, kubeadm, Flannel, disques Longhorn (formatés
+   disques), préparation des nœuds, containerd, kubeadm, Cilium, disques Longhorn (formatés
    seulement s'ils sont vides et créés par le lab), puis jonction des workers.
 4. Addons, contrôles de santé, puis tests fonctionnels.
 
@@ -194,7 +198,7 @@ puis les redémarre toujours ([storage-longhorn.md](storage-longhorn.md#tests)).
 make destroy                                      # supprime les 4 VMs (confirmation)
 ```
 
-Restent en place : les données du NAS (`/volume1/kubernetes`), les sauvegardes, l'image
+Restent en place : les données du NAS (`/volume1/kubevolume`), les sauvegardes, l'image
 cloud dans `local` (réutilisée au prochain déploiement). Les disques Longhorn sont supprimés
 avec les VMs : sauvegardez d'abord les volumes utiles.
 
@@ -202,9 +206,9 @@ avec les VMs : sauvegardez d'abord les volumes utiles.
 
 - [ ] IP des nœuds et pool LoadBalancer réservés, `RESERVED_IPS` / `RESERVED_CIDRS` complétés
 - [ ] Token Proxmox dédié, secret uniquement dans `.env`
-- [ ] Contenu « Import » sur `local`, pas de `vlan_id`
+- [ ] Stockage `image_datastore` compatible **Import** ; `Store`/`VM-ZFS` ont assez d’espace ; pas de `vlan_id`
 - [ ] Export NFS, règles et flux TCP 2049 validés (ou NFS retiré)
-- [ ] `make doctor`, `make config`, `make addons-plan` sans erreur
+- [ ] `make doctor`, `make config`, `make validate`, `make plan` réussis avant `make deploy`
 - [ ] Plan Terraform relu avant confirmation
 - [ ] `make test`, `make addons-test`, `make health` réussis
 - [ ] Entrée DNS de la Gateway créée, CA interne importée
