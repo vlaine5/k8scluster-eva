@@ -33,6 +33,7 @@ module "nodes" {
   control_plane_count = var.control_plane_count
   worker_count        = var.worker_count
   network_cidr        = var.network_cidr
+  node_ip_cidr        = var.node_ip_cidr
   ip_start            = var.ip_start
   worker_ip_offset    = var.worker_ip_offset
   gateway             = var.gateway
