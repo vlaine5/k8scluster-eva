@@ -3,7 +3,7 @@
 #     kubernetes.core : addons installés par l'API depuis votre poste)
 #   - qualité et tests : ansible-lint, yamllint, pytest
 # ansible-core 2.20+ nécessite Python >= 3.12.
-ansible-core==2.21.4
+ansible-core==2.21.5
 PyYAML==6.0.3
 kubernetes==36.0.3
 ansible-lint==26.9.0
