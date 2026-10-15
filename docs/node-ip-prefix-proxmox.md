@@ -55,20 +55,47 @@ git switch feature/node-ip-subnet
 
 Ne pas utiliser `git clean -fdx` : cela pourrait supprimer des fichiers locaux.
 
-### 4. Verifier avant tout deploiement
+### 4. Previsualiser les quatre adresses
 
 ```bash
 source .venv/bin/activate
 make doctor MODE=terraform PROVIDER=proxmox
+make config MODE=terraform PROVIDER=proxmox
 make validate MODE=terraform PROVIDER=proxmox
 ```
 
-Attention : la commande `make config` peut encore afficher des IP calculees
-sans tenir compte de `node_ip_prefix`. Ne pas se fier a cet affichage pour
-valider les IP finales : inspecter le plan Terraform avant de lancer
-`make deploy`. Aucun deploiement ne doit etre lance sans cette verification.
+Avec `WORKER_COUNT=3` dans `.env`, la partie **Noeuds prevus** de
+`make config` doit afficher :
+- `k8s-cp-1` : `10.20.50.10`
+- `k8s-worker-1` : `10.20.50.11`
+- `k8s-worker-2` : `10.20.50.12`
+- `k8s-worker-3` : `10.20.50.13`
 
-### 5. Points de controle
+### 5. Afficher le VRAI plan Terraform, sans creer de VM
+
+```bash
+make plan MODE=terraform PROVIDER=proxmox
+```
+
+Cette commande transmet automatiquement les parametres de `.env` et de
+`terraform.tfvars` a Terraform, puis lance `terraform plan` **sans
+`terraform apply`**. Aucune VM n'est creee ou modifiee.
+
+Controlez le plan : quatre VM, adresses `10.20.50.10/16` a
+`10.20.50.13/16`, CPU, memoire, stockage et **aucune destruction imprevue**.
+Si le plan propose une destruction ou ne correspond pas a vos attentes,
+**ne lancez pas `make deploy`**.
+
+### 6. Deployez seulement apres avoir controle le plan
+
+```bash
+make deploy MODE=terraform PROVIDER=proxmox
+```
+
+Cette commande demande confirmation avant `terraform apply`.
+Contrairement a `make plan`, elle peut effectivement creer les VM.
+
+### 7. Points de controle
 
 - Le bridge Proxmox pointe bien vers le VLAN voulu.
 - La passerelle et le DNS sont accessibles depuis les futures VM.
