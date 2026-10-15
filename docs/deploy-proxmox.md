@@ -77,10 +77,26 @@ ip_start       = 100              # .100 = control-plane, .101 et .102 = workers
 La passerelle par défaut est la première adresse du réseau (ici `192.168.1.1`) ; sinon,
 réglez `gateway` dans le même fichier.
 
+**VLAN en /16 avec des IP regroupées en 10.20.50.x :**
+
+```hcl
+network_cidr   = "10.20.0.0/16"  # masque REEL des interfaces VM
+node_ip_prefix = "10.20.50"     # trois premiers octets des IP, sans /24
+ip_start       = 10             # premiere VM = 10.20.50.10/16
+gateway        = "10.20.0.1"
+```
+
+Pour aller de 10.20.50.10 à 10.20.50.13, mettre `WORKER_COUNT=3` dans `.env`.
+La valeur `node_ip_prefix` **ne crée pas de sous-réseau /24**.
+
 ## 3. Déployer
 
 ```bash
 make doctor MODE=terraform PROVIDER=proxmox
+make config MODE=terraform PROVIDER=proxmox
+make validate MODE=terraform PROVIDER=proxmox
+make plan MODE=terraform PROVIDER=proxmox   # vrai plan Terraform, NE crée aucune VM
+# UNIQUEMENT après vérification du plan :
 make deploy MODE=terraform PROVIDER=proxmox
 ```
 
