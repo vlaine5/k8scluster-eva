@@ -12,7 +12,9 @@
 
 locals {
   prefix_length    = tonumber(split("/", var.network_cidr)[1])
-  address_cidr     = coalesce(var.node_ip_cidr, var.network_cidr)
+  # Le prefixe ne change jamais le masque des VM : il choisit seulement leurs IP.
+  # Exemple : 10.20.50 + 10 -> 10.20.50.10, avec le masque /16 du VLAN.
+  address_base     = var.node_ip_prefix == null ? null : "${var.node_ip_prefix}.0"
   gateway          = coalesce(var.gateway, cidrhost(var.network_cidr, 1))
   worker_ip_offset = coalesce(var.worker_ip_offset, var.control_plane_count)
 
@@ -39,8 +41,8 @@ locals {
   # Map nom -> description complète du nœud (utilisée avec for_each).
   nodes = {
     for n in concat(local.control_planes, local.workers) : n.name => merge(n, {
-      ip            = cidrhost(local.address_cidr, var.ip_start + n.ip_offset)
-      address       = "${cidrhost(local.address_cidr, var.ip_start + n.ip_offset)}/${local.prefix_length}"
+      ip            = (var.node_ip_prefix == null ? cidrhost(var.network_cidr, var.ip_start + n.ip_offset) : "${var.node_ip_prefix}.${var.ip_start + n.ip_offset}")
+      address       = "${(var.node_ip_prefix == null ? cidrhost(var.network_cidr, var.ip_start + n.ip_offset) : "${var.node_ip_prefix}.${var.ip_start + n.ip_offset}")}/${local.prefix_length}"
       longhorn_disk = var.longhorn_disk_gb > 0 && n.role == local.storage_role
     })
   }
