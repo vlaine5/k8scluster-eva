@@ -75,6 +75,7 @@ fi
 
 info "Configure PATH for future interactive Bash sessions"
 if [[ -f "${HOME}/.bashrc" ]] && ! grep -Fq '# k8s-lab GitOps tools' "${HOME}/.bashrc"; then
+  # shellcheck disable=SC2016 # Le $PATH doit rester litteral dans la ligne ecrite dans .bashrc.
   printf '\n# k8s-lab GitOps tools\nexport PATH="%s:$PATH"\n' "${INSTALL_DIR}" >> "${HOME}/.bashrc"
 fi
 
