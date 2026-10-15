@@ -14,7 +14,6 @@ locals {
   prefix_length    = tonumber(split("/", var.network_cidr)[1])
   # Le prefixe ne change jamais le masque des VM : il choisit seulement leurs IP.
   # Exemple : 10.20.50 + 10 -> 10.20.50.10, avec le masque /16 du VLAN.
-  address_base     = var.node_ip_prefix == null ? null : "${var.node_ip_prefix}.0"
   gateway          = coalesce(var.gateway, cidrhost(var.network_cidr, 1))
   worker_ip_offset = coalesce(var.worker_ip_offset, var.control_plane_count)
 
