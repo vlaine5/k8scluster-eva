@@ -6,11 +6,15 @@
 # =============================================================================
 
 proxmox_node    = "pv05"
-vm_datastore    = "local-lvm"
-# Type de contenu « Import » activé sur ce stockage (image cloud téléchargée par Proxmox).
+# Stockage des disques SYSTEME des VM : vérifier que "Store" accepte les images disque.
+vm_datastore    = "Store"
+# Stockage de FICHIERS contenant l’image cloud (contenu « Import » obligatoire).
+# "VM-ZFS" est parfois un stockage zfspool, qui ne sait PAS héberger les fichiers Import.
+# Dans ce cas utiliser un stockage de type Directory (ex. "local") avec Import activé.
+# Vérifier dans Proxmox : Datacenter > Storage > Edit > Content.
 image_datastore = "local"
-# Disques Longhorn dédiés (scsi1) : même stockage que les VMs.
-longhorn_datastore = "local-lvm"
+# Disques Longhorn dédiés (scsi1) : stockage compatible "Disk image".
+longhorn_datastore = "VM-ZFS"
 
 # vmbr0 est déjà sur le VLAN 20 : surtout PAS de vlan_id.
 network_bridge = "vmbr0"
@@ -26,8 +30,8 @@ node_ip_prefix = "10.20.50"
 #    Reserver ces IP hors de la plage DHCP avant le deploiement.
 ip_start = 10
 gateway      = "10.20.0.1"
-# À VALIDER : serveur(s) DNS du VLAN 20.
-dns_servers  = ["10.20.0.1"]
+# À VALIDER : 10.20.0.30 doit bien être un DNS fonctionnel (ex. AdGuard).
+dns_servers = ["10.20.0.30"]
 
 # Facultatif : IDs de VMs fixes (control-plane puis workers) pour les retrouver facilement.
 # vm_id_start = 2100
