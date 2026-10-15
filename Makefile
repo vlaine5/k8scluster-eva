@@ -44,7 +44,7 @@ SHELL_SCRIPTS := k8s-lab $(wildcard scripts/*.sh scripts/lib/*.sh tests/*/*.sh)
 PLAYBOOKS := site.yml preflight.yml addons.yml cni-local.yml reset.yml kubeconfig.yml backup.yml etcd-restore.yml \
              upgrade.yml os-update.yml node-remove.yml health.yml storage-node-failure.yml
 
-.PHONY: help help-dev menu doctor config validate deploy destroy uninstall status kubeconfig test manifest \
+.PHONY: help help-dev menu doctor config validate plan deploy destroy uninstall status kubeconfig test manifest \
         addons-plan addons-apply addons-status addons-test addons-upgrade addons-remove addons-catalog \
         upgrade-plan upgrade os-update backup restore health node-remove storage-failure-test versions versions-check \
         venv test-unit catalog-check schema-check docs-generate docs-check addons-render-check \
@@ -62,6 +62,7 @@ help: ## Aide : les commandes principales
 	  '  make doctor MODE=kind          vérifier votre machine et la configuration' \
 	  '  make config MODE=kind          configuration effective et plan résolu (secrets masqués)' \
 	  '  make deploy MODE=kind          créer / compléter le cluster puis installer les addons' \
+	  '  make plan MODE=terraform PROVIDER=proxmox    voir le plan des VMs sans les creer' \
 	  '  make status                    voir les clusters du lab' \
 	  '  make test                      tester le cluster actif (nginx + Service + DNS)' \
 	  '  make destroy MODE=kind         supprimer le cluster (confirmation demandée)' \
@@ -95,6 +96,9 @@ config: ## Configuration effective, plan résolu, avertissements (secrets masqu�
 
 validate: ## Valide la configuration sans rien modifier
 	@$(LAB_ENV) $(LAB) validate $(TARGET)
+
+plan: ## Affiche le vrai plan Terraform (VMs, IP, disques) sans rien creer ; MODE=terraform PROVIDER=proxmox
+	@$(LAB_ENV) $(LAB) terraform-plan $(TARGET)
 
 deploy: ## Crée / complète un cluster puis installe les addons
 	@$(LAB_ENV) $(LAB) deploy $(TARGET) $(OPTIONS)
