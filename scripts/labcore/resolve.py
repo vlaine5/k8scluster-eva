@@ -440,6 +440,13 @@ class Resolver:
             if network and tf_network and network != tf_network:
                 self.error(f"NODE_NETWORK_CIDR={network} diffère de network_cidr={tf_network} (terraform.tfvars).")
             network = network or tf_network
+            # L'ancien node_ip_cidr a ete remplace par un prefixe lisible.
+            # Exemple : 10.20.50 + ip_start=10 -> 10.20.50.10/16
+            # (le masque /16 reste defini exclusivement par network_cidr).
+            if "node_ip_cidr" in tfvars:
+                self.error("node_ip_cidr n'existe plus : remplacez-le par "
+                           'node_ip_prefix = "10.20.50" (sans /24 ni /16).')
+            node_ip_prefix = tfvars.get("node_ip_prefix", "") if self.platform == "proxmox" else ""
             ip_start = int(tfvars.get("ip_start") or inv.tf_variable_default(tf_dir / "variables.tf", "ip_start") or 100)
             offset_raw = tfvars.get("worker_ip_offset", "null")
             worker_offset = int(offset_raw) if offset_raw not in ("", "null") else cp
@@ -450,19 +457,32 @@ class Resolver:
             if network:
                 try:
                     net = netutil.parse_cidr(network)
-                    hosts = [net.network_address + ip_start + i for i in range(cp)] + \
-                            [net.network_address + ip_start + worker_offset + j for j in range(workers)]
+                    # Calcul identique au module Terraform. Avec node_ip_prefix,
+                    # ip_start correspond au dernier octet ; sinon c'est un offset
+                    # depuis l'adresse de base du reseau (ancien comportement).
+                    octets = [ip_start + i for i in range(cp)] + \
+                             [ip_start + worker_offset + j for j in range(workers)]
+                    if node_ip_prefix:
+                        if any(o < 0 or o > 255 for o in octets):
+                            self.error("node_ip_prefix et ip_start depassent le dernier octet IPv4 (255).")
+                            hosts = []
+                        else:
+                            hosts = [ipaddress.IPv4Address(f"{node_ip_prefix}.{o}") for o in octets]
+                    else:
+                        hosts = [net.network_address + o for o in octets]
                     for h in hosts:
                         if h not in net or h in (net.network_address, net.broadcast_address):
-                            self.error(f"network_cidr={network} est trop petit pour {cp} control-plane(s) et "
-                                       f"{workers} worker(s) à partir de ip_start={ip_start}.")
+                            self.error(f"Adresse de noeud {h} hors du reseau network_cidr={network}. "
+                                       "Verifiez node_ip_prefix et ip_start.")
                             break
-                    self.plan.nodes = [{"name": f"{prefix}-cp-{i + 1}", "role": "control_plane", "ip": str(hosts[i])}
-                                       for i in range(cp)] + \
-                                      [{"name": f"{prefix}-worker-{j + 1}", "role": "worker", "ip": str(hosts[cp + j])}
-                                       for j in range(workers)]
+                    if hosts:
+                        self.plan.nodes = [{"name": f"{prefix}-cp-{i + 1}", "role": "control_plane", "ip": str(hosts[i])}
+                                           for i in range(cp)] + \
+                                          [{"name": f"{prefix}-worker-{j + 1}", "role": "worker", "ip": str(hosts[cp + j])}
+                                           for j in range(workers)]
                 except (netutil.NetError, ValueError) as exc:
-                    self.error(f"network_cidr (terraform.tfvars) : {exc}")
+                    self.error(f"Adresses des noeuds (terraform.tfvars) : {exc}. "
+                               "node_ip_prefix doit contenir trois octets IPv4 (ex : 10.20.50).")
             elif self.platform != "libvirt":
                 self.info(f"Réseau des nœuds inconnu (terraform/providers/{self.platform}/terraform.tfvars absent) : "
                           "les contrôles de chevauchement d'adresses seront faits quand il existera.")

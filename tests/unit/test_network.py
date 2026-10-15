@@ -71,6 +71,52 @@ def test_valid_metallb_pool(lab):
     assert plan.resolved["loadbalancer_pool_size"] == 11
 
 
+def test_proxmox_node_ip_prefix_uses_16_mask_and_four_nodes(lab):
+    """Le /16 vient de network_cidr ; le prefixe choisit seulement 10.20.50.x."""
+    lab.env("""
+NODE_NETWORK_CIDR=10.20.0.0/16
+WORKER_COUNT=3
+CNI=flannel
+LOADBALANCER_PROVIDER=metallb
+LOADBALANCER_IP_POOL=10.20.80.100-10.20.80.200
+RESERVED_IPS=10.20.0.1,10.20.0.31
+""")
+    lab.tfvars("proxmox", """
+proxmox_node = "pv05"
+network_cidr = "10.20.0.0/16"
+node_ip_prefix = "10.20.50"
+ip_start = 10
+gateway = "10.20.0.1"
+""")
+    plan = lab.plan("terraform", "proxmox")
+    assert plan.ok, messages(plan)
+    assert [n["ip"] for n in plan.nodes] == [
+        "10.20.50.10", "10.20.50.11", "10.20.50.12", "10.20.50.13"
+    ]
+
+
+def test_proxmox_node_ip_prefix_outside_vlan_is_refused(lab):
+    lab.env("NODE_NETWORK_CIDR=10.20.0.0/16")
+    lab.tfvars("proxmox", """
+proxmox_node = "pv05"
+network_cidr = "10.20.0.0/16"
+node_ip_prefix = "10.21.50"
+ip_start = 10
+""")
+    assert "hors du reseau" in messages(lab.plan("terraform", "proxmox"))
+
+
+def test_proxmox_node_ip_prefix_last_octet_does_not_overflow(lab):
+    lab.env("NODE_NETWORK_CIDR=10.20.0.0/16\nWORKER_COUNT=3")
+    lab.tfvars("proxmox", """
+proxmox_node = "pv05"
+network_cidr = "10.20.0.0/16"
+node_ip_prefix = "10.20.50"
+ip_start = 254
+""")
+    assert "depassent le dernier octet" in messages(lab.plan("terraform", "proxmox"))
+
+
 def test_pool_outside_node_network_in_l2(lab):
     assert "hors du réseau des nœuds" in messages(proxmox_homelab(lab, "LOADBALANCER_IP_POOL=10.30.0.200-10.30.0.210"))
 

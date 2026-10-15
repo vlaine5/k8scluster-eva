@@ -41,6 +41,26 @@ variable "network_cidr" {
   }
 }
 
+# Plage logique des IP, SANS changer le masque des interfaces.
+# Exemple avec network_cidr = "10.20.0.0/16" :
+#   node_ip_prefix = "10.20.50" et ip_start = 10
+#   -> premiere VM : 10.20.50.10/16 (et non /24).
+# Laisser null pour garder le calcul historique depuis network_cidr.
+variable "node_ip_prefix" {
+  description = "Three IPv4 octets used to assign node IPs, e.g. 10.20.50. Does not change the VM network mask."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.node_ip_prefix == null ? true : (
+      can(regex("^([0-9]{1,3}\\.){2}[0-9]{1,3}$", var.node_ip_prefix)) &&
+      can(cidrhost(format("%s.1/32", var.node_ip_prefix), 0)) &&
+      cidrhost(var.network_cidr, 0) == cidrhost(format("%s.0/%s", var.node_ip_prefix, split("/", var.network_cidr)[1]), 0)
+    )
+    error_message = "node_ip_prefix must be three IPv4 octets inside network_cidr, e.g. 10.20.50."
+  }
+}
+
 variable "ip_start" {
   description = "Host number of the first control-plane inside network_cidr (e.g. 100 -> 192.168.1.100)."
   type        = number
@@ -55,9 +75,9 @@ variable "ip_start" {
   validation {
     condition = !can(cidrhost(var.network_cidr, 0)) || (
       var.ip_start + max(var.control_plane_count, coalesce(var.worker_ip_offset, var.control_plane_count) + var.worker_count)
-      < pow(2, 32 - tonumber(split("/", var.network_cidr)[1])) - 1
+      < (var.node_ip_prefix == null ? pow(2, 32 - tonumber(split("/", var.network_cidr)[1])) - 1 : 256)
     )
-    error_message = "network_cidr is too small for the control-planes and workers starting at ip_start."
+    error_message = "Not enough IP addresses for nodes starting at ip_start (check node_ip_prefix and last octet <= 255)."
   }
 }
 

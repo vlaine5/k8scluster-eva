@@ -130,6 +130,26 @@ tf_has_resources() {
   [[ -s "${state}" ]] && grep -q '"mode": "managed"' "${state}"
 }
 
+# Affiche le vrai plan d'infrastructure, avec EXACTEMENT les memes variables
+# (.env + terraform.tfvars) que deploy. Ne lance JAMAIS terraform apply.
+# Accessible aux debutants via : make plan MODE=terraform PROVIDER=proxmox
+terraform_plan() {
+  local provider="$1"
+  tf_check_provider "${provider}"
+  require_doctor terraform "${provider}"
+  tf_export_vars "${provider}"
+
+  step "Terraform : initialisation (aucune VM creee)"
+  (cd "${LAB_ROOT}" && tf "${provider}" init -input=false) ||
+    die "terraform init a echoue."
+
+  step "Terraform : apercu des modifications, sans application"
+  (cd "${LAB_ROOT}" && tf "${provider}" plan -input=false) ||
+    die "terraform plan a echoue. Verifiez .env et terraform.tfvars."
+
+  ok "Plan affiche : aucune VM creee ou modifiee. Pour deployer, utilisez make deploy."
+}
+
 terraform_deploy() {
   local provider="$1" context plan summary
   tf_check_provider "${provider}"
