@@ -7,6 +7,7 @@ sans creer de nouveau sous-reseau.
 
 Le VLAN utilise **10.20.0.0/16**, avec la passerelle **10.20.0.1**.
 On souhaite :
+
 - noeud control-plane : **10.20.50.10/16** ;
 - trois workers : **10.20.50.11/16** a **10.20.50.13/16** ;
 - services MetalLB : **10.20.80.100** a **10.20.80.200**.
@@ -66,6 +67,7 @@ make validate MODE=terraform PROVIDER=proxmox
 
 Avec `WORKER_COUNT=3` dans `.env`, la partie **Noeuds prevus** de
 `make config` doit afficher :
+
 - `k8s-cp-1` : `10.20.50.10`
 - `k8s-worker-1` : `10.20.50.11`
 - `k8s-worker-2` : `10.20.50.12`
