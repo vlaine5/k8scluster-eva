@@ -55,6 +55,7 @@ ${C_BOLD}Cycle de vie${C_RESET}
   doctor   [mode]       vérifier les prérequis (et la configuration) pour un mode
   config   [mode]       configuration effective, plan résolu, avertissements (secrets masqués)
   validate [mode]       valider .env sans rien modifier
+  terraform-plan [mode] [provider]  voir le plan Terraform sans creer de VM
   deploy   <mode>       créer / compléter le cluster puis installer les addons (idempotent)
   status                voir les clusters du lab
   test                  test applicatif sur le cluster actif (nginx + Service + DNS)
@@ -400,6 +401,13 @@ main() {
       ;;
     config) cmd_config ${rest[@]+"${rest[@]}"} ;;
     validate) cmd_validate ${rest[@]+"${rest[@]}"} ;;
+    terraform-plan)
+      # Le plan de l'infrastructure Terraform n'est pas le plan des addons.
+      # Limite aux modes Terraform pour eviter toute confusion.
+      select_mode ${rest[@]+"${rest[@]}"}
+      [[ "${LAB_MODE}" == terraform ]] || die "terraform-plan est reserve au mode terraform."
+      dispatch plan ${rest[@]+"${rest[@]}"}
+      ;;
     plan | addons-plan) cmd_addons plan ${rest[@]+"${rest[@]}"} ;;
     addons-apply | addons-status | addons-test | addons-upgrade | addons-remove | addons-catalog)
       cmd_addons "${command#addons-}" ${rest[@]+"${rest[@]}"}
