@@ -223,6 +223,12 @@ variable "network_cidr" {
   type        = string
 }
 
+variable "node_ip_cidr" {
+  description = "Optional IPv4 subnet used for node IP allocation, e.g. 10.20.50.0/24 within 10.20.0.0/16."
+  type = string
+  default = null
+}
+
 variable "ip_start" {
   description = "Host number of the first control-plane in network_cidr (100 -> x.x.x.100)."
   type        = number
