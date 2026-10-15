@@ -41,19 +41,23 @@ variable "network_cidr" {
   }
 }
 
-variable "node_ip_cidr" {
-  description = "Optional IPv4 subnet used for node addresses, within network_cidr."
-  type = string
-  default = null
+# Plage logique des IP, SANS changer le masque des interfaces.
+# Exemple avec network_cidr = "10.20.0.0/16" :
+#   node_ip_prefix = "10.20.50" et ip_start = 10
+#   -> premiere VM : 10.20.50.10/16 (et non /24).
+# Laisser null pour garder le calcul historique depuis network_cidr.
+variable "node_ip_prefix" {
+  description = "Three IPv4 octets used to assign node IPs, e.g. 10.20.50. Does not change the VM network mask."
+  type        = string
+  default     = null
 
   validation {
-    condition = var.node_ip_cidr == null ? true : (
-      can(cidrhost(var.node_ip_cidr, 0)) &&
-      !strcontains(var.node_ip_cidr, ":") &&
-      tonumber(split("/", var.node_ip_cidr)[1]) >= tonumber(split("/", var.network_cidr)[1]) &&
-      cidrhost(var.network_cidr, 0) == cidrhost(format("%s/%s", split("/", var.node_ip_cidr)[0], split("/", var.network_cidr)[1]), 0)
+    condition = var.node_ip_prefix == null ? true : (
+      can(regex("^([0-9]{1,3}\\.){2}[0-9]{1,3}$", var.node_ip_prefix)) &&
+      can(cidrhost(format("%s.1/32", var.node_ip_prefix), 0)) &&
+      cidrhost(var.network_cidr, 0) == cidrhost(format("%s.0/%s", var.node_ip_prefix, split("/", var.network_cidr)[1]), 0)
     )
-    error_message = "node_ip_cidr must be an IPv4 subnet contained in network_cidr."
+    error_message = "node_ip_prefix must be three IPv4 octets inside network_cidr, e.g. 10.20.50."
   }
 }
 
@@ -71,9 +75,9 @@ variable "ip_start" {
   validation {
     condition = !can(cidrhost(var.network_cidr, 0)) || (
       var.ip_start + max(var.control_plane_count, coalesce(var.worker_ip_offset, var.control_plane_count) + var.worker_count)
-      < pow(2, 32 - tonumber(split("/", coalesce(var.node_ip_cidr, var.network_cidr))[1])) - 1
+      < (var.node_ip_prefix == null ? pow(2, 32 - tonumber(split("/", var.network_cidr)[1])) - 1 : 256)
     )
-    error_message = "network_cidr is too small for the control-planes and workers starting at ip_start."
+    error_message = "Not enough IP addresses for nodes starting at ip_start (check node_ip_prefix and last octet <= 255)."
   }
 }
 
