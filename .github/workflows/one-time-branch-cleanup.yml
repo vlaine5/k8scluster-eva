@@ -1,0 +1,69 @@
+# One-shot: triggered only by the merge of this cleanup workflow into master.
+# Requires repository GITHUB_TOKEN permission "contents: write".
+# Must be removed from master after the branch cleanup run has completed.
+name: One-time cleanup of archived branches
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/one-time-branch-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  delete-archived-refs:
+    if: github.repository == 'vlaine5/k8scluster-eva'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify branch tips are archived, then delete only those refs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Fixed allow-list: neither HEAD/master nor user-supplied inputs appear here.
+          refs=(
+            'claude/charming-brown-owrjlw|de72265fa9da6053da8a4d2ea726600432148bcb'
+            'claude/clever-cerf-qctq59|541276735334fe058c13e0ae4581c2e787361cba'
+            'docs/pv05-first-deploy-2026|26ff9549f68ed0e2e77ea582649366a4c76f44fc'
+            'feat/bootstrap-gitops-vm|4fb937f01e57f0b0238bdbf7aae5806bbe4ffb57'
+            'feature/node-ip-subnet|512b2fc02fc256fe611637f3483ece8bf9853613'
+            'refacto/kube|5393eb8703e1e8ac8abcf0d1a965f6066e240fa0'
+            'test/proxmox-plan-readonly|fee2ee77066c8f01648ef8506ba66c1babdac4f6'
+            'chore/consolidate-history|ancestor'
+          )
+          validated=()
+          for entry in "${refs[@]}"; do
+            branch="${entry%%|*}"
+            expected="${entry#*|}"
+            if [[ "$branch" == master ]]; then
+              echo "::error::Refusing to delete master"
+              exit 1
+            fi
+            if ! current="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" --jq '.object.sha' 2>/dev/null)"; then
+              echo "[skip] ${branch}: ref already absent"
+              continue
+            fi
+            if [[ "$expected" != ancestor && "$current" != "$expected" ]]; then
+              echo "::error::${branch} changed (${current} != ${expected}); abort without deletion"
+              exit 1
+            fi
+            # Compare old tip -> exact master commit that launched this workflow.
+            # A branch with new work or not merged into master has behind_by > 0.
+            behind="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${current}...${GITHUB_SHA}" --jq '.behind_by')"
+            if [[ "$behind" != 0 ]]; then
+              echo "::error::${branch} is not an ancestor of master (${GITHUB_SHA})"
+              exit 1
+            fi
+            echo "[verified] ${branch} at ${current}"
+            validated+=("$branch")
+          done
+          # Only start deletions if ALL remaining refs passed the checks.
+          for branch in "${validated[@]}"; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" >/dev/null
+            echo "[deleted] ${branch}"
+          done
+          echo "[ok] Verified and deleted ${#validated[@]} archived refs; master untouched"
