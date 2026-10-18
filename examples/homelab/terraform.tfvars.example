@@ -6,13 +6,11 @@
 # =============================================================================
 
 proxmox_node    = "pv05"
-# Stockage des disques SYSTEME des VM : vérifier que "Store" accepte les images disque.
-vm_datastore    = "Store"
-# Stockage de FICHIERS contenant l’image cloud (contenu « Import » obligatoire).
-# "VM-ZFS" est parfois un stockage zfspool, qui ne sait PAS héberger les fichiers Import.
-# Dans ce cas utiliser un stockage de type Directory (ex. "local") avec Import activé.
-# Vérifier dans Proxmox : Datacenter > Storage > Edit > Content.
-image_datastore = "local"
+# Disques système des VM : zfspool VM-ZFS de pv05.
+vm_datastore    = "VM-ZFS"
+# Image cloud Debian : stockage Directory Store, contenu Import activé.
+# Vérifier : grep -A 5 '^dir: Store$' /etc/pve/storage.cfg
+image_datastore = "Store"
 # Disques Longhorn dédiés (scsi1) : stockage compatible "Disk image".
 longhorn_datastore = "VM-ZFS"
 

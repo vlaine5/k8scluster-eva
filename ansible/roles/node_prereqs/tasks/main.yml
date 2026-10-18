@@ -13,6 +13,12 @@
     state: present
   when: node_prereqs.packages[k8s_os_family] | default([]) | length > 0
 
+# NAS externe : les droits d'export doivent être préparés une seule fois dans DSM.
+# Montage temporaire en lecture seule (et démontage) AVANT kubeadm init/join.
+- name: Check the NFS CSI export from every cluster node
+  ansible.builtin.include_tasks: nfs_preflight.yml
+  when: "'nfs-csi' in (lab_addon_ids | default([]))"
+
 - name: Check whether the kernel supports loadable modules
   ansible.builtin.stat:
     path: /proc/modules

@@ -1,9 +1,9 @@
-# Premier déploiement sur le homelab « pv05 »
+# Déploiement et relances du homelab « pv05 »
 
-Procédure **manuelle**, à dérouler après revue du code. Le framework n'a jamais été lancé sur
-cette infrastructure : aucune VM n'a été créée, aucun `terraform apply` n'a été exécuté, ni
-par la CI ni pendant le développement. Chaque étape qui modifie quelque chose est signalée
-par **[modifie]** et demande votre confirmation.
+Procédure du homelab après le premier déploiement réel d'octobre 2026
+(4 nœuds Ready, Cilium, NFS CSI et Longhorn). Avant une **relance**, inspectez
+le plan Terraform : les VM existantes doivent être conservées.
+Les étapes manuelles qui modifient le NAS, Proxmox ou le pare-feu sont signalées.
 
 | Élément | Valeur | Statut |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ Fichiers fournis : [../examples/profiles/homelab-pv05.env](../examples/profiles/
 
 Il **créera** : 4 VMs (IDs attribués par Proxmox, ou `vm_id_start`), l’image cloud Debian
 13 datée (SHA-256 vérifié par Proxmox) dans un stockage acceptant **Import**, un disque système
-de 300 Gio par VM sur `Store` et un disque Longhorn **neuf** de 100 Gio par worker sur `VM-ZFS`
+de 300 Gio par VM sur `VM-ZFS` et un disque Longhorn **neuf** de 100 Gio par worker sur `VM-ZFS`
 (numéro de série `k8slab-longhorn`), puis Kubernetes et les addons dans ces VMs.
 
 Il **ne touchera pas** : aux autres VMs de `pv05`, à la configuration réseau de Proxmox, au
@@ -33,7 +33,7 @@ contient des données n'est jamais formaté ; `kubeadm reset` n'est jamais lanc�
 automatiquement ; `make destroy` ne supprime ni les données du NAS ni les sauvegardes.
 
 Capacité logique à prévoir sur les datastores : **4 × 300 + 3 × 100 = 1 500 Gio**
-(`Store` pour les systèmes, `VM-ZFS` pour les disques Longhorn). Le provisionnement fin
+(`VM-ZFS` pour tous les disques de VM ; `Store` héberge le fichier cloud à importer). Le provisionnement fin
 peut réduire l’occupation réelle initiale, sans supprimer le besoin de capacité future.
 Mémoire allouée : 16 Gio sur 188.
 
@@ -57,7 +57,7 @@ Sur `pv05` (shell root ou interface web) :
    (ex. *Datacenter → Storage → local → Edit → Content* : cochez **Import**).
    Attention : un stockage Proxmox de type **zfspool** ne permet généralement pas
    d’y télécharger le fichier image cloud via `proxmox_download_file`.
-   Vérifiez également `Store` (disques système) et `VM-ZFS` (Longhorn).
+   Sur `pv05`, utilisez `image_datastore=Store` (Directory + Import), `vm_datastore=VM-ZFS` et `longhorn_datastore=VM-ZFS`.
 2. Créez un utilisateur et un token **dédiés**, avec le rôle minimal décrit dans
    [deploy-proxmox.md](deploy-proxmox.md#2-configurer) (`pveum role add K8sLab ...`,
    `pveum user token add terraform@pve k8s-lab --privsep 0`). Notez le secret, affiché une
@@ -83,7 +83,8 @@ configure jamais le NAS ni le pare-feu.
 3. Le NAS et les VMs sont dans le même VLAN 20 : vérifiez le pare-feu local
    du NAS, les ACL NFS et la connectivité **TCP 2049**. Le Stormshield n’est normalement
    pas traversé pour ce flux direct sur le même réseau.
-4. Vérifiez après la création des VMs (étape 6) : test de montage depuis un worker,
+4. Le framework vérifie automatiquement l'export NFS depuis **chaque VM** par un
+   montage temporaire en lecture seule, avant `kubeadm init/join` :
    [storage-nfs.md](storage-nfs.md).
 
 Sans NFS : retirez `nfs-csi` de `STORAGE_BACKENDS` ; seul Longhorn sera installé.
@@ -141,8 +142,10 @@ make deploy
    seulement s'ils sont vides et créés par le lab), puis jonction des workers.
 4. Addons, contrôles de santé, puis tests fonctionnels.
 
-En cas d'échec, corrigez la cause indiquée et relancez `make deploy` : chaque étape est
-idempotente et le cluster existant est conservé.
+En cas d'échec, corrigez la cause et vérifiez d'abord le plan avec
+`make plan MODE=terraform PROVIDER=proxmox`. Si aucune VM existante n'est
+remplacée ou détruite, `make deploy` reprend la configuration. Les tests
+de stockage libèrent leurs Pods avant la suppression des PVC/PV.
 
 ## 7. Vérifier
 
@@ -199,7 +202,7 @@ make destroy                                      # supprime les 4 VMs (confirma
 ```
 
 Restent en place : les données du NAS (`/volume1/kubevolume`), les sauvegardes, l'image
-cloud dans `local` (réutilisée au prochain déploiement). Les disques Longhorn sont supprimés
+cloud dans `Store` (réutilisée au prochain déploiement). Les disques Longhorn sont supprimés
 avec les VMs : sauvegardez d'abord les volumes utiles.
 
 ## Liste de contrôle

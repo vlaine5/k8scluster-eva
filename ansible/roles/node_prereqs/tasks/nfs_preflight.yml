@@ -1,0 +1,64 @@
+---
+# Les clients NFS sont déjà installés par node_prereqs.
+# Vérification de l'export, sans écriture ni changement permanent sur le NAS.
+# rmdir (et surtout pas rm -r) protège les données si le démontage échoue.
+- name: Validate the NAS NFS export before kubeadm init or join
+  block:
+    - name: Create a private temporary NFS mountpoint
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: k8s-lab-nfs-probe-
+      register: node_prereqs_nfs_probe_dir
+
+    - name: Probe the NFS export with a bounded read-only mount
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - --kill-after=5s
+          - 45s
+          - mount
+          - -t
+          - nfs
+          - -o
+          - "ro,vers={{ cfg.NFS_VERSION }},timeo=50,retrans=1"
+          - "{{ cfg.NFS_SERVER }}:{{ cfg.NFS_SHARE }}"
+          - "{{ node_prereqs_nfs_probe_dir.path }}"
+      register: node_prereqs_nfs_probe_mount
+      changed_when: node_prereqs_nfs_probe_mount.rc == 0
+
+    - name: Verify that the NFS export is mounted
+      ansible.builtin.command:
+        argv: [findmnt, --mountpoint, "{{ node_prereqs_nfs_probe_dir.path }}", --noheadings, --output, FSTYPE]
+      changed_when: false
+
+  rescue:
+    - name: Explain inaccessible NAS export or NFS permissions
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }} ({{ node_ip | default('IP inconnue') }}) ne peut pas monter
+          {{ cfg.NFS_SERVER }}:{{ cfg.NFS_SHARE }} en NFSv{{ cfg.NFS_VERSION }}.
+          {{ ansible_failed_result.stderr | default(ansible_failed_result.msg | default('Montage NFS en échec'), true) }}
+          Vérifiez les autorisations NFS du NAS pour les IP des nœuds, le chemin
+          exporté et TCP 2049 (NFSv4). Le framework ne modifie jamais le NAS.
+
+  always:
+    - name: Detect an active temporary NFS mount
+      ansible.builtin.command:
+        argv: [findmnt, --mountpoint, "{{ node_prereqs_nfs_probe_dir.path }}", --noheadings]
+      register: node_prereqs_nfs_probe_mounted
+      changed_when: false
+      failed_when: false
+      when: node_prereqs_nfs_probe_dir is defined and node_prereqs_nfs_probe_dir.path is defined
+
+    - name: Unmount the temporary NFS export
+      ansible.builtin.command:
+        argv: [umount, "{{ node_prereqs_nfs_probe_dir.path }}"]
+      register: node_prereqs_nfs_probe_umount
+      changed_when: node_prereqs_nfs_probe_umount.rc == 0
+      when: node_prereqs_nfs_probe_mounted.rc | default(1) == 0
+
+    - name: Remove only the empty temporary mountpoint
+      ansible.builtin.command:
+        argv: [rmdir, "{{ node_prereqs_nfs_probe_dir.path }}"]
+      changed_when: true
+      when: node_prereqs_nfs_probe_dir is defined and node_prereqs_nfs_probe_dir.path is defined

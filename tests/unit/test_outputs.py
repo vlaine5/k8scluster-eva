@@ -35,6 +35,10 @@ def test_ansible_vars_never_contain_secrets(lab):
     assert data["cni"] == "flannel" and data["kubernetes_version"] == "1.36.5"
     assert data["lab_addon_ids"][0] == "prometheus-operator-crds"
     assert "nfs-common" in data["node_prereqs"]["packages"]["debian"]
+    assert data["cfg"]["NFS_SERVER"] == "10.70.0.30"
+    assert data["cfg"]["NFS_SHARE"] == "/volume1/kubernetes"
+    assert data["cfg"]["NFS_VERSION"] == "4.1"
+    assert "nfs-csi" in data["lab_addon_ids"]
 
 
 def test_manifest_never_contains_secrets(lab):
