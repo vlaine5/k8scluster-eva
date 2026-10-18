@@ -8,7 +8,7 @@
       ansible.builtin.tempfile:
         state: directory
         prefix: k8s-lab-nfs-probe-
-      register: nfs_probe_dir
+      register: node_prereqs_nfs_probe_dir
 
     - name: Probe the NFS export with a bounded read-only mount
       ansible.builtin.command:
@@ -22,13 +22,13 @@
           - -o
           - "ro,vers={{ cfg.NFS_VERSION }},timeo=50,retrans=1"
           - "{{ cfg.NFS_SERVER }}:{{ cfg.NFS_SHARE }}"
-          - "{{ nfs_probe_dir.path }}"
-      register: nfs_probe_mount
-      changed_when: nfs_probe_mount.rc == 0
+          - "{{ node_prereqs_nfs_probe_dir.path }}"
+      register: node_prereqs_nfs_probe_mount
+      changed_when: node_prereqs_nfs_probe_mount.rc == 0
 
     - name: Verify that the NFS export is mounted
       ansible.builtin.command:
-        argv: [findmnt, --mountpoint, "{{ nfs_probe_dir.path }}", --noheadings, --output, FSTYPE]
+        argv: [findmnt, --mountpoint, "{{ node_prereqs_nfs_probe_dir.path }}", --noheadings, --output, FSTYPE]
       changed_when: false
 
   rescue:
@@ -44,21 +44,21 @@
   always:
     - name: Detect an active temporary NFS mount
       ansible.builtin.command:
-        argv: [findmnt, --mountpoint, "{{ nfs_probe_dir.path }}", --noheadings]
-      register: nfs_probe_mounted
+        argv: [findmnt, --mountpoint, "{{ node_prereqs_nfs_probe_dir.path }}", --noheadings]
+      register: node_prereqs_nfs_probe_mounted
       changed_when: false
       failed_when: false
-      when: nfs_probe_dir is defined and nfs_probe_dir.path is defined
+      when: node_prereqs_nfs_probe_dir is defined and node_prereqs_nfs_probe_dir.path is defined
 
     - name: Unmount the temporary NFS export
       ansible.builtin.command:
-        argv: [umount, "{{ nfs_probe_dir.path }}"]
-      register: nfs_probe_umount
-      changed_when: nfs_probe_umount.rc == 0
-      when: nfs_probe_mounted.rc | default(1) == 0
+        argv: [umount, "{{ node_prereqs_nfs_probe_dir.path }}"]
+      register: node_prereqs_nfs_probe_umount
+      changed_when: node_prereqs_nfs_probe_umount.rc == 0
+      when: node_prereqs_nfs_probe_mounted.rc | default(1) == 0
 
     - name: Remove only the empty temporary mountpoint
       ansible.builtin.command:
-        argv: [rmdir, "{{ nfs_probe_dir.path }}"]
+        argv: [rmdir, "{{ node_prereqs_nfs_probe_dir.path }}"]
       changed_when: true
-      when: nfs_probe_dir is defined and nfs_probe_dir.path is defined
+      when: node_prereqs_nfs_probe_dir is defined and node_prereqs_nfs_probe_dir.path is defined
