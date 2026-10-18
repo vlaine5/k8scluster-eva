@@ -140,5 +140,5 @@
   ansible.builtin.debug:
     msg: >-
       NFS {{ cfg.NFS_SERVER }}:{{ cfg.NFS_SHARE }} OK — RWX, non-root write, persistence. Pods: {{ nfs_test_nodes.stdout }}
-      {{ '(both on the same node: only one schedulable node)'
+      {{ '(both Pods scheduled on the same node: cross-node access not exercised)'
          if nfs_test_nodes.stdout.split() | map('regex_replace', '^[^=]*=', '') | unique | length < 2 else '' }}

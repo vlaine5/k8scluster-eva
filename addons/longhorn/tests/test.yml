@@ -177,7 +177,7 @@
       register: longhorn_test_victim
       changed_when: false
 
-    - name: Delete the replica {{ longhorn_test_victim.stdout }}
+    - name: Delete the selected test replica
       ansible.builtin.command:
         argv: "{{ addon_kubectl + ['-n', 'longhorn-system', 'delete', 'replicas.longhorn.io', longhorn_test_victim.stdout] }}"
       changed_when: true

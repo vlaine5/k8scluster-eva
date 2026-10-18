@@ -1,33 +1,103 @@
 ---
-# Supprime les volumes de test (PVC du namespace de test, PV en politique Delete)
-# puis la StorageClass de test. Ne touche à aucun autre volume.
-- name: Delete the test volumes
+# Le PVC d'un Pod toujours présent (lecteur Longhorn, test NFS...) peut bloquer
+# le détachement CSI. Nettoyage strictement limité au namespace/SC de test.
+# Ne jamais supprimer de PV de force ni retirer leurs finalizers.
+- name: Read the test claims and their bound PVs
   ansible.builtin.command:
-    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'delete', 'pvc', '--all', '--wait=true', '--timeout=180s'] }}"
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'get', 'pvc', '-o', 'json'] }}"
+  register: addon_test_claims
+  changed_when: false
+  failed_when: false
+
+- name: Remember PVs created by the current test
+  ansible.builtin.set_fact:
+    addon_test_pv_names: >-
+      {{ ((addon_test_claims.stdout | from_json)['items']
+          | selectattr('spec.volumeName', 'defined')
+          | map(attribute='spec.volumeName') | reject('equalto', '') | list)
+         if addon_test_claims.rc == 0 else [] }}
+
+- name: Delete the test Pods before their PVCs
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'delete', 'pods', '--all',
+           '--ignore-not-found', '--wait=true', '--timeout=180s'] }}"
+  register: addon_test_pods_delete
+  changed_when: "'deleted' in addon_test_pods_delete.stdout"
+  failed_when: false
+
+- name: Delete the test PVCs after Pod termination
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['-n', addon_test_ns, 'delete', 'pvc', '--all',
+           '--ignore-not-found', '--wait=true', '--timeout=180s'] }}"
   register: addon_test_pvc_delete
   changed_when: "'deleted' in addon_test_pvc_delete.stdout"
   failed_when: false
 
-- name: Wait until the test PersistentVolumes are released
+- name: Wait until the current test PVs are deleted by CSI
   ansible.builtin.command:
     argv: "{{ addon_kubectl + ['get', 'pv', '-o',
-           'jsonpath={range .items[?(@.spec.storageClassName==\"' ~ addon_test_sc_name ~ '\")]}{.metadata.name} {end}'] }}"
-  register: addon_test_pv_left
+           'jsonpath={range .items[*]}{.metadata.name}{\" \"}{end}'] }}"
+  register: addon_test_pv_wait
   changed_when: false
-  until: addon_test_pv_left.stdout | trim | length == 0
+  until: >-
+    addon_test_pv_wait.rc == 0 and
+    (addon_test_pv_names | intersect(addon_test_pv_wait.stdout.split()) | length == 0)
   retries: 30
   delay: 10
   failed_when: false
+  when: addon_test_pv_names | length > 0
 
-- name: Report test volumes that could not be deleted
+- name: Remember any current-test PVs that could not be deleted
+  ansible.builtin.set_fact:
+    addon_test_pvs_remaining: >-
+      {{ (addon_test_pv_names | intersect(addon_test_pv_wait.stdout.split()))
+         if (addon_test_pv_wait.rc | default(1)) == 0 else addon_test_pv_names }}
+
+# Un ancien PV de test peut survivre à une exécution interrompue : ne le
+# supprimer ni de force, ni en effaçant sa StorageClass prématurément.
+- name: Check for PVs still referencing the test StorageClass
+  ansible.builtin.command:
+    argv: "{{ addon_kubectl + ['get', 'pv', '-o',
+           'jsonpath={range .items[?(@.spec.storageClassName==\"' ~ addon_test_sc_name ~ '\")]}{.metadata.name} {end}'] }}"
+  register: addon_test_sc_pvs
+  changed_when: false
+  failed_when: false
+
+- name: Explain remaining test PVs instead of deleting data
   ansible.builtin.debug:
-    msg: "Test volumes still present (check the CSI driver): {{ addon_test_pv_left.stdout }}"
-  when: addon_test_pv_left.stdout | default('') | trim | length > 0
+    msg: >-
+      PV(s) restant sur {{ addon_test_sc_name }} : {{ addon_test_sc_pvs.stdout }}.
+      Vérifiez les Pods, PVC et finalizers du pilote CSI. Aucune suppression forcée.
+  when:
+    - addon_test_sc_pvs.rc == 0
+    - addon_test_sc_pvs.stdout | trim | length > 0
 
-- name: Delete the test StorageClass
+- name: Delete the test StorageClass only if no PV references it
   kubernetes.core.k8s:
     kubeconfig: "{{ addon_kubeconfig }}"
     context: "{{ addon_context }}"
     state: absent
     kind: StorageClass
     name: "{{ addon_test_sc_name }}"
+  when:
+    - addon_test_sc_pvs.rc == 0
+    - addon_test_sc_pvs.stdout | trim | length == 0
+
+- name: Report incomplete cleanup as a functional test failure
+  ansible.builtin.set_fact:
+    addon_test_failed: true
+    addon_test_failure: >-
+      {{ (addon_test_failure | default('')) ~ (' ; ' if addon_test_failure | default('') | length > 0 else '') }}
+      Nettoyage incomplet de {{ addon_test_ns }} :
+      get-pvc={{ addon_test_claims.rc }}, delete-pods={{ addon_test_pods_delete.rc }},
+      delete-pvc={{ addon_test_pvc_delete.rc }},
+      PV restants={{ addon_test_pvs_remaining | join(', ') or 'aucun' }},
+      SC-PV={{ addon_test_sc_pvs.stdout | default('?') }}.
+      Aucun volume ou finalizer n'a été supprimé de force.
+  when: >-
+    addon_test_claims.rc != 0 or
+    addon_test_pods_delete.rc != 0 or
+    addon_test_pvc_delete.rc != 0 or
+    addon_test_pvs_remaining | length > 0 or
+    addon_test_sc_pvs.rc != 0 or
+    addon_test_sc_pvs.stdout | trim | length > 0
