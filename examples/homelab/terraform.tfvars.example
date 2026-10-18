@@ -9,30 +9,7 @@ proxmox_node    = "pv05"
 # Disques système des VM : zfspool VM-ZFS de pv05.
 vm_datastore    = "VM-ZFS"
 # Image cloud Debian : stockage Directory Store, contenu Import activé.
-# Vérifier : grep -A 5 '^dir: Store
-# Disques Longhorn dédiés (scsi1) : stockage compatible "Disk image".
-longhorn_datastore = "VM-ZFS"
-
-# vmbr0 est déjà sur le VLAN 20 : surtout PAS de vlan_id.
-network_bridge = "vmbr0"
-
-# 1) Reseau REEL du VLAN : le /16 sera configure sur CHAQUE VM.
-network_cidr = "10.20.0.0/16"
-# 2) Optionnel : les trois premiers nombres des IP des noeuds.
-#    "10.20.50" ne signifie PAS un /24 ! Les VM auront bien /16.
-#    Sans ce parametre, les IP commencent a 10.20.0.x.
-node_ip_prefix = "10.20.50"
-# 3) Dernier nombre de la premiere IP :
-#    cp-1=10.20.50.10/16, worker-1=.11/16, worker-2=.12/16, worker-3=.13/16.
-#    Reserver ces IP hors de la plage DHCP avant le deploiement.
-ip_start = 10
-gateway      = "10.20.0.1"
-# À VALIDER : 10.20.0.30 doit bien être un DNS fonctionnel (ex. AdGuard).
-dns_servers = ["10.20.0.30"]
-
-# Facultatif : IDs de VMs fixes (control-plane puis workers) pour les retrouver facilement.
-# vm_id_start = 2100
- /etc/pve/storage.cfg
+# Vérifier : grep -A 5 '^dir: Store$' /etc/pve/storage.cfg
 image_datastore = "Store"
 # Disques Longhorn dédiés (scsi1) : stockage compatible "Disk image".
 longhorn_datastore = "VM-ZFS"
