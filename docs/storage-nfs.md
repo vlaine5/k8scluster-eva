@@ -4,6 +4,17 @@ Le pilote officiel `nfs.csi.k8s.io` crée **un sous-dossier par volume** dans un
 **qui existe déjà** sur votre NAS. Le framework ne crée, ne modifie et ne supprime jamais
 l'export, ses droits ni le NAS.
 
+En mode kubeadm, `make deploy` installe automatiquement `nfs-common` (Debian)
+ou `nfs-utils` (Rocky) sur chaque VM. Avant `kubeadm init/join`, Ansible
+teste depuis **chaque nœud** le montage de `NFS_SERVER:NFS_SHARE` en **lecture
+seule**, avec `NFS_VERSION` et un délai limité. Il démonte ensuite le partage
+et supprime le point de montage temporaire, sans écrire sur le NAS et sans
+modifier `fstab`. Si le Synology refuse une IP, le déploiement s'arrête
+avec un message qui identifie le nœud et l'export concernés.
+
+Les permissions NFS sur DSM restent un prérequis externe : elles ne sont
+jamais créées ou élargies automatiquement par le framework.
+
 ```bash
 STORAGE_BACKENDS=nfs-csi
 NFS_SERVER=10.70.0.30
@@ -56,11 +67,22 @@ spec:
 La taille n'est pas un quota : le sous-dossier peut grossir jusqu'à remplir l'export
 (quotas : côté NAS).
 
-## Test
+## Tests et relances propres
 
-`make addons-test ADDON=nfs-csi` : volume RWX, écriture par un utilisateur non root,
-lecture depuis un autre nœud, persistance après recréation du Pod. Le volume de test est
-supprimé à la fin (copie de la StorageClass en `Delete`, sous-dossier `k8s-lab-test-nfs-csi-*`).
+`make addons-test MODE=terraform PROVIDER=proxmox ADDON=nfs-csi` : volume RWX, écriture par un utilisateur non root,
+lecture depuis un autre nœud, persistance après recréation du Pod. Le volume de test utilise une copie de la StorageClass en `Delete`,
+sous-dossier `k8s-lab-test-nfs-csi-*`.
+
+Le nettoyage attend la fin des Pods de test **avant** de supprimer les PVC
+(et avant de demander au pilote CSI de supprimer les PV). Si un PV subsiste,
+le framework signale un échec de nettoyage et conserve la StorageClass de test.
+Il ne retire jamais les finalizers ni ne supprime les données de force.
+La lecture multi-nœuds est indiquée comme non vérifiée si le scheduler a placé
+les deux Pods sur le même nœud.
+
+Pour relancer le déploiement complet, vérifier d'abord
+`make plan MODE=terraform PROVIDER=proxmox` :
+aucune VM existante ne doit être détruite ou remplacée.
 
 ## Données conservées
 
