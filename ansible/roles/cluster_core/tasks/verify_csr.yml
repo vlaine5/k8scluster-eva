@@ -1,24 +1,66 @@
 ---
-# Tous les certificats de service des kubelets du lab doivent être approuvés
-# (sinon kubectl logs/exec et metrics-server échouent).
+# Le certificat de service du kubelet doit être signé par la CA Kubernetes,
+# valide et correspondre à l'IP du nœud. Les objets CSR sont éphémères :
+# un cluster existant peut avoir 0 CSR bien que ses certificats soient valides.
+#
+# 1. Attendre l'approbation des éventuelles demandes actuelles, et refuser un
+#    refus explicite. Ne jamais exiger l'historique des CSR déjà supprimées.
+# 2. Vérifier le certificat présenté EN DIRECT par chaque kubelet via TLS 10250.
+#    curl vérifie chaîne de confiance, dates et SAN IP avec la CA kubeadm.
+#    Une réponse HTTP 401/403 sans identifiants est normale : le handshake
+#    TLS strict a réussi. Aucun --insecure ni --kubelet-insecure-tls.
 - name: Wait until no kubelet serving certificate request is pending
   ansible.builtin.command:
     argv: [kubectl, --kubeconfig=/etc/kubernetes/admin.conf, get, csr,
            -o, "jsonpath={range .items[?(@.spec.signerName=='kubernetes.io/kubelet-serving')]}{.spec.username}={.status.conditions[0].type}{'\\n'}{end}"]
   register: cluster_core_csr_list
   changed_when: false
-  until: cluster_core_csr_list.stdout_lines | select('match', '^system:node:[^=]+=$') | list | length == 0
+  until: >-
+    cluster_core_csr_list.rc == 0 and
+    (cluster_core_csr_list.stdout_lines
+     | select('match', '^system:node:[^=]+=$') | list | length == 0)
   retries: 30
   delay: 10
 
-# Pas de référence arrière « \1 » ici : dans une condition (that/when), Jinja lit '\1'
-# comme un caractère d'échappement octal, et la comparaison échouait toujours.
-- name: Check that every node has an approved serving certificate
+- name: Refuse explicitly denied kubelet serving certificate requests
   ansible.builtin.assert:
     that: >-
-      groups['k8s_cluster'] | map('regex_replace', '^', 'system:node:') | map('regex_replace', '$', '=Approved')
-      | difference(cluster_core_csr_list.stdout_lines) | length == 0
+      cluster_core_csr_list.stdout_lines | select('search', '=Denied$') | list | length == 0
     fail_msg: >-
-      Some kubelet serving certificates are not approved: {{ cluster_core_csr_list.stdout_lines }}.
-      Check kubelet-csr-approver: kubectl -n kube-system logs deploy/kubelet-csr-approver
+      Kubelet-serving CSR denied: {{ cluster_core_csr_list.stdout_lines }}.
+      Investigate the approval controller: kubectl -n kube-system logs deploy/kubelet-csr-approver
     quiet: true
+
+# Exécuté depuis le control-plane, qui détient /etc/kubernetes/pki/ca.crt.
+# Les endpoints répondent souvent 401 (ou 403) sans token : ces réponses
+# prouvent que la connexion TLS s'est achevée sans contourner le contrôle CA/SAN.
+# 200 est également accepté si /healthz est rendu accessible sans token.
+- name: Verify every live kubelet serving certificate with the cluster CA and node IP
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --silent
+      - --show-error
+      - --noproxy
+      - "*"
+      - --connect-timeout
+      - "5"
+      - --max-time
+      - "12"
+      - --cacert
+      - /etc/kubernetes/pki/ca.crt
+      - --output
+      - /dev/null
+      - --write-out
+      - "%{http_code}"
+      - "https://{{ hostvars[item]['k8s_node_ip'] }}:10250/healthz"
+  loop: "{{ groups['k8s_cluster'] }}"
+  loop_control:
+    label: "{{ item }} ({{ hostvars[item]['k8s_node_ip'] }}:10250)"
+  register: cluster_core_kubelet_tls_check
+  changed_when: false
+  until: >-
+    cluster_core_kubelet_tls_check.rc == 0 and
+    cluster_core_kubelet_tls_check.stdout in ['200', '401', '403']
+  retries: 24
+  delay: 10

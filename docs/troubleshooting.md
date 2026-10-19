@@ -74,6 +74,7 @@ le relancer après avoir corrigé un problème reprend là où il s'est arrêté
 | Nœuds `NotReady` | CNI absent ou en erreur | `kubectl -n kube-flannel logs ds/kube-flannel-ds`, `kubectl -n kube-system logs ds/cilium`, `kubectl -n calico-system get pods` ; avec `CNI=none`, installez un CNI |
 | `already runs <CNI> but cni=<autre>` | changement de CNI demandé sur un cluster existant | jamais automatique : [cni.md](cni.md#changer-de-cni) |
 | `kubectl logs` / `exec` : `tls: internal error` | certificat de service du kubelet pas encore émis | `kubectl get csr` ; kubeadm : `kubectl -n kube-system logs deploy/kubelet-csr-approver` |
+| `Check that every node has an approved serving certificate` : `[]` sur une relance | ancienne vérification exigeant des CSR historiques déjà supprimées | mise à jour du framework : vérification HTTPS `10250` des certificats vivants (CA kubeadm, SAN IP, expiration) ; `kubectl get csr` vide est normal si les certificats existent |
 | `cannot resolve pkgs.k8s.io` (preflight) | DNS ou proxy | `/etc/resolv.conf`, accès Internet des nœuds |
 | Pods d'un nœud à l'autre ne se joignent pas (Vagrant) | mauvaise interface réseau | vérifiez `FLANNELD_IFACE` (IP du nœud) et `node_ip` dans l'inventaire |
 | Collections introuvables (`community.general.modprobe`) | collections non installées | `ansible-galaxy collection install -r ansible/requirements.yml` |
